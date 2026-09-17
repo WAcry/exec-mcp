@@ -1,0 +1,61 @@
+# ADR-001：执行内核与产品边界
+
+状态：生效。日期：2026-09-17。
+
+## 为什么这样选
+
+exec-mcp 面向使用 ChatGPT 的开发者，而不是只适用于某个人的一台 Linux 机器。
+我们选择贴近 Codex 的调用习惯，同时把机械性的并发、筛选和组合留给代码。
+这是面向目标模型的产品选择，不代表已经证明某种接口对所有模型都最优。
+
+## 决定
+
+顶层 MCP 只提供 `exec` 和 `wait`。文件、命令和外部 MCP 操作都进入 `exec`，
+不保留“偶尔方便”的直接 Shell、补丁或图片入口，也不把等待伪装成一段特殊 JavaScript。
+
+四个本机执行原语是 `tools.exec_command`、`tools.write_stdin`、
+`tools.apply_patch`、`tools.view_image`。发现机制另见 [ADR-002](adr-002-tool-discovery.md)。
+读取、搜索、Git 和 worktree 使用系统工具，不再为它们发明产品级生命周期。
+
+`exec` 的 `source` 是 JavaScript，外层仍是 MCP 对象参数。
+`exec.workdir` 决定本次执行中本机工具的默认目录：省略时为服务用户主目录，
+相对值也以主目录解析；本机工具中的相对路径以本次目录解析。
+`apply_patch` 接收单个完整补丁字符串，不再接收 `{patch, workdir}`。
+命令可以显式指定自己的目录；Shell 中的 `cd` 不会改变下一次工具调用的默认目录。
+这些规则不改写下游 MCP 的路径、参数或配置。
+
+保留 Codex patch 语法和执行引擎；工具契约必须包含足够的语法说明，不能只依赖模型记忆。
+补丁可能部分成功，不承诺跨文件原子性。不再为 diff UI 额外生成快照和行统计。
+
+采用 TypeScript/Node 承载 MCP、配置、下游连接和平台适配；
+执行 JavaScript 和应用补丁复用同一明确固定版本的 Codex 组件。
+使用官方 MCP SDK，不启动完整 Codex App Server 或模型循环，不读机器上 Codex 的配置与数据库。
+升级版本是显式依赖更新，需要验证契约；不随系统 Codex 或某个源码 checkout 自动升级。
+
+Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路径，不以 WSL 冒充。
+系统路径、Shell、PTY、子进程树与安装位置由平台适配处理；
+不能把 `bash`、POSIX 信号、systemd 或某台机器的主目录写成共同前提。
+发布必须验证各目标平台的 host、补丁入口和进程清理，不能只检查平台包“存在”。
+具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
+
+不实现 UI、`request_user_input`、内建 Skill 发现/管理、附件导入，
+也不增加 Workspace、子 Agent、持久任务或调度框架。
+需要 Skill 能力时把它当普通下游工具；它不是内核特殊协议。
+原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
+
+## 接受的代价
+
+简单操作也要经过一层 JavaScript，且 Code Mode host 是必经依赖。
+因此修复 host 的启动与恢复，而不是增加第二条直接工具路径。
+复用二进制减少重造成本，却仍有协议、包装方式和版本兼容成本；
+旧 codex-mcp 已验证的取消、结果保真和连接机制可以选择性复用，旧产品约束不能整体继承。
+
+## 事实依据
+
+参考 Codex 快照 `8b78600dc85cc265d7e7e827f6aa903875405287`：
+[补丁工具](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
+是 freeform；[Code Mode 契约转换](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
+把 freeform 参数映射成字符串。
+[平台包装脚本](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-cli/scripts/build_npm_package.py)
+可用于核对平台分发，但不构成 exec-mcp 已完成跨平台验证的证据。
+这些是决策参考，不是对运行版本的隐式 pin。

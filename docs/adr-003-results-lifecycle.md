@@ -65,3 +65,19 @@ SDK 可能先缓冲完整响应，多个调用也会并发占用内存；不能�
 不提供 Codex 的 `notify()` 注入语义，不以静默丢弃或普通 MCP 通知冒充支持。
 保留显式 `text`、媒体输出、`yield_control` 和 `wait`；未 await 的 Promise 不属于可靠后台任务。
 为这些临时执行维护必要内存状态，但不增加持久任务数据库、自动续跑或跨重启执行保证。
+
+## 长等待优先，传输失败不等于执行失败
+
+为减少 [ADR-001](adr-001-exec-runtime.md) 中的外层调用开销，`exec.yield_time_ms` 保持 0–30 秒，
+`wait.yield_time_ms` 保持 0–5 分钟，并默认 5 分钟（`300000` ms）。
+这是单次最长等待，不是固定休眠或 cell 执行期限；完成、主动 yield 或终止时提前返回。
+Connector 的超时可能更短且会变化，不据此下调 wait 上限。
+
+- 正常等满仍运行：返回 `Script running` 和原 `cell_id`，继续长 `wait`。
+- Connector 502 / connection reset / transport timeout / gateway timeout：不判定 cell 失败。
+  已知 `cell_id` 时直接对同一 ID 再次长 `wait`，不先 `wait(0)`，不重新 `exec`。
+- 收到 `completed` 就取最终结果并检查脚本错误；明确返回 cell 不存在、终止或执行错误，
+  才按对应状态处理，不能据此认定副作用未发生。
+
+工具描述应精练说明上述续等规则。运行时须将等待连接与 cell 生命周期分离，
+并有界保留可重取的最终结果，避免完成响应丢失后立即被误报为不存在；不新增持久任务系统。

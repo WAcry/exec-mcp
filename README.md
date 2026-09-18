@@ -4,12 +4,14 @@
 以及调用你配置的其他 MCP 服务。继续使用 ChatGPT，不需要迁移项目或打开另一套聊天界面。
 
 助手可以在一次调用里组合独立操作、并发执行并整理结果，减少机械性的往返。
-工具说明使用中文；支持 ChatGPT 文件导入和产物交付，没有控制面板、内建 Skills 管理或问题表单。
+工具说明使用中文；支持 ChatGPT 文件导入和产物交付，当前没有控制面板、内建 Skills 管理或问题表单。
 
 > **当前是可从源码运行的首版，尚未发布 npm 包或正式安装器。**
 > Linux、Windows、macOS 的 Node 22/24 CI 已验证真实执行与独立打包安装（含管道和 PTY）。
 > 验证覆盖 CI 使用的系统与架构，不等于已经覆盖所有操作系统版本或 CPU 架构。
 > OpenAI Tunnel 的真实 ChatGPT 连接仍需使用者的 Tunnel 权限与密钥完成验证。
+
+已计划但尚未交付的方向见 [Backlog](docs/BACKLOG.md)，不代表当前已可用功能。
 
 ## 从源码启动
 
@@ -128,7 +130,7 @@ tunnel-client run --profile exec-mcp
 连接后可直接告诉 ChatGPT：“检查我的项目并运行测试”，附上明确的项目路径。
 首次使用建议先执行只读检查，确认访问的是预期机器与目录。
 
-Cloudflare Tunnel 与 Tailscale Funnel 仍是后续计划。
+其他 Tunnel 接入仍在 [Backlog](docs/BACKLOG.md) 中，尚未交付。
 不要将当前无认证入口转发到公网；隧道可达不代表调用者已经获得授权。
 
 ## 文件传输

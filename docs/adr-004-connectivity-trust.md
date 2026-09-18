@@ -21,7 +21,7 @@
 只有明确配置为这一私有、单操作者路径，才允许本地 MCP 跳不另设应用认证；
 本机其他进程仍属于被信任的环境。回环地址自身不证明请求来自 OpenAI。
 
-后续加入 Cloudflare Tunnel 和 Tailscale Funnel 时，不能继承无认证例外。
+其他 Tunnel 的延后接入计划见 [Backlog](BACKLOG.md)；实施时不能继承无认证例外。
 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 可以对公网开放，
 不等同于只供 tailnet 内访问的 Serve；
 [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) 的可达性也不能替代调用方授权。
@@ -46,4 +46,5 @@
 下载入口只提供显式导出的文件，不得把它与拥有机器执行权限的 MCP 入口一起公开。
 
 公开 README 只写已经可用的安装和连接步骤，未交付的平台、架构、Tunnel 都明确标为目标。
-无产品 UI 不影响原生内容返回，也不意味着未来认证必须自己实现一套登录页面。
+当前无产品 UI 不影响原生内容返回；未来 Web UI 的计划见 [Backlog](BACKLOG.md)，
+不意味着认证必须自行实现一套账号或登录系统。

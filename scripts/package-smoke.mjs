@@ -185,6 +185,22 @@ try {
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
+  const undefinedStore = await scopedCall(
+    'store("nullable",null);try{store("nullable",undefined)}catch(error){text(String(error));}text({value:load("nullable")});',
+  );
+  assert.ok(!undefinedStore.isError, JSON.stringify(undefinedStore));
+  assert.ok(
+    undefinedStore.content.some(
+      (block) =>
+        block.type === "text" &&
+        block.text.includes("Only plain serializable objects can be stored"),
+    ),
+  );
+  assert.ok(
+    undefinedStore.content.some(
+      (block) => block.type === "text" && block.text === '{"value":null}',
+    ),
+  );
   const saved = await scopedCall(
     'store("cache", {value:42}); text("hidden");',
     { max_output_tokens: 0 },

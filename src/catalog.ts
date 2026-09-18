@@ -304,6 +304,7 @@ store(key,value)/load(key) 直接使用 Codex 原生的对话内存存储，不�
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约。外部能力先 tools.tool_search；新方法下一次 exec 才绑定。不要猜名称或参数。
 返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。
+audio() 沿用 host 规则：可识别且短于 25 ms 的 WAV 会改为说明文本，不返回该音频片段。
 超过等待窗口返回 Script running 与 cell_id，只用 wait 续取；yield_control() 主动交回累计输出并继续执行；exit() 结束脚本。setTimeout/clearTimeout 可用，但计时器必须通过 Promise 等待。notify 不支持。
 source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。仅显式设置 max_output_tokens/wait.max_tokens 才按近似预算截断本次文本，不影响原始工具结果或 store；wait 预算不继承 exec，省略不截断。截断文本未必是有效 JSON，被省略内容不由后续 wait 补发。
 cell_id 不等于终端 session_id；已交回句柄的进程通过后续 exec 内 write_stdin 操作。取消不回滚副作用。仅显式输出必要结果；默认不截断，不自动落盘，超出真实传输边界会报错，操作可能已发生，不自动重试。

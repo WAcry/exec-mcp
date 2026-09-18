@@ -2,7 +2,7 @@ import { accessSync, constants, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
-export const PINNED_CODEX_VERSION = "0.150.0";
+export const PINNED_CODEX_VERSION = "0.155.1";
 const require = createRequire(import.meta.url);
 const TARGETS: Record<string, string> = {
   "linux-x64": "x86_64-unknown-linux-musl",

@@ -30,7 +30,7 @@
     "@modelcontextprotocol/core": "2.0.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@openai/codex": "0.150.0",
+    "@openai/codex": "0.155.1",
     "file-type": "22.0.1",
     "minisearch": "7.2.0",
     "node-pty": "1.1.0",

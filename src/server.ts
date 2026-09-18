@@ -74,9 +74,6 @@ export async function startServer(
     if (route === "/healthz" || route === "/readyz") {
       respond(response, closing ? 503 : 200, {
         status: closing ? "stopping" : "ready",
-        ...(route === "/readyz"
-          ? { code_mode: runtime.codeMode.resources }
-          : {}),
       });
       return;
     }
@@ -174,7 +171,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 function respond(
   response: ServerResponse,
   status: number,
-  body: Record<string, unknown>,
+  body: Record<string, string>,
 ): void {
   response.writeHead(status, { "Content-Type": "application/json" });
   response.end(JSON.stringify(body));

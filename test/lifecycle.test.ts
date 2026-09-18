@@ -208,7 +208,7 @@ describe("real execution lifecycle boundaries", () => {
         while(!failed&&Date.now()<end)await new Promise(r=>setTimeout(r,10));
         let message='';try{await service.wait({cellId:id,sessionScope:'scope'});}catch(error){message=error.message;}
         if(!message.includes('结果不确定'))throw new Error(message);
-        const next=await service.exec({source:'text({recovered:load("cache")===7});',tools:[],sessionScope:'scope'});
+        const next=await service.exec({source:'text({recovered:load("cache")===undefined});',tools:[],sessionScope:'scope'});
         if(!JSON.stringify(next).includes('recovered')||!JSON.stringify(next).includes('true'))throw new Error('No recovery');
         console.log('host recovery ok');
       } finally {await service.close();}

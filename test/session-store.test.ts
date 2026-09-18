@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodeModeService } from "../src/code-mode/service.js";
 import { SessionPool } from "../src/code-mode/session-pool.js";
 import type { CodeModeSession } from "../src/code-mode/session.js";
@@ -25,7 +25,45 @@ afterEach(async () => {
   await Promise.all(pools.splice(0).map((value) => value.close()));
 });
 
-describe("bounded conversation store/load", () => {
+describe("native session store/load", () => {
+  it("stores and loads a large value across cells using the pinned host", async () => {
+    const value = service();
+    const bytes = 40 * 1024 * 1024;
+    const stored = await run(value, `store("large", "x".repeat(${bytes}));`);
+    expect(stored.isError, JSON.stringify(stored)).not.toBe(true);
+    const loaded = await run(
+      value,
+      'const value=load("large");text({length:value.length,first:value[0],last:value.at(-1)});',
+    );
+    expect(loaded.isError, JSON.stringify(loaded)).not.toBe(true);
+    expect(jsonOutput(loaded)).toEqual({
+      length: bytes,
+      first: "x",
+      last: "x",
+    });
+  });
+
+  it("publishes completed writes before the originating cell result is collected", async () => {
+    const value = service();
+    const writer = await run(value, 'store("finished",42);yield_control();');
+    const id = cellId(writer);
+    const deadline = Date.now() + 3000;
+    let visible = false;
+    do {
+      visible = jsonOutput<boolean>(
+        await run(value, 'text(load("finished")===42);'),
+      );
+      if (!visible) await pause(10);
+    } while (!visible && Date.now() < deadline);
+    expect(visible).toBe(true);
+    const result = await value.wait({
+      cellId: id,
+      sessionScope: "conversation-a",
+    });
+    expect(result.isError).not.toBe(true);
+    expect(texts(result).join("\n")).toContain("Script completed");
+  });
+
   it("shares JSON only within one conversation, across cells and model turns", async () => {
     const value = service();
     await run(value, 'globalThis.transient=7; store("rows", {items:[1,2,3]});');
@@ -101,7 +139,7 @@ describe("bounded conversation store/load", () => {
     expect(jsonOutput(await run(value, 'text(load("committed"));'))).toBe(5);
   });
 
-  it("merges concurrent cell writes without sharing JS variables", async () => {
+  it("shares a newly opened session during concurrent exec without sharing JS variables", async () => {
     const value = service();
     await Promise.all([
       run(value, 'store("first",1);globalThis.first=1;'),
@@ -212,7 +250,7 @@ describe("bounded conversation store/load", () => {
     ).toContain("kept");
   });
 
-  it("refreshes per-exec tool bindings while retaining conversation data", async () => {
+  it("refreshes per-exec tool bindings inside a shared session", async () => {
     const value = service();
     await value.exec({
       source: 'store("old",await tools.old({}));',
@@ -273,7 +311,36 @@ describe("bounded conversation store/load", () => {
 });
 
 describe("session lease ownership", () => {
-  it("gives cells distinct native sessions and closes late openings during shutdown", async () => {
+  it("keeps the native session for two idle days and expires it after three idle days", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+    const close = vi.fn(async () => {});
+    const open = vi.fn(
+      async () => ({ usable: true, close }) as unknown as CodeModeSession,
+    );
+    const pool = new SessionPool(open);
+    pools.push(pool);
+    try {
+      const first = await pool.acquire("conversation");
+      first.release();
+      vi.setSystemTime(2 * 24 * 60 * 60 * 1000);
+      const reused = await pool.acquire("conversation");
+      expect(reused.session).toBe(first.session);
+      expect(close).not.toHaveBeenCalled();
+      reused.release();
+      vi.setSystemTime(5 * 24 * 60 * 60 * 1000 + 1);
+      const fresh = await pool.acquire("conversation");
+      expect(fresh.session).not.toBe(first.session);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledTimes(2);
+      fresh.release();
+    } finally {
+      await pool.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("deduplicates in-flight opens and closes late openings during shutdown", async () => {
     let finish!: (session: CodeModeSession) => void;
     let opens = 0,
       closes = 0;
@@ -297,8 +364,8 @@ describe("session lease ownership", () => {
       },
     } as CodeModeSession);
     await Promise.all([firstCheck, secondCheck, closing]);
-    expect(opens).toBe(2);
-    expect(closes).toBe(2);
+    expect(opens).toBe(1);
+    expect(closes).toBe(1);
   });
 
   it("does not cache a session that failed during its opening handshake", async () => {

@@ -19,8 +19,8 @@ exec / wait：唯一的顶层工具入口
 ChatGPT 是主 Agent；服务不是另一个模型推理循环。
 执行内核不知道请求经过哪一种 Tunnel，也不拥有用户的项目或 Git 工作流。
 项目路径不是 Workspace 身份，执行句柄不是持久任务身份。
-同一对话可共享有界缓存中的显式数据；每个 cell 的原生 session、V8 isolate 和工具快照仍独立。
-长生命周期的数据归有配额的缓存所有，固定 host 只短期保留受限写入记录，不让原生 session 无限积累存储。
+同一对话复用原生 session 并通过 host 的 store/load 显式共享内存数据；每次 exec 的 V8 isolate 和工具快照仍独立。
+不在外层另建缓存或存储配额；仅在整个 session 长时间空闲后释放，接受原生存储不保证内存总量有界的取舍。
 
 复用 Codex 的 Code Mode host 和 patch engine，不引入完整 App Server、模型客户端，
 也不共享机器上 Codex 的配置或会话数据库。

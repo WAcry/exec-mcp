@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+import { parseArgs } from "node:util";
+import { pathToFileURL } from "node:url";
+import { defaultConfigPath, initializeConfig, loadConfig } from "./config.js";
+import { resolveCodexBinary, PINNED_CODEX_VERSION } from "./codex-package.js";
+import { CodeModeService } from "./code-mode/service.js";
+import { startServer } from "./server.js";
+import { VERSION } from "./version.js";
+
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      config: { type: "string" },
+      help: { type: "boolean", short: "h" },
+      version: { type: "boolean" },
+    },
+  });
+  if (values.version) {
+    console.log(VERSION);
+    return;
+  }
+  const command = positionals[0];
+  if (values.help || command === undefined) {
+    console.log(
+      "exec-mcp：通过 exec 组合本机与 MCP 工具\n\n用法：exec-mcp init|serve|doctor [--config 文件]\ninit   新建配置，不覆盖已有文件\nserve  在回环地址启动 MCP；通过 OpenAI Secure MCP Tunnel 连接\ndoctor 检查配置、固定 Codex 组件并实际运行 V8 探针\n",
+    );
+    return;
+  }
+  if (positionals.length !== 1) throw new Error("只接受一个子命令。");
+  const filename = values.config ?? defaultConfigPath();
+  if (command === "init") {
+    await initializeConfig(filename);
+    console.log(`已创建配置：${filename}\n确认权限设置后运行 exec-mcp serve。`);
+    return;
+  }
+  if (command === "doctor") {
+    const config = await loadConfig(filename);
+    resolveCodexBinary("codex");
+    resolveCodexBinary("codex-code-mode-host");
+    const code = new CodeModeService();
+    try {
+      const result = await code.exec({
+        source: 'text("exec-mcp probe ok")',
+        tools: [],
+      });
+      if (
+        result.isError ||
+        !JSON.stringify(result.content).includes("exec-mcp probe ok")
+      )
+        throw new Error("Code Mode 探针失败。");
+      console.log(
+        `配置有效；${process.platform}/${process.arch}；Codex ${PINNED_CODEX_VERSION} V8 探针通过；配置了 ${config.mcpServers.length} 个下游（未连接）。`,
+      );
+    } finally {
+      await code.close();
+    }
+    return;
+  }
+  if (command !== "serve") throw new Error(`未知子命令：${command}`);
+  const server = await startServer(await loadConfig(filename));
+  console.log(
+    `exec-mcp ${VERSION} 已就绪：${server.url}\n仅允许受信任的 OpenAI 私有 Tunnel；不要公开此无认证端口。`,
+  );
+  let stopping = false;
+  const stop = (): void => {
+    if (stopping) return;
+    stopping = true;
+    void server.close().catch(() => {
+      console.error("服务关闭时发生清理错误。");
+      process.exitCode = 1;
+    });
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+}
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  void main().catch((error) => {
+    console.error(
+      `exec-mcp：${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  });
+}

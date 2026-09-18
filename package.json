@@ -1,0 +1,58 @@
+{
+  "name": "exec-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "通过 exec 在自己的机器上组合和执行工具的 MCP 服务。",
+  "engines": {
+    "node": ">=22.19.0 <27"
+  },
+  "bin": {
+    "exec-mcp": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build && npm run format:check",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/src/cli.js serve",
+    "prepack": "npm run build",
+    "test:package": "node scripts/package-smoke.mjs",
+    "format": "prettier --write src test scripts *.ts *.json .github/workflows/*.yml",
+    "format:check": "prettier --check src test scripts *.ts *.json .github/workflows/*.yml"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "1.14.4",
+    "@grpc/proto-loader": "0.8.1",
+    "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/core": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "@openai/codex": "0.150.0",
+    "file-type": "22.0.1",
+    "minisearch": "7.2.0",
+    "node-pty": "1.1.0",
+    "zod": "4.4.3",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.11",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "prettier": "3.6.2"
+  },
+  "license": "UNLICENSED",
+  "files": [
+    "dist/src",
+    "proto",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "docs"
+  ]
+}

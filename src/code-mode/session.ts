@@ -96,6 +96,10 @@ export class CodeModeSession {
     this.#eventStream.resume();
   }
 
+  get usable(): boolean {
+    return !this.#closed && this.#failure === undefined;
+  }
+
   static async open(options: {
     admission?: WeightedAdmissionQueue;
     client: CodeModeHostClient;
@@ -185,6 +189,7 @@ export class CodeModeSession {
     if (options.signal?.aborted === true) throw executionAbortError();
     this.#requireOpen();
     const executionId = crypto.randomUUID();
+    let dispatched = false;
     try {
       const state: ExecutionState = { tools: toolMap(options.tools) };
       this.#executions.set(executionId, state);
@@ -205,12 +210,27 @@ export class CodeModeSession {
           this.#transportTimeoutMs +
           1_000,
       });
+      dispatched = true;
       return await this.#readExecutionStream(
         stream,
         executionId,
         options.signal,
       );
     } catch (error) {
+      const cellId = this.#executions.get(executionId)?.cellId;
+      if (!dispatched) {
+        this.#executions.delete(executionId);
+        throw error;
+      }
+      try {
+        if (cellId !== undefined) await this.terminate(cellId);
+        else
+          this.#fail(
+            new Error("执行连接中断且未取得 cell ID；会话结果不确定。"),
+          );
+      } catch {
+        this.#fail(new Error("无法确认失败 cell 的终止；会话结果不确定。"));
+      }
       this.#executions.delete(executionId);
       throw error;
     }
@@ -353,8 +373,6 @@ export class CodeModeSession {
         const error = executionAbortError();
         finish(error);
         stream.cancel();
-        if (cellId !== undefined)
-          void this.terminate(cellId).catch(() => undefined);
       };
 
       if (signal?.aborted === true) {

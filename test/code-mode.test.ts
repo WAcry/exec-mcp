@@ -31,7 +31,7 @@ describe("pinned real Code Mode host", () => {
     expect(jsonOutput(result)).toEqual({
       catalog: [{ name: "echo", description: tool.description }],
       n: { n: 4 },
-      hidden: ["undefined", "undefined", "undefined"],
+      hidden: ["undefined", "function", "function"],
     });
   });
   it("supports freeform strings and concurrent nested calls", async () => {

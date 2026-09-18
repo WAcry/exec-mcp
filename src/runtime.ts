@@ -115,6 +115,9 @@ export class ExecRuntime {
           const scope = sessionScope(context);
           return await this.codeMode.exec({
             source: args.source,
+            ...(args.max_output_tokens === undefined
+              ? {}
+              : { maxOutputTokens: args.max_output_tokens }),
             tools: [...tools, ...this.discovery.snapshot()],
             ...(args.yield_time_ms === undefined
               ? {}
@@ -141,6 +144,9 @@ export class ExecRuntime {
           const scope = sessionScope(context);
           return await this.codeMode.wait({
             cellId: args.cell_id,
+            ...(args.max_tokens === undefined
+              ? {}
+              : { maxTokens: args.max_tokens }),
             ...(args.yield_time_ms === undefined
               ? {}
               : { yieldTimeMs: args.yield_time_ms }),

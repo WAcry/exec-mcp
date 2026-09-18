@@ -43,7 +43,7 @@ ADR 正文保持当前有效；同一主题通常原地更新，历史由 Git �
 | --- | --- |
 | 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001：执行内核与产品边界](docs/adr-001-exec-runtime.md) |
 | ALL_TOOLS、BM25、契约发现、中文描述、下游 MCP | [ADR-002：工具发现与契约](docs/adr-002-tool-discovery.md) |
-| JSON 去重、输出大小、cell/进程、取消与失败 | [ADR-003：结果与执行生命周期](docs/adr-003-results-lifecycle.md) |
+| JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003：结果与执行生命周期](docs/adr-003-results-lifecycle.md) |
 | Tunnel、认证、安装、发布及机器权限 | [ADR-004：接入与信任边界](docs/adr-004-connectivity-trust.md) |
 
 ## 实现与验证

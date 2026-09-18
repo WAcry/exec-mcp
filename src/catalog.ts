@@ -3,8 +3,18 @@ import type { CodeModeToolDefinition } from "./code-mode/types.js";
 
 const ms = (maximum: number, description: string) =>
   z.number().int().min(0).max(maximum).describe(description).optional();
+const tokenBudget = z
+  .number()
+  .int()
+  .min(0)
+  .max(Number.MAX_SAFE_INTEGER)
+  .describe(
+    "本次文本输出的近似 token 预算（约 4 个 UTF-8 字节/token）；省略不限量，0 省略文本。保留首尾并标记截断，不影响嵌套结果、存储和媒体；状态/提示不计入。",
+  )
+  .optional();
 export const EXEC_SCHEMA = z
   .object({
+    max_output_tokens: tokenBudget,
     source: z
       .string()
       .min(1)
@@ -24,6 +34,7 @@ export const EXEC_SCHEMA = z
   .strict();
 export const WAIT_SCHEMA = z
   .object({
+    max_tokens: tokenBudget,
     cell_id: z
       .string()
       .min(1)
@@ -237,13 +248,15 @@ export function bindNative(
   };
 }
 export const EXEC_DESCRIPTION = `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
-本次默认目录来自 workdir；不同 exec 不共享变量、store/load 或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
+本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
+store(key,value)/load(key) 在同一 ChatGPT 对话的不同 exec 间保存/读取 JSON 数据；key 为字符串，未命中返回 undefined。需宿主的 openai/session；缺失时调用报错。数据仅在内存；无活动 cell 且空闲 24 小时或服务/host 重启后丢失。新 cell 读启动快照，写入在完成时合并（脚本报错也可能提交）；load 返回副本，修改后需 store，并发同键非事务。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约。外部能力先 tools.tool_search；新方法下一次 exec 才绑定。不要猜名称或参数。
-返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url}) 输出生成图。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。
+返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。
 超过等待窗口返回 Script running 与 cell_id，只用 wait 续取；yield_control() 主动交回累计输出并继续执行；exit() 结束脚本。setTimeout/clearTimeout 可用，但计时器必须通过 Promise 等待。notify 不支持。
-cell_id 不等于终端 session_id；已交回句柄的进程通过后续 exec 内 write_stdin 操作。取消不回滚副作用。仅显式输出必要结果；不自动截断落盘，超出真实传输边界会报错，操作可能已发生，不自动重试。
+source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。仅显式设置 max_output_tokens/wait.max_tokens 才按近似预算截断本次文本，不影响原始工具结果或 store；wait 预算不继承 exec，省略不截断。截断文本未必是有效 JSON，被省略内容不由后续 wait 补发。
+cell_id 不等于终端 session_id；已交回句柄的进程通过后续 exec 内 write_stdin 操作。取消不回滚副作用。仅显式输出必要结果；默认不截断，不自动落盘，超出真实传输边界会报错，操作可能已发生，不自动重试。
 
 本机及发现契约：\n${NATIVE_CONTRACTS.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的运行中 cell_id 的新增输出，或终止该 cell。默认、推荐和最长等待均为 110 秒；完成、主动 yield 或终止时提前返回。终端 session_id 由 exec 内的 write_stdin 操作。";
+  "续取 exec 返回的运行中 cell_id 的新增输出，或终止该 cell。默认、推荐和最长等待均为 110 秒；完成、主动 yield 或终止时提前返回。可用 max_tokens 限制本次近似文本预算，省略不限量且不继承 exec；媒体与状态保留。终端 session_id 由 exec 内的 write_stdin 操作。";

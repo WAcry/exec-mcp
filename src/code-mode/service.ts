@@ -7,6 +7,8 @@ import { CancellableMutex, WeightedAdmissionQueue } from "./admission.js";
 import { CodeModeHostProcess } from "./host-process.js";
 import { outputItemsToCallToolResult } from "./result.js";
 import { CodeModeSession, type RuntimeOutcome } from "./session.js";
+import { SessionPool, type SessionLease } from "./session-pool.js";
+import { applyOutputBudget, validateOutputBudget } from "./output-budget.js";
 import type {
   CodeModeExecRequest,
   CodeModeOutputItem,
@@ -24,12 +26,14 @@ export const INDETERMINATE_CELL_TEXT =
   "Code Mode host 在执行期间退出；结果不确定，工具副作用可能已发生，请先检查状态，勿自动重试。";
 
 // Unsupported helpers must fail explicitly; retain the native ALL_TOOLS catalog.
-const CODE_MODE_SOURCE_PRELUDE =
-  "delete globalThis.notify; delete globalThis.store; delete globalThis.load;";
+const CODE_MODE_SOURCE_PRELUDE = "delete globalThis.notify;";
+const UNSCOPED_STORE_PRELUDE =
+  'globalThis.store = globalThis.load = () => { throw new Error("store/load 需要宿主提供 openai/session 对话标识；本次不可跨 exec 存储。"); };';
 
 interface ParsedExecSource {
   code: string;
   yieldTimeMs?: number;
+  maxOutputTokens?: number;
 }
 
 interface CellOwner {
@@ -37,6 +41,7 @@ interface CellOwner {
   scope?: string;
   session: CodeModeSession;
   observer: CancellableMutex;
+  lease: SessionLease;
 }
 
 interface InvalidatedCell {
@@ -55,10 +60,9 @@ export class CodeModeService {
   readonly #startupTimeoutMs: number;
   readonly #transportTimeoutMs: number;
   #cellOwners = new Map<string, CellOwner>();
-  #closingSessions = new Map<CodeModeSession, Promise<void>>();
   #closePromise: Promise<void> | undefined;
   #invalidatedCells = new Map<string, InvalidatedCell>();
-  #sessions = new Set<CodeModeSession>();
+  readonly #pool: SessionPool;
   #stopping = false;
 
   constructor(options: CodeModeServiceOptions = {}) {
@@ -96,6 +100,10 @@ export class CodeModeService {
     }
     const onError = options.onError ?? (() => undefined);
 
+    this.#pool = new SessionPool(
+      (scope) => this.#openSession(scope),
+      options.sessionIdleMs,
+    );
     this.#host = new CodeModeHostProcess({
       ...(options.hostBinary === undefined
         ? {}
@@ -126,8 +134,12 @@ export class CodeModeService {
     const yieldTimeMs =
       request.yieldTimeMs ?? parsed.yieldTimeMs ?? this.#defaultExecYieldTimeMs;
     validateYieldTime(yieldTimeMs, "yield-time_ms", MAX_EXEC_YIELD_TIME_MS);
+    const maxOutputTokens = request.maxOutputTokens ?? parsed.maxOutputTokens;
+    validateOutputBudget(request.maxOutputTokens);
+    validateOutputBudget(maxOutputTokens);
     const scope = sessionScopeKey(request.sessionScope);
-    const session = await this.#openSession(scope);
+    const lease = await this.#pool.acquire(scope);
+    const session = lease.session;
     const startedAt = performance.now();
     try {
       this.#requireRunning();
@@ -137,21 +149,26 @@ export class CodeModeService {
       );
       const hostOutcome = await session.execute({
         ...(request.signal === undefined ? {} : { signal: request.signal }),
-        source: `${CODE_MODE_SOURCE_PRELUDE}${parsed.code}`,
+        source: `${CODE_MODE_SOURCE_PRELUDE}${scope === undefined ? UNSCOPED_STORE_PRELUDE : ""}${parsed.code}`,
         toolCallId: randomHandle("exec"),
         tools: request.tools,
         yieldTimeMs,
       });
-      const outcome = this.#trackOutcome(session, scope, hostOutcome);
-      return await this.#modelResult(outcome, elapsedSeconds(startedAt));
+      const outcome = this.#trackOutcome(lease, scope, hostOutcome);
+      return await this.#modelResult(
+        outcome,
+        elapsedSeconds(startedAt),
+        maxOutputTokens,
+      );
     } catch (error) {
-      await this.#closeSession(session);
+      lease.release();
       throw error;
     }
   }
 
   async wait(request: CodeModeWaitRequest): Promise<CodeModeToolResult> {
     this.#requireRunning();
+    validateOutputBudget(request.maxTokens);
     const yieldTimeMs = request.yieldTimeMs ?? this.#defaultWaitYieldTimeMs;
     validateNonNegativeSafeInteger(yieldTimeMs, "yield_time_ms");
     validateYieldTime(yieldTimeMs, "yield-time_ms", MAX_WAIT_YIELD_TIME_MS);
@@ -182,12 +199,16 @@ export class CodeModeService {
               yieldTimeMs: remaining,
             });
       const outcome = this.#trackOutcome(
-        owner.session,
+        owner.lease,
         owner.scope,
         hostOutcome,
         request.cellId,
       );
-      return this.#modelResult(outcome, elapsedSeconds(startedAt));
+      return this.#modelResult(
+        outcome,
+        elapsedSeconds(startedAt),
+        request.maxTokens,
+      );
     };
     if (request.terminate === true) return observe();
     return owner.observer.run(
@@ -203,13 +224,9 @@ export class CodeModeService {
 
   async #close(): Promise<void> {
     this.#stopping = true;
-    const sessions = new Set(this.#sessions);
-    for (const session of sessions) void this.#closeSession(session);
     this.#cellOwners.clear();
     this.#invalidatedCells.clear();
-    while (this.#closingSessions.size > 0) {
-      await Promise.allSettled(this.#closingSessions.values());
-    }
+    await this.#pool.close();
     this.#resultPreparation.close();
     this.#admission.close();
     await this.#host.stop();
@@ -228,14 +245,17 @@ export class CodeModeService {
         : { maxYieldTimeMs: this.#maxYieldTimeMs }),
       admission: this.#admission,
       onFailure: (failedSession) => {
-        void this.#invalidateSession(failedSession);
+        this.#invalidateSession(failedSession);
       },
       resultPreparation: this.#resultPreparation,
       ...(scope === undefined ? {} : { scope }),
       startupTimeoutMs: this.#startupTimeoutMs,
       transportTimeoutMs: this.#transportTimeoutMs,
     });
-    this.#sessions.add(session);
+    if (this.#stopping) {
+      await session.close();
+      this.#requireRunning();
+    }
     return session;
   }
 
@@ -246,11 +266,7 @@ export class CodeModeService {
     this.#cleanupExpiredInvalidatedCells();
     const owner = this.#cellOwners.get(cellId);
     if (owner !== undefined) {
-      if (
-        owner.scope !== undefined &&
-        requestedScope !== undefined &&
-        owner.scope !== requestedScope
-      ) {
+      if (owner.scope !== undefined && owner.scope !== requestedScope) {
         throw new Error("exec cell 属于其他 ChatGPT 会话");
       }
       return owner;
@@ -264,14 +280,14 @@ export class CodeModeService {
   }
 
   #trackOutcome(
-    session: CodeModeSession,
+    lease: SessionLease,
     scope: string | undefined,
     outcome: RuntimeOutcome,
     publicCellId?: string,
   ): RuntimeOutcome {
+    const session = lease.session;
     if (outcome.state === "yielded") {
-      if (!this.#sessions.has(session))
-        throw new Error(INDETERMINATE_CELL_TEXT);
+      if (!this.#pool.has(session)) throw new Error(INDETERMINATE_CELL_TEXT);
       const handle = publicCellId ?? randomHandle("cell");
       this.#cellOwners.set(handle, {
         observer:
@@ -279,6 +295,7 @@ export class CodeModeService {
         hostCellId: outcome.cellId,
         ...(scope === undefined ? {} : { scope }),
         session,
+        lease,
       });
       return { ...outcome, cellId: handle };
     } else {
@@ -286,7 +303,7 @@ export class CodeModeService {
         this.#cellOwners.delete(publicCellId);
         this.#invalidatedCells.delete(publicCellId);
       }
-      void this.#closeSession(session);
+      lease.release();
     }
     return publicCellId === undefined
       ? outcome
@@ -296,17 +313,21 @@ export class CodeModeService {
   async #modelResult(
     outcome: RuntimeOutcome,
     wallTimeSeconds: number,
+    maxTokens?: number,
   ): Promise<CodeModeToolResult> {
-    const items: CodeModeOutputItem[] = [
-      { type: "text", text: statusHeader(outcome, wallTimeSeconds) },
-      ...outcome.items,
-    ];
+    const items: CodeModeOutputItem[] = [...outcome.items];
     if (outcome.state === "completed" && outcome.errorText !== undefined) {
       items.push({ type: "text", text: `Script error:\n${outcome.errorText}` });
     }
     try {
+      const budgeted = applyOutputBudget(items, maxTokens);
+      const status =
+        statusHeader(outcome, wallTimeSeconds) +
+        (budgeted.truncated
+          ? `文本已按 ${maxTokens} token 预算截断；后续 wait 不补发被省略内容。\n`
+          : "");
       return outputItemsToCallToolResult(
-        items,
+        [{ type: "text", text: status }, ...budgeted.items],
         outcome.state === "completed" && outcome.errorText !== undefined,
       );
     } catch (error) {
@@ -332,51 +353,31 @@ export class CodeModeService {
       try {
         await owner.session.terminate(owner.hostCellId);
       } catch {
-        // The session is closed below even if termination raced host failure.
+        this.#invalidateSession(owner.session);
       } finally {
-        await this.#closeSession(owner.session);
+        owner.lease.release();
       }
     })().catch(() => undefined);
-  }
-
-  #closeSession(session: CodeModeSession): Promise<void> {
-    if (this.#sessions.delete(session)) {
-      for (const [cellId, owner] of this.#cellOwners) {
-        if (owner.session === session) this.#cellOwners.delete(cellId);
-      }
-    }
-    let closing = this.#closingSessions.get(session);
-    if (closing === undefined) {
-      closing = session.close();
-      this.#closingSessions.set(session, closing);
-      const forget = (): void => {
-        this.#closingSessions.delete(session);
-      };
-      // Observe rejection even when cleanup runs after a completed tool result.
-      void closing.then(forget, forget);
-    }
-    return closing;
   }
 
   #invalidateSessions(): void {
     this.#cleanupExpiredInvalidatedCells();
     for (const [cellId, owner] of this.#cellOwners) {
       this.#recordInvalidatedCell(cellId, owner.scope);
+      owner.lease.release();
     }
-    const sessions = [...this.#sessions];
-    this.#sessions.clear();
     this.#cellOwners.clear();
-    for (const session of sessions) void this.#closeSession(session);
+    this.#pool.reset();
   }
 
-  #invalidateSession(session: CodeModeSession): Promise<void> {
-    this.#sessions.delete(session);
+  #invalidateSession(session: CodeModeSession): void {
     for (const [cellId, owner] of this.#cellOwners) {
       if (owner.session !== session) continue;
       this.#recordInvalidatedCell(cellId, owner.scope);
       this.#cellOwners.delete(cellId);
+      owner.lease.release();
     }
-    return this.#closeSession(session);
+    this.#pool.invalidate(session);
   }
 
   #recordInvalidatedCell(cellId: string, scope: string | undefined): void {
@@ -401,11 +402,7 @@ function assertMatchingScope(
   ownerScope: string | undefined,
   requestedScope: string | undefined,
 ): void {
-  if (
-    ownerScope !== undefined &&
-    requestedScope !== undefined &&
-    ownerScope !== requestedScope
-  ) {
+  if (ownerScope !== undefined && ownerScope !== requestedScope) {
     throw new Error("exec cell 属于其他 ChatGPT 会话");
   }
 }
@@ -449,7 +446,7 @@ export function parseExecSource(input: string): ParsedExecSource {
   }
   const object = parsed as Record<string, unknown>;
   for (const key of Object.keys(object)) {
-    if (key !== "yield_time_ms") {
+    if (key !== "yield_time_ms" && key !== "max_output_tokens") {
       throw new Error(`exec pragma does not support field ${key}`);
     }
   }
@@ -457,9 +454,12 @@ export function parseExecSource(input: string): ParsedExecSource {
     object.yield_time_ms,
     "yield_time_ms",
   );
+  const maxOutputTokens = object.max_output_tokens;
+  validateOutputBudget(maxOutputTokens);
   return {
     code,
     ...(yieldTimeMs === undefined ? {} : { yieldTimeMs }),
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
   };
 }
 

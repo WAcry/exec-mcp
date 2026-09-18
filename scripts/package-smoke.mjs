@@ -145,8 +145,42 @@ try {
       (block) => block.type === "text" && block.text.includes("tool_search"),
     ),
   );
+  const scopedCall = (source, extra = {}) =>
+    client.callTool({
+      name: "exec",
+      arguments: { source, ...extra },
+      _meta: { "openai/session": "package-smoke-conversation" },
+    });
+  const saved = await scopedCall(
+    'store("cache", {value:42}); text("hidden");',
+    { max_output_tokens: 0 },
+  );
+  assert.ok(!saved.isError, JSON.stringify(saved));
+  assert.equal(saved.content.length, 1);
+  const restored = await scopedCall('text(load("cache"));');
+  assert.ok(
+    restored.content.some(
+      (block) => block.type === "text" && block.text === '{"value":42}',
+    ),
+  );
+  const png =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5xkAAAAASUVORK5CYII=";
+  const media = await scopedCall(
+    `generatedImage({image_url:${JSON.stringify(png)},output_hint:"图片说明"});`,
+  );
+  assert.ok(!media.isError, JSON.stringify(media));
+  assert.equal(
+    media.content.filter((block) => block.type === "image").length,
+    1,
+  );
+  assert.equal(
+    media.content.filter(
+      (block) => block.type === "text" && block.text === "图片说明",
+    ).length,
+    1,
+  );
   console.log(
-    "PASS: 独立 tarball 安装、CLI 初始化、固定 V8 探针、MCP 两工具目录和真实补丁执行。",
+    "PASS: 独立 tarball 安装、CLI 初始化、固定 V8 探针、MCP 两工具目录、真实补丁、跨 exec 存储、输出预算和图片说明。",
   );
 } finally {
   await client?.close();

@@ -197,7 +197,8 @@ describe("real execution lifecycle boundaries", () => {
       let failed=false;
       const service=new CodeModeService({onError(){failed=true;},transportTimeoutMs:1000});
       try {
-        const first=await service.exec({source:'await new Promise(()=>{});',tools:[],yieldTimeMs:0});
+        await service.exec({source:'store("cache",7);',tools:[],sessionScope:'scope'});
+        const first=await service.exec({source:'await new Promise(()=>{});',tools:[],yieldTimeMs:0,sessionScope:'scope'});
         const id=JSON.stringify(first).match(/cell_[A-Za-z0-9_-]+/)[0];
         const rows=execFileSync('ps',['-o','pid=,args=','--ppid',String(process.pid)],{encoding:'utf8'}).split('\n');
         const row=rows.find(line=>line.includes('codex-code-mode-host'));
@@ -205,10 +206,10 @@ describe("real execution lifecycle boundaries", () => {
         process.kill(Number(row.trim().split(/\s+/)[0]),'SIGKILL');
         const end=Date.now()+5000;
         while(!failed&&Date.now()<end)await new Promise(r=>setTimeout(r,10));
-        let message='';try{await service.wait({cellId:id});}catch(error){message=error.message;}
+        let message='';try{await service.wait({cellId:id,sessionScope:'scope'});}catch(error){message=error.message;}
         if(!message.includes('结果不确定'))throw new Error(message);
-        const next=await service.exec({source:'text("recovered")',tools:[]});
-        if(!JSON.stringify(next).includes('recovered'))throw new Error('No recovery');
+        const next=await service.exec({source:'text({recovered:load("cache")===undefined});',tools:[],sessionScope:'scope'});
+        if(!JSON.stringify(next).includes('recovered')||!JSON.stringify(next).includes('true'))throw new Error('No recovery');
         console.log('host recovery ok');
       } finally {await service.close();}
     `,

@@ -43,6 +43,7 @@ export interface CodeModeExecRequest {
   /** Opaque OpenAI conversation scope. It is correlation state, not auth. */
   sessionScope?: string;
   signal?: AbortSignal;
+  maxOutputTokens?: number;
   /** Public MCP yield_time_ms. It overrides an optional source pragma. */
   yieldTimeMs?: number;
 }
@@ -51,6 +52,7 @@ export interface CodeModeWaitRequest {
   cellId: string;
   sessionScope?: string;
   signal?: AbortSignal;
+  maxTokens?: number;
   terminate?: boolean;
   yieldTimeMs?: number;
 }
@@ -58,6 +60,7 @@ export interface CodeModeWaitRequest {
 export type CodeModeToolResult = CallToolResult;
 
 export interface CodeModeServiceOptions {
+  sessionIdleMs?: number;
   defaultExecYieldTimeMs?: number;
   defaultWaitYieldTimeMs?: number;
   hostBinary?: string;

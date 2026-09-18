@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
 import { defaultConfigPath, initializeConfig, loadConfig } from "./config.js";
 import { resolveCodexBinary, PINNED_CODEX_VERSION } from "./codex-package.js";
 import { CodeModeService } from "./code-mode/service.js";
@@ -76,10 +75,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 }
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
-) {
+// Node resolves the entry module through symlinks (/var -> /private/var on
+// macOS, npm bin links, etc.); argv[1] is not a canonical module identity.
+if (import.meta.main) {
   void main().catch((error) => {
     console.error(
       `exec-mcp：${error instanceof Error ? error.message : String(error)}`,

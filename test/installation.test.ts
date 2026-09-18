@@ -41,6 +41,33 @@ afterEach(async () => {
 });
 
 describe("installing the pinned native PTY dependency", () => {
+  it("starts the CLI from a symlinked directory and keeps module imports side-effect-free", async () => {
+    const directory = await root();
+    const alias = path.join(directory, "linked checkout");
+    await symlink(
+      process.cwd(),
+      alias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const help = await run(
+      process.execPath,
+      ["--import", "tsx", path.join(alias, "src", "cli.ts"), "--help"],
+      { timeout: 10_000 },
+    );
+    expect(help.stdout).toContain("init|serve|doctor");
+    const imported = await run(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "--eval",
+        `await import(${JSON.stringify(new URL("../src/cli.ts", import.meta.url).href)});console.log("only-imported");`,
+      ],
+      { timeout: 10_000 },
+    );
+    expect(imported.stdout.trim()).toBe("only-imported");
+  });
   it("does nothing for platforms that do not use the macOS helper", async () => {
     const directory = await root();
     await expect(

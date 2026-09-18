@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  writeFile,
+  mkdir,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +82,25 @@ try {
       })
     ).stdout;
   assert.match(await executeCli(["--help"]), /init\|serve\|doctor/);
+  const installationAlias = path.join(temporary, "installation alias");
+  await symlink(
+    isolated,
+    installationAlias,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const aliasCli = path.join(
+    installationAlias,
+    "node_modules",
+    "exec-mcp",
+    "dist",
+    "src",
+    "cli.js",
+  );
+  const aliasHelp = await run(process.execPath, [aliasCli, "--help"], {
+    cwd: isolated,
+    timeout: 30_000,
+  });
+  assert.match(aliasHelp.stdout, /init\|serve\|doctor/);
   await executeCli(["init", "--config", config]);
   const originalConfig = await readFile(config, "utf8");
   await writeFile(config, originalConfig.replace("port = 8891", "port = 0"));

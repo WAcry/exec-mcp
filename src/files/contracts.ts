@@ -2,9 +2,9 @@ import { z } from "zod/v4";
 
 export const RESOURCE_FILE_BYTES = 32 * 1024 * 1024;
 export const FILE_DEFAULTS = {
-  max_file_bytes: 256 * 1024 * 1024,
-  max_export_bytes: 1024 * 1024 * 1024,
-  ttl_seconds: 15 * 60,
+  max_file_bytes: 512 * 1024 * 1024,
+  max_export_bytes: 4 * 1024 * 1024 * 1024,
+  ttl_seconds: 60 * 60,
 } as const;
 export const FILE_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000;
 

@@ -8,6 +8,8 @@ import { CodeModeHostProcess } from "./host-process.js";
 import { outputItemsToCallToolResult } from "./result.js";
 import { CodeModeSession, type RuntimeOutcome } from "./session.js";
 import { SessionPool, type SessionLease } from "./session-pool.js";
+import { ConversationStore, type StoreLease } from "./conversation-store.js";
+import { collectStoreWrites, storeBridge } from "./store-bridge.js";
 import { applyOutputBudget, validateOutputBudget } from "./output-budget.js";
 import type {
   CodeModeExecRequest,
@@ -22,6 +24,7 @@ export const DEFAULT_WAIT_YIELD_TIME_MS = 110_000;
 export const MAX_EXEC_YIELD_TIME_MS = 30_000;
 export const MAX_WAIT_YIELD_TIME_MS = 110_000;
 export const INVALIDATED_CELL_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const MAX_INVALIDATED_CELLS = 1024;
 export const INDETERMINATE_CELL_TEXT =
   "Code Mode host 在执行期间退出；结果不确定，工具副作用可能已发生，请先检查状态，勿自动重试。";
 
@@ -42,6 +45,7 @@ interface CellOwner {
   session: CodeModeSession;
   observer: CancellableMutex;
   lease: SessionLease;
+  store?: StoreLease;
   takeAttachments?: CodeModeExecRequest["takeAttachments"];
 }
 
@@ -64,6 +68,8 @@ export class CodeModeService {
   #closePromise: Promise<void> | undefined;
   #invalidatedCells = new Map<string, InvalidatedCell>();
   readonly #pool: SessionPool;
+  readonly #store: ConversationStore;
+  readonly #maintenance: NodeJS.Timeout;
   #stopping = false;
 
   constructor(options: CodeModeServiceOptions = {}) {
@@ -103,8 +109,19 @@ export class CodeModeService {
 
     this.#pool = new SessionPool(
       (scope) => this.#openSession(scope),
-      options.sessionIdleMs,
+      options.maxCells,
     );
+    this.#store = new ConversationStore({
+      ...options.storeLimits,
+      ...(options.sessionIdleMs === undefined
+        ? {}
+        : { idleMs: options.sessionIdleMs }),
+    });
+    this.#maintenance = setInterval(
+      () => this.#cleanupExpiredInvalidatedCells(),
+      60_000,
+    );
+    this.#maintenance.unref();
     this.#host = new CodeModeHostProcess({
       ...(options.hostBinary === undefined
         ? {}
@@ -119,6 +136,14 @@ export class CodeModeService {
       },
       startupTimeoutMs: this.#startupTimeoutMs,
     });
+  }
+
+  get resources() {
+    return {
+      active_cells: this.#pool.size,
+      invalidated_cells: this.#invalidatedCells.size,
+      store: this.#store.usage,
+    };
   }
 
   async exec(request: CodeModeExecRequest): Promise<CodeModeToolResult> {
@@ -141,6 +166,7 @@ export class CodeModeService {
     const scope = sessionScopeKey(request.sessionScope);
     const lease = await this.#pool.acquire(scope);
     const session = lease.session;
+    let store: StoreLease | undefined;
     const startedAt = performance.now();
     try {
       this.#requireRunning();
@@ -148,19 +174,28 @@ export class CodeModeService {
         request.signal,
         "Code Mode execution was aborted before it started",
       );
+      store = scope === undefined ? undefined : this.#store.begin(scope);
+      const bridge =
+        store === undefined
+          ? undefined
+          : storeBridge(store, this.#store.limits);
       const hostOutcome = await session.execute({
         ...(request.signal === undefined ? {} : { signal: request.signal }),
-        source: `${CODE_MODE_SOURCE_PRELUDE}${scope === undefined ? UNSCOPED_STORE_PRELUDE : ""}${parsed.code}`,
+        source: `${CODE_MODE_SOURCE_PRELUDE}${bridge?.source ?? UNSCOPED_STORE_PRELUDE}${parsed.code}`,
         toolCallId: randomHandle("exec"),
-        tools: request.tools,
+        tools:
+          bridge === undefined
+            ? request.tools
+            : [bridge.tool, ...request.tools],
         yieldTimeMs,
       });
-      const outcome = this.#trackOutcome(
+      const outcome = await this.#trackOutcome(
         lease,
         scope,
         hostOutcome,
         undefined,
         request.takeAttachments,
+        store,
       );
       return await this.#modelResult(
         outcome,
@@ -169,6 +204,7 @@ export class CodeModeService {
         request.takeAttachments,
       );
     } catch (error) {
+      store?.release();
       lease.release();
       throw error;
     }
@@ -206,12 +242,13 @@ export class CodeModeService {
                 : { signal: request.signal }),
               yieldTimeMs: remaining,
             });
-      const outcome = this.#trackOutcome(
+      const outcome = await this.#trackOutcome(
         owner.lease,
         owner.scope,
         hostOutcome,
         request.cellId,
         owner.takeAttachments,
+        owner.store,
       );
       return this.#modelResult(
         outcome,
@@ -234,9 +271,12 @@ export class CodeModeService {
 
   async #close(): Promise<void> {
     this.#stopping = true;
+    clearInterval(this.#maintenance);
+    for (const owner of this.#cellOwners.values()) owner.store?.release();
     this.#cellOwners.clear();
     this.#invalidatedCells.clear();
     await this.#pool.close();
+    this.#store.close();
     this.#resultPreparation.close();
     this.#admission.close();
     await this.#host.stop();
@@ -289,13 +329,14 @@ export class CodeModeService {
     throw new Error(`未知或已结束的 exec cell：${cellId}`);
   }
 
-  #trackOutcome(
+  async #trackOutcome(
     lease: SessionLease,
     scope: string | undefined,
     outcome: RuntimeOutcome,
     publicCellId?: string,
     takeAttachments?: CodeModeExecRequest["takeAttachments"],
-  ): RuntimeOutcome {
+    store?: StoreLease,
+  ): Promise<RuntimeOutcome> {
     const session = lease.session;
     if (outcome.state === "yielded") {
       if (!this.#pool.has(session)) throw new Error(INDETERMINATE_CELL_TEXT);
@@ -307,6 +348,7 @@ export class CodeModeService {
         ...(scope === undefined ? {} : { scope }),
         session,
         lease,
+        ...(store === undefined ? {} : { store }),
         ...(takeAttachments === undefined ? {} : { takeAttachments }),
       });
       return { ...outcome, cellId: handle };
@@ -315,7 +357,19 @@ export class CodeModeService {
         this.#cellOwners.delete(publicCellId);
         this.#invalidatedCells.delete(publicCellId);
       }
-      lease.release();
+      try {
+        if (outcome.state === "completed" && store)
+          store.commit(await collectStoreWrites(session));
+      } catch (error) {
+        outcome = {
+          ...outcome,
+          state: "completed",
+          errorText: `${outcome.state === "completed" && outcome.errorText ? `${outcome.errorText}\n` : ""}store 提交失败：${error instanceof Error ? error.message : String(error)} 已有缓存保留；工具副作用不回滚，不要自动重跑脚本。`,
+        };
+      } finally {
+        store?.release();
+        lease.release();
+      }
     }
     return publicCellId === undefined
       ? outcome
@@ -373,6 +427,7 @@ export class CodeModeService {
       } catch {
         this.#invalidateSession(owner.session);
       } finally {
+        owner.store?.release();
         owner.lease.release();
       }
     })().catch(() => undefined);
@@ -382,6 +437,7 @@ export class CodeModeService {
     this.#cleanupExpiredInvalidatedCells();
     for (const [cellId, owner] of this.#cellOwners) {
       this.#recordInvalidatedCell(cellId, owner.scope);
+      owner.store?.release();
       owner.lease.release();
     }
     this.#cellOwners.clear();
@@ -392,6 +448,7 @@ export class CodeModeService {
     for (const [cellId, owner] of this.#cellOwners) {
       if (owner.session !== session) continue;
       this.#recordInvalidatedCell(cellId, owner.scope);
+      owner.store?.release();
       this.#cellOwners.delete(cellId);
       owner.lease.release();
     }
@@ -399,6 +456,11 @@ export class CodeModeService {
   }
 
   #recordInvalidatedCell(cellId: string, scope: string | undefined): void {
+    while (this.#invalidatedCells.size >= MAX_INVALIDATED_CELLS) {
+      this.#invalidatedCells.delete(
+        this.#invalidatedCells.keys().next().value!,
+      );
+    }
     this.#invalidatedCells.set(cellId, {
       expiresAt: Date.now() + INVALIDATED_CELL_RETENTION_MS,
       ...(scope === undefined ? {} : { scope }),

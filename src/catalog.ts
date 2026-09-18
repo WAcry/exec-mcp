@@ -1,5 +1,7 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
+import { DEFAULT_STORE_LIMITS } from "./code-mode/conversation-store.js";
+import { MAX_EXEC_CELLS } from "./code-mode/session-pool.js";
 import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
@@ -280,7 +282,8 @@ export function bindNative(
 export const EXEC_DESCRIPTION = `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
 附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
-store(key,value)/load(key) 在同一 ChatGPT 对话的不同 exec 间保存/读取 JSON 数据；key 为字符串，未命中返回 undefined。需宿主的 openai/session；缺失时调用报错。数据仅在内存；无活动 cell 且空闲 24 小时或服务/host 重启后丢失。新 cell 读启动快照，写入在完成时合并（脚本报错也可能提交）；load 返回副本，修改后需 store，并发同键非事务。
+store(key,value)/load(key) 同步保存/读取同一对话的 JSON 缓存；需 openai/session，未命中返回 undefined。新 cell 读启动快照，完成结果由 exec/wait 收取时合并写入（报错也可能提交）；load 返回副本。store.delete(key)/store.clear() 释放数据，store.stats() 查看本次快照用量。每对话 ${DEFAULT_STORE_LIMITS.sessionBytes / 1024 ** 2} MiB/${DEFAULT_STORE_LIMITS.maxKeys} 键，总计 ${DEFAULT_STORE_LIMITS.totalBytes / 1024 ** 2} MiB/${DEFAULT_STORE_LIMITS.maxConversations} 对话；不足时只回收最久未用的空闲对话，活动对话受保护，单对话超限明确拒绝。通常空闲 ${DEFAULT_STORE_LIMITS.idleMs / 3_600_000} 小时才过期；压力回收或服务重启可提前丢失，重要数据用文件，不把缓存当持久存储。
+最多保留 ${MAX_EXEC_CELLS} 个运行中、待取结果或清理中的 cell；达到上限先 wait 收取结果或终止不用的 cell，不自动杀掉活动任务；此上限不限制单个 exec 内的工具调用总数。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约。外部能力先 tools.tool_search；新方法下一次 exec 才绑定。不要猜名称或参数。
 返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。

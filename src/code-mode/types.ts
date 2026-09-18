@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
+import type { StoreLimits } from "./conversation-store.js";
 
 export type CodeModeToolKind = "function" | "freeform";
 
@@ -63,6 +64,8 @@ export type CodeModeToolResult = CallToolResult;
 
 export interface CodeModeServiceOptions {
   sessionIdleMs?: number;
+  storeLimits?: Partial<StoreLimits>;
+  maxCells?: number;
   defaultExecYieldTimeMs?: number;
   defaultWaitYieldTimeMs?: number;
   hostBinary?: string;

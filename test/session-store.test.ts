@@ -25,7 +25,7 @@ afterEach(async () => {
   await Promise.all(pools.splice(0).map((value) => value.close()));
 });
 
-describe("native session store/load", () => {
+describe("bounded conversation store/load", () => {
   it("shares JSON only within one conversation, across cells and model turns", async () => {
     const value = service();
     await run(value, 'globalThis.transient=7; store("rows", {items:[1,2,3]});');
@@ -101,7 +101,7 @@ describe("native session store/load", () => {
     expect(jsonOutput(await run(value, 'text(load("committed"));'))).toBe(5);
   });
 
-  it("shares a newly opened session during concurrent exec without sharing JS variables", async () => {
+  it("merges concurrent cell writes without sharing JS variables", async () => {
     const value = service();
     await Promise.all([
       run(value, 'store("first",1);globalThis.first=1;'),
@@ -212,7 +212,7 @@ describe("native session store/load", () => {
     ).toContain("kept");
   });
 
-  it("refreshes per-exec tool bindings inside a shared session", async () => {
+  it("refreshes per-exec tool bindings while retaining conversation data", async () => {
     const value = service();
     await value.exec({
       source: 'store("old",await tools.old({}));',
@@ -273,7 +273,7 @@ describe("native session store/load", () => {
 });
 
 describe("session lease ownership", () => {
-  it("deduplicates in-flight opens and closes late openings during shutdown", async () => {
+  it("gives cells distinct native sessions and closes late openings during shutdown", async () => {
     let finish!: (session: CodeModeSession) => void;
     let opens = 0,
       closes = 0;
@@ -297,8 +297,8 @@ describe("session lease ownership", () => {
       },
     } as CodeModeSession);
     await Promise.all([firstCheck, secondCheck, closing]);
-    expect(opens).toBe(1);
-    expect(closes).toBe(1);
+    expect(opens).toBe(2);
+    expect(closes).toBe(2);
   });
 
   it("does not cache a session that failed during its opening handshake", async () => {

@@ -316,6 +316,7 @@ export class CodeModeSession {
       this.#toolStream.cancel();
       this.#cells.clear();
       this.#cancelledInvocations.clear();
+      this.#earlyClosures.clear();
       this.#executions.clear();
     }
     while (this.#toolTasks.size > 0) {

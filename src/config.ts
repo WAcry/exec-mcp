@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 import { configDirectory } from "./host/platform.js";
 import { resolveUserPath } from "./util.js";
 import type { DownstreamMcpServerConfig } from "./downstream/config.js";
+import { FILE_CONFIG_SCHEMA, type FileConfig } from "./files/contracts.js";
 
 const strings = z.record(z.string(), z.string());
 const serverSchema = z
@@ -54,6 +55,7 @@ const downstreamSchema = z
 const configSchema = z
   .object({
     server: serverSchema,
+    files: FILE_CONFIG_SCHEMA.optional(),
     mcp_servers: z.record(z.string().min(1), downstreamSchema).default({}),
   })
   .strict();
@@ -62,6 +64,7 @@ export interface Config {
   port: number;
   access: "openai-tunnel";
   mcpServers: DownstreamMcpServerConfig[];
+  files?: FileConfig;
 }
 export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
 export function defaultConfigPath(): string {
@@ -81,7 +84,7 @@ export function parseConfig(text: string, filename: string): Config {
     throw new Error(
       `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
     );
-  const { server, mcp_servers } = parsed.data;
+  const { server, mcp_servers, files } = parsed.data;
   const mcpServers: DownstreamMcpServerConfig[] = Object.entries(mcp_servers)
     .filter(([, item]) => item.enabled)
     .map(([name, item]) => {
@@ -114,7 +117,7 @@ export function parseConfig(text: string, filename: string): Config {
         ...policy,
       };
     });
-  return { ...server, mcpServers };
+  return { ...server, mcpServers, ...(files === undefined ? {} : { files }) };
 }
 export async function loadConfig(
   filename = defaultConfigPath(),

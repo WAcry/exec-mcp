@@ -39,6 +39,8 @@ export type CodeModeOutputItem =
 
 export interface CodeModeExecRequest {
   source: string;
+  /** 服务端原生附件出口，不是 V8 全局或模型提供的回调。 */
+  takeAttachments?: () => CallToolResult["content"];
   tools: readonly CodeModeToolDefinition[];
   /** Opaque OpenAI conversation scope. It is correlation state, not auth. */
   sessionScope?: string;

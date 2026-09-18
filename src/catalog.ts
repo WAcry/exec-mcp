@@ -1,5 +1,11 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
+import {
+  HOST_FILE_SCHEMA,
+  IMPORT_FILE_SCHEMA,
+  EXPORT_FILE_SCHEMA,
+  REVOKE_FILE_SCHEMA,
+} from "./files/contracts.js";
 
 const ms = (maximum: number, description: string) =>
   z.number().int().min(0).max(maximum).describe(description).optional();
@@ -15,6 +21,12 @@ const tokenBudget = z
 export const EXEC_SCHEMA = z
   .object({
     max_output_tokens: tokenBudget,
+    files: z
+      .array(HOST_FILE_SCHEMA)
+      .optional()
+      .describe(
+        "可选的 ChatGPT 原生文件引用数组；按原顺序原样传入，不填文件名、路径、URL 或内容。宿主绑定为文件对象；JS 用 import_file 的零基 index 选择，不直接访问下载凭据。",
+      ),
     source: z
       .string()
       .min(1)
@@ -176,6 +188,24 @@ interface NativeContract {
 }
 export const NATIVE_CONTRACTS: readonly NativeContract[] = [
   {
+    name: "import_file",
+    schema: IMPORT_FILE_SCHEMA,
+    description:
+      "将本次 exec.files[index] 流式保存到显式 destination，返回 {path,size,sha256}；不会自动下载未使用的文件。默认不覆盖，失败清理临时文件；成功后用返回路径处理文件，不保存或输出下载 URL。",
+  },
+  {
+    name: "export_file",
+    schema: EXPORT_FILE_SCHEMA,
+    description:
+      "显式交付文件快照，返回 {id,name,mime_type,size,sha256,expires_at,uri}。成功后 exec/wait 自动附带原生 resource_link，无需 text()，不受文本预算影响。默认 resource 至多 32 MiB，经本实例私有 MCP 入口 resources/read 获取；url 需配置独立 HTTPS 下载入口，任何持有链接者均可下载。过期失效，不承诺写入 ChatGPT sandbox。",
+  },
+  {
+    name: "revoke_file",
+    schema: REVOKE_FILE_SCHEMA,
+    description:
+      "撤销当前对话的文件导出，返回 {revoked:true}；拒绝新的资源读取和 URL 下载。已开始或已完成的下载不能收回。",
+  },
+  {
     name: "exec_command",
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
@@ -248,6 +278,7 @@ export function bindNative(
   };
 }
 export const EXEC_DESCRIPTION = `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
+附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
 store(key,value)/load(key) 在同一 ChatGPT 对话的不同 exec 间保存/读取 JSON 数据；key 为字符串，未命中返回 undefined。需宿主的 openai/session；缺失时调用报错。数据仅在内存；无活动 cell 且空闲 24 小时或服务/host 重启后丢失。新 cell 读启动快照，写入在完成时合并（脚本报错也可能提交）；load 返回副本，修改后需 store，并发同键非事务。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。

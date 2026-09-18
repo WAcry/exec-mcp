@@ -47,10 +47,11 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 发布必须验证各目标平台的 host、补丁入口和进程清理，不能只检查平台包“存在”。
 具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
 
-不实现 UI、`request_user_input`、内建 Skill 发现/管理、附件导入，
+不实现 UI、`request_user_input`、内建 Skill 发现/管理，
 也不增加 Workspace、子 Agent、持久任务或调度框架。
 需要 Skill 能力时把它当普通下游工具；它不是内核特殊协议。
 原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
+文件传输也由 exec 编排，原生文件绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。
 
 ## 接受的代价
 

@@ -1,6 +1,11 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { McpServer, type ServerContext } from "@modelcontextprotocol/server";
+import {
+  McpServer,
+  ResourceTemplate,
+  type ServerContext,
+  type ResourceLink,
+} from "@modelcontextprotocol/server";
 import { CodeModeService } from "./code-mode/service.js";
 import {
   NATIVE_CONTRACTS,
@@ -23,6 +28,7 @@ import { viewImage } from "./host/image.js";
 import { toolError } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
+import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -35,8 +41,10 @@ export class ExecRuntime {
   readonly patch = new PatchRunner();
   readonly downstream: DownstreamMcpRegistry;
   readonly discovery: ToolDiscovery;
+  readonly artifacts: ArtifactStore;
   private closing: Promise<void> | undefined;
-  constructor(config: Config) {
+  constructor(config: Config, artifacts?: ArtifactStore) {
+    this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
     this.discovery = new ToolDiscovery(this.downstream);
   }
@@ -64,9 +72,23 @@ export class ExecRuntime {
         description: EXEC_DESCRIPTION,
         inputSchema: EXEC_SCHEMA,
         annotations,
-        _meta: { securitySchemes: [{ type: "noauth" }] },
+        _meta: {
+          securitySchemes: [{ type: "noauth" }],
+          "openai/fileParams": ["files"],
+        },
       },
       async (args, context) => {
+        const scope = sessionScope(context);
+        let pending: { id: string; content: ResourceLink }[] = [];
+        let pendingBytes = 0;
+        const takeAttachments = () => {
+          const items = pending
+            .filter((item) => this.artifacts.available(item.id, scope))
+            .map((item) => item.content);
+          pending = [];
+          pendingBytes = 0;
+          return items;
+        };
         try {
           if (!this.ready) throw new Error("服务正在关闭。");
           const signal = context.mcpReq.signal;
@@ -79,6 +101,64 @@ export class ExecRuntime {
           const tools = NATIVE_CONTRACTS.map((contract) =>
             bindNative(contract, async (input, nested) => {
               switch (contract.name) {
+                case "import_file": {
+                  const inputFile = input as {
+                    index: number;
+                    destination: string;
+                    overwrite?: boolean;
+                  };
+                  const file = args.files?.[inputFile.index];
+                  if (!file)
+                    throw new Error(
+                      "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
+                    );
+                  return this.artifacts.importFile(
+                    file,
+                    inputFile.destination,
+                    cwd,
+                    inputFile.overwrite,
+                    nested.signal,
+                  );
+                }
+                case "export_file": {
+                  if (pendingBytes + 4096 > 1024 * 1024)
+                    throw new Error(
+                      "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
+                    );
+                  const file = input as {
+                    path: string;
+                    name?: string;
+                    delivery?: "resource" | "url";
+                  };
+                  const exported = await this.artifacts.exportFile(
+                    file.path,
+                    cwd,
+                    scope,
+                    file.delivery,
+                    file.name,
+                    nested.signal,
+                  );
+                  const bytes = Buffer.byteLength(
+                    JSON.stringify(exported.content),
+                  );
+                  if (pendingBytes + bytes > 1024 * 1024) {
+                    await this.artifacts.revoke(exported.info.id, scope);
+                    throw new Error(
+                      "文件链接元数据超出单次响应预算；本次导出已撤销。",
+                    );
+                  }
+                  pending.push({
+                    id: exported.info.id,
+                    content: exported.content,
+                  });
+                  pendingBytes += bytes;
+                  return exported.info;
+                }
+                case "revoke_file":
+                  return this.artifacts.revoke(
+                    (input as { id: string }).id,
+                    scope,
+                  );
                 case "exec_command":
                   return this.terminal.execCommand(
                     input as ExecCommandInput,
@@ -112,9 +192,9 @@ export class ExecRuntime {
               }
             }),
           );
-          const scope = sessionScope(context);
           return await this.codeMode.exec({
             source: args.source,
+            takeAttachments,
             ...(args.max_output_tokens === undefined
               ? {}
               : { maxOutputTokens: args.max_output_tokens }),
@@ -126,7 +206,9 @@ export class ExecRuntime {
             signal,
           });
         } catch (error) {
-          return toolError(error);
+          const result = toolError(error);
+          result.content.push(...takeAttachments());
+          return result;
         }
       },
     );
@@ -161,6 +243,22 @@ export class ExecRuntime {
         }
       },
     );
+    server.registerResource(
+      "exported-file",
+      new ResourceTemplate(`${ARTIFACT_URI_PREFIX}{id}`, { list: undefined }),
+      {
+        title: "已导出的文件",
+        description:
+          "显式导出的短期文件快照；不列出目录，通过本实例私有 MCP 入口读取。",
+        cacheHint: { ttlMs: 0, cacheScope: "private" },
+      },
+      async (uri, _variables, context) =>
+        this.artifacts.readResource(
+          uri.href,
+          sessionScope(context),
+          context.mcpReq.signal,
+        ),
+    );
     return server;
   }
   close(): Promise<void> {
@@ -170,6 +268,7 @@ export class ExecRuntime {
         this.terminal.close(),
         this.patch.close(),
         this.downstream.close(),
+        this.artifacts.close(),
       ]);
       const errors = results.filter((result) => result.status === "rejected");
       if (errors.length)

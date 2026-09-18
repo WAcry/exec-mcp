@@ -17,16 +17,32 @@ import type { Config } from "./config.js";
 import { ExecRuntime } from "./runtime.js";
 import { LegacySessionRouter } from "./http/legacy.js";
 import { MAX_PAYLOAD_BYTES } from "./limits.js";
+import { startDownloadGateway } from "./files/gateway.js";
+import type { ArtifactStore } from "./files/artifacts.js";
 
 export async function startServer(
   config: Config,
-): Promise<{ url: string; runtime: ExecRuntime; close(): Promise<void> }> {
+  options: { artifacts?: ArtifactStore } = {},
+): Promise<{
+  url: string;
+  downloadAddress?: string;
+  runtime: ExecRuntime;
+  close(): Promise<void>;
+}> {
   if (
     !["127.0.0.1", "::1"].includes(config.host) ||
     config.access !== "openai-tunnel"
   )
     throw new Error("首版只允许明确配置的 OpenAI 私有 Tunnel 与本机回环入口。");
-  const runtime = new ExecRuntime(config);
+  const runtime = new ExecRuntime(config, options.artifacts);
+  let downloads: Awaited<ReturnType<typeof startDownloadGateway>> | undefined;
+  try {
+    if (runtime.artifacts.config.download)
+      downloads = await startDownloadGateway(runtime.artifacts);
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
   const onerror = (): void => {
     // Never print SDK error payloads: they may include credentials or user input.
     console.error("MCP 传输出现异常；检查客户端连接与本机就绪状态。");
@@ -103,13 +119,19 @@ export async function startServer(
       });
     });
   } catch (error) {
-    await Promise.allSettled([modern.close(), legacy.close(), runtime.close()]);
+    await Promise.allSettled([
+      modern.close(),
+      legacy.close(),
+      runtime.close(),
+      downloads?.close(),
+    ]);
     throw error;
   }
   const address = server.address() as AddressInfo;
   return {
     url: `http://${config.host === "::1" ? "[::1]" : config.host}:${address.port}/mcp`,
     runtime,
+    ...(downloads === undefined ? {} : { downloadAddress: downloads.address }),
     close() {
       closing ??= (async () => {
         const stopped = new Promise<void>((resolve, reject) =>
@@ -119,6 +141,7 @@ export async function startServer(
           modern.close(),
           legacy.close(),
           runtime.close(),
+          downloads?.close(),
         ]);
         server.closeAllConnections();
         await stopped;

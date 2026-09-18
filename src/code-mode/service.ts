@@ -42,6 +42,7 @@ interface CellOwner {
   session: CodeModeSession;
   observer: CancellableMutex;
   lease: SessionLease;
+  takeAttachments?: CodeModeExecRequest["takeAttachments"];
 }
 
 interface InvalidatedCell {
@@ -154,11 +155,18 @@ export class CodeModeService {
         tools: request.tools,
         yieldTimeMs,
       });
-      const outcome = this.#trackOutcome(lease, scope, hostOutcome);
+      const outcome = this.#trackOutcome(
+        lease,
+        scope,
+        hostOutcome,
+        undefined,
+        request.takeAttachments,
+      );
       return await this.#modelResult(
         outcome,
         elapsedSeconds(startedAt),
         maxOutputTokens,
+        request.takeAttachments,
       );
     } catch (error) {
       lease.release();
@@ -203,11 +211,13 @@ export class CodeModeService {
         owner.scope,
         hostOutcome,
         request.cellId,
+        owner.takeAttachments,
       );
       return this.#modelResult(
         outcome,
         elapsedSeconds(startedAt),
         request.maxTokens,
+        owner.takeAttachments,
       );
     };
     if (request.terminate === true) return observe();
@@ -284,6 +294,7 @@ export class CodeModeService {
     scope: string | undefined,
     outcome: RuntimeOutcome,
     publicCellId?: string,
+    takeAttachments?: CodeModeExecRequest["takeAttachments"],
   ): RuntimeOutcome {
     const session = lease.session;
     if (outcome.state === "yielded") {
@@ -296,6 +307,7 @@ export class CodeModeService {
         ...(scope === undefined ? {} : { scope }),
         session,
         lease,
+        ...(takeAttachments === undefined ? {} : { takeAttachments }),
       });
       return { ...outcome, cellId: handle };
     } else {
@@ -314,7 +326,9 @@ export class CodeModeService {
     outcome: RuntimeOutcome,
     wallTimeSeconds: number,
     maxTokens?: number,
+    takeAttachments?: CodeModeExecRequest["takeAttachments"],
   ): Promise<CodeModeToolResult> {
+    const attachments = takeAttachments?.() ?? [];
     const items: CodeModeOutputItem[] = [...outcome.items];
     if (outcome.state === "completed" && outcome.errorText !== undefined) {
       items.push({ type: "text", text: `Script error:\n${outcome.errorText}` });
@@ -326,10 +340,13 @@ export class CodeModeService {
         (budgeted.truncated
           ? `文本已按 ${maxTokens} token 预算截断；后续 wait 不补发被省略内容。\n`
           : "");
-      return outputItemsToCallToolResult(
+      const result = outputItemsToCallToolResult(
         [{ type: "text", text: status }, ...budgeted.items],
         outcome.state === "completed" && outcome.errorText !== undefined,
       );
+      result.content.push(...attachments);
+      encodePayload(result);
+      return result;
     } catch (error) {
       this.#discardUnrepresentableCell(outcome);
       return {
@@ -338,6 +355,7 @@ export class CodeModeService {
             type: "text",
             text: `结果不可交付；操作可能已生效，请勿自动重试。${error instanceof Error ? error.message : String(error)}`,
           },
+          ...attachments,
         ],
         isError: true,
       };

@@ -179,8 +179,30 @@ try {
     ).length,
     1,
   );
+  const exported = await scopedCall(
+    'const file = await tools.export_file({path:"smoke.txt"}); store("export-id",file.id);',
+    { workdir: project, max_output_tokens: 0 },
+  );
+  assert.ok(!exported.isError, JSON.stringify(exported));
+  const fileLink = exported.content.find(
+    (block) => block.type === "resource_link",
+  );
+  assert.ok(fileLink, "packaged server omitted the native resource link");
+  const resource = await client.readResource({
+    uri: fileLink.uri,
+    _meta: { "openai/session": "package-smoke-conversation" },
+  });
+  assert.equal(
+    Buffer.from(resource.contents[0].blob, "base64").toString("utf8"),
+    "packaged runtime works\n",
+  );
+  const revoked = await scopedCall(
+    'await tools.revoke_file({id:load("export-id")});',
+  );
+  assert.ok(!revoked.isError, JSON.stringify(revoked));
+  await assert.rejects(client.readResource({ uri: fileLink.uri }));
   console.log(
-    "PASS: 独立 tarball 安装、CLI 初始化、固定 V8 探针、MCP 两工具目录、真实补丁、跨 exec 存储、输出预算和图片说明。",
+    "PASS: 独立 tarball 安装、CLI、固定 V8、两工具目录、补丁、跨 exec 存储、输出预算、图片说明，以及原生文件资源读取与撤销。",
   );
 } finally {
   await client?.close();

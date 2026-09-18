@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/client";
-import { connect, cellId, jsonOutput, nodeCommand, texts } from "./helpers.js";
+import {
+  connect,
+  cellId,
+  jsonOutput,
+  nodeCommand,
+  observeTerminal,
+  texts,
+} from "./helpers.js";
+import type { TerminalResult } from "../src/host/terminal.js";
 import { startServer } from "../src/server.js";
 import type { DownstreamMcpServerConfig } from "../src/downstream/config.js";
 import { createDownstreamCodeName } from "../src/downstream/registry.js";
@@ -86,7 +94,7 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
       "created\n",
     );
     const command = nodeCommand(
-      'process.stdin.once("data",x=>{process.stdout.write(x);process.exit(0)})',
+      'process.stdin.once("data",x=>process.stdout.write(x,()=>process.exit(0)))',
     );
     const first = await exec(
       client,
@@ -98,7 +106,18 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
       client,
       `text(await tools.write_stdin({session_id:${JSON.stringify(id)},chars:"ok",yield_time_ms:3000}));`,
     );
-    expect(jsonOutput(last)).toMatchObject({ output: "ok", exit_code: 0 });
+    const completed = await observeTerminal(
+      jsonOutput<TerminalResult>(last),
+      async (input) => {
+        const result = await exec(
+          client,
+          `text(await tools.write_stdin(${JSON.stringify(input)}));`,
+        );
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        return jsonOutput<TerminalResult>(result);
+      },
+    );
+    expect(completed).toMatchObject({ output: "ok", exit_code: 0 });
   });
   it("returns progress and final output through the wait tool", async () => {
     const { client } = await connection({}, legacy);

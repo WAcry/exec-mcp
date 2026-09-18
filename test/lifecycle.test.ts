@@ -7,7 +7,7 @@ import { CodeModeService } from "../src/code-mode/service.js";
 import { TerminalManager } from "../src/host/terminal.js";
 import { PatchRunner } from "../src/host/patch.js";
 import { viewImage } from "../src/host/image.js";
-import { cellId, nodeCommand, texts } from "./helpers.js";
+import { cellId, nodeCommand, observeTerminal, texts } from "./helpers.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -59,7 +59,7 @@ describe("real execution lifecycle boundaries", () => {
             const result = await terminal.execCommand(
               {
                 cmd: nodeCommand(
-                  'process.stdin.once("data",x=>{process.stdout.write(x);process.exit(0)})',
+                  'process.stdin.once("data",x=>process.stdout.write(x,()=>process.exit(0)))',
                 ),
                 yield_time_ms: 0,
               },
@@ -91,33 +91,32 @@ describe("real execution lifecycle boundaries", () => {
     await start;
     await service.wait({ cellId: cellId(first), terminate: true });
     expect(aborted).toBe(true);
-    const result = await terminal.writeStdin({
+    const part = await terminal.writeStdin({
       session_id: sessionId,
       chars: "still alive",
       yield_time_ms: 3000,
     });
+    const result = await observeTerminal(part, (input) =>
+      terminal.writeStdin(input),
+    );
     expect(result.output).toBe("still alive");
+    expect(result.exit_code).toBe(0);
   });
   it("uses flow control to retain unread terminal bytes rather than dropping them", async () => {
     const terminal = new TerminalManager(32 * 1024, 8 * 1024);
     cleanup.push(() => terminal.close());
-    let result = await terminal.execCommand(
+    const first = await terminal.execCommand(
       {
         cmd: nodeCommand('process.stdout.write("x".repeat(2*1024*1024))'),
         yield_time_ms: 100,
       },
       tmpdir(),
     );
-    let output = result.output;
-    for (let i = 0; result.session_id && i < 50; i++) {
-      result = await terminal.writeStdin({
-        session_id: result.session_id,
-        yield_time_ms: 100,
-      });
-      output += result.output;
-    }
+    const result = await observeTerminal(first, (input) =>
+      terminal.writeStdin(input),
+    );
     expect(result.exit_code).toBe(0);
-    expect(output).toBe("x".repeat(2 * 1024 * 1024));
+    expect(result.output).toBe("x".repeat(2 * 1024 * 1024));
   });
   it("does not serialize away distinct native media or its detail", async () => {
     const file = path.join(await directory(), "one.png");

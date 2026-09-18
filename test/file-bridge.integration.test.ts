@@ -314,7 +314,9 @@ describe("isolated downloadable files endpoint", () => {
       (read.contents[0] as { blob: string }).blob,
       "base64",
     );
-    expect(returned).toEqual(bytes);
+    // Vitest's generic deep equality enumerates millions of Buffer properties;
+    // use exact native byte equality, not a slower or weaker content assertion.
+    expect(returned.equals(bytes)).toBe(true);
   });
   it("streams a file larger than the resource limit over the separate URL gateway", async () => {
     const t = await setup(false, true);

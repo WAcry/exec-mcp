@@ -1,15 +1,17 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { TerminalManager } from "../src/host/terminal.js";
 import { PatchRunner } from "../src/host/patch.js";
-import { nodeCommand } from "./helpers.js";
+import { nodeCommand, observeTerminal } from "./helpers.js";
 const terminals: TerminalManager[] = [];
 const patches: PatchRunner[] = [];
 const directories: string[] = [];
 async function directory(): Promise<string> {
-  const value = await mkdtemp(path.join(tmpdir(), "exec mcp 测试-"));
+  const value = await realpath(
+    await mkdtemp(path.join(tmpdir(), "exec mcp 测试-")),
+  );
   directories.push(value);
   return value;
 }
@@ -28,15 +30,50 @@ afterEach(async () => {
   );
 });
 describe("real local processes", () => {
+  it("returns newly produced output while a pipe is still waiting for more input", async () => {
+    const value = terminal();
+    const first = await value.execCommand(
+      {
+        cmd: nodeCommand(
+          'process.stdin.on("data",()=>process.stdout.write("progress"));process.stdin.on("end",()=>process.stdout.write("done"));',
+        ),
+        yield_time_ms: 0,
+      },
+      await directory(),
+    );
+    const start = performance.now();
+    const progress = await value.writeStdin({
+      session_id: first.session_id!,
+      chars: "go",
+      yield_time_ms: 10_000,
+    });
+    expect(progress.output).toBe("progress");
+    expect(progress.session_id).toBe(first.session_id);
+    expect(progress.exit_code).toBeUndefined();
+    expect(performance.now() - start).toBeLessThan(8000);
+    const part = await value.writeStdin({
+      session_id: progress.session_id!,
+      close_stdin: true,
+    });
+    const complete = await observeTerminal(part, (input) =>
+      value.writeStdin(input),
+    );
+    expect(complete.output).toBe("done");
+    expect(complete.exit_code).toBe(0);
+  });
   it("executes under the requested directory and retains exit status", async () => {
     const cwd = await directory();
-    const result = await terminal().execCommand(
+    const value = terminal();
+    const first = await value.execCommand(
       {
         cmd: nodeCommand(
           'process.stdout.write(process.cwd()); process.stderr.write("\\nerr"); process.exitCode=7;',
         ),
       },
       cwd,
+    );
+    const result = await observeTerminal(first, (input) =>
+      value.writeStdin(input),
     );
     expect(result.output).toContain(cwd);
     expect(result.output).toContain("err");
@@ -55,12 +92,16 @@ describe("real local processes", () => {
       cwd,
     );
     expect(first.session_id).toBeDefined();
-    const result = await value.writeStdin({
+    const part = await value.writeStdin({
       session_id: first.session_id!,
       chars: "hello😀",
       close_stdin: true,
       yield_time_ms: 3000,
     });
+    const result = await observeTerminal(
+      { ...part, output: first.output + part.output },
+      (input) => value.writeStdin(input),
+    );
     expect(result.output).toBe("hello😀");
     expect(result.exit_code).toBe(0);
   });
@@ -70,18 +111,11 @@ describe("real local processes", () => {
       { cmd: nodeCommand('process.stdout.write("汉😀".repeat(350000))') },
       await directory(),
     );
-    let output = first.output;
-    let id = first.session_id;
-    for (let count = 0; id && count < 30; count++) {
-      const part = await value.writeStdin({
-        session_id: id,
-        yield_time_ms: 1000,
-      });
-      output += part.output;
-      id = part.session_id;
-    }
-    expect(id).toBeUndefined();
-    expect(output).toBe("汉😀".repeat(350000));
+    const result = await observeTerminal(first, (input) =>
+      value.writeStdin(input),
+    );
+    expect(result.exit_code).toBe(0);
+    expect(result.output).toBe("汉😀".repeat(350000));
   });
   it("terminates an owned process and yields a final result", async () => {
     const value = terminal();
@@ -101,7 +135,7 @@ describe("real local processes", () => {
     const first = await value.execCommand(
       {
         cmd: nodeCommand(
-          'console.log("READY");process.stdin.once("data",x=>{console.log("GOT:"+x.toString().trim());process.exit(0)})',
+          'console.log("READY");let line="";process.stdin.on("data",x=>{line+=x;if(/[\\r\\n]/.test(line)){process.stdin.pause();process.stdout.write("GOT:"+line.trim()+"\\n",()=>process.exit(0));}})',
         ),
         tty: true,
         yield_time_ms: 500,
@@ -109,22 +143,24 @@ describe("real local processes", () => {
       await directory(),
     );
     expect(first.session_id).toBeDefined();
-    let result = await value.writeStdin({
-      session_id: first.session_id!,
+    const ready = await observeTerminal(
+      first,
+      (input) => value.writeStdin(input),
+      (result) => result.output.includes("READY"),
+    );
+    expect(ready.session_id).toBeDefined();
+    const part = await value.writeStdin({
+      session_id: ready.session_id!,
       chars: "hello\r",
       cols: 80,
       rows: 24,
       yield_time_ms: 2000,
     });
-    let output = result.output;
-    if (result.session_id) {
-      result = await value.writeStdin({
-        session_id: result.session_id,
-        yield_time_ms: 2000,
-      });
-      output += result.output;
-    }
-    expect(output).toContain("GOT:hello");
+    const result = await observeTerminal(part, (input) =>
+      value.writeStdin(input),
+    );
+    expect(result.output).toContain("GOT:hello");
+    expect(result.exit_code).toBe(0);
   });
 });
 describe("pinned freeform patch engine", () => {

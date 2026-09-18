@@ -45,6 +45,7 @@ interface Session {
   mutex: AsyncMutex;
   done: Promise<number>;
   finish(code: number): void;
+  outputReady?: () => void;
   exitCode?: number;
   terminating?: Promise<void>;
 }
@@ -112,6 +113,7 @@ export class TerminalManager {
       if (session.exitCode !== undefined) return;
       session.exitCode = code;
       session.finish(code);
+      session.outputReady?.();
     };
     if (backend.kind === "pipe") {
       const child = backend.process;
@@ -186,12 +188,20 @@ export class TerminalManager {
       }
       // Existing unread output is useful immediately, even for a long requested wait.
       if (session.bytes === 0 && session.exitCode === undefined) {
-        await waitUntil(
-          session.done,
-          input.yield_time_ms ??
-            (input.chars || input.close_stdin ? 250 : 110_000),
-          signal,
-        );
+        try {
+          // A live process may be waiting for more input, or blocked by our output
+          // high-water mark. New output must wake the reader before process exit.
+          await waitUntil(
+            new Promise<void>((resolve) => {
+              session.outputReady = resolve;
+            }),
+            input.yield_time_ms ??
+              (input.chars || input.close_stdin ? 250 : 110_000),
+            signal,
+          );
+        } finally {
+          delete session.outputReady;
+        }
       }
       return this.collect(session, started);
     });
@@ -220,6 +230,7 @@ export class TerminalManager {
     session.chunks.push(chunk);
     session.bytes += chunk.length;
     this.unread += chunk.length;
+    session.outputReady?.();
     this.backpressure();
   }
   private collect(session: Session, started: number): TerminalResult {

@@ -185,6 +185,55 @@ try {
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
+  // Verify native PTY after a clean tarball installation, not only in the checkout.
+  const processFixture = path.join(project, "process fixture.cjs");
+  await writeFile(
+    processFixture,
+    'console.log("PROCESS_READY");let line="";process.stdin.on("data",chunk=>{line+=chunk;if(/[\\r\\n]/.test(line)){process.stdin.pause();process.stdout.write("PROCESS_REPLY:"+line.trim()+"\\n",()=>process.exit(0));}});',
+  );
+  const quote = (value) =>
+    `'${value.replaceAll("'", process.platform === "win32" ? "''" : "'\\''")}'`;
+  const command = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(processFixture)}${process.platform === "win32" ? "; exit $LASTEXITCODE" : ""}`;
+  const terminalCall = async (source) => {
+    const result = await scopedCall(source, { workdir: project });
+    assert.ok(!result.isError, JSON.stringify(result));
+    const body = result.content.findLast(
+      (block) => block.type === "text" && block.text.startsWith("{"),
+    );
+    assert.ok(body, JSON.stringify(result));
+    return JSON.parse(body.text);
+  };
+  for (const tty of [false, true]) {
+    let part = await terminalCall(
+      `text(await tools.exec_command({cmd:${JSON.stringify(command)},tty:${tty},yield_time_ms:0}));`,
+    );
+    let output = part.output;
+    const deadline = Date.now() + 30_000;
+    while (!output.includes("PROCESS_READY")) {
+      assert.ok(
+        part.session_id && Date.now() < deadline,
+        JSON.stringify({ part, output }),
+      );
+      part = await terminalCall(
+        `text(await tools.write_stdin({session_id:${JSON.stringify(part.session_id)},yield_time_ms:1000}));`,
+      );
+      output += part.output;
+    }
+    assert.ok(part.session_id);
+    part = await terminalCall(
+      `text(await tools.write_stdin({session_id:${JSON.stringify(part.session_id)},chars:${JSON.stringify(tty ? "smoke\r" : "smoke\n")},yield_time_ms:1000}));`,
+    );
+    output += part.output;
+    while (part.session_id) {
+      assert.ok(Date.now() < deadline, JSON.stringify({ part, output }));
+      part = await terminalCall(
+        `text(await tools.write_stdin({session_id:${JSON.stringify(part.session_id)},yield_time_ms:1000}));`,
+      );
+      output += part.output;
+    }
+    assert.equal(part.exit_code, 0);
+    assert.match(output, /PROCESS_REPLY:smoke/);
+  }
   const undefinedStore = await scopedCall(
     'store("nullable",null);try{store("nullable",undefined)}catch(error){text(String(error));}text({value:load("nullable")});',
   );
@@ -252,7 +301,7 @@ try {
   assert.ok(!revoked.isError, JSON.stringify(revoked));
   await assert.rejects(client.readResource({ uri: fileLink.uri }));
   console.log(
-    "PASS: 独立 tarball 安装、CLI、固定 V8、两工具目录、补丁、跨 exec 存储、输出预算、图片说明、文件资源，以及 Skill 发现与显式调用策略。",
+    "PASS: 独立 tarball 安装、CLI、原生管道和 PTY、固定 V8、补丁、存储、输出预算、媒体、文件资源及 Skill 发现。",
   );
 } finally {
   await client?.close();

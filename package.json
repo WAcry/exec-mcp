@@ -36,7 +36,8 @@
     "node-pty": "1.1.0",
     "zod": "4.4.3",
     "ajv": "8.17.1",
-    "ajv-formats": "3.0.1"
+    "ajv-formats": "3.0.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/node": "22.19.11",

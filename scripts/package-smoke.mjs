@@ -125,6 +125,40 @@ try {
   );
   const project = path.join(temporary, "project with spaces");
   await mkdir(project);
+  const skillDirectory = path.join(
+    project,
+    ".agents",
+    "skills",
+    "packaged-skill",
+  );
+  await mkdir(path.join(skillDirectory, "agents"), { recursive: true });
+  await writeFile(
+    path.join(skillDirectory, "SKILL.md"),
+    "---\nname: packaged-skill\ndescription: PRIVATE_PACKAGED_TRIGGER\n---\nPRIVATE_PACKAGED_BODY\n",
+  );
+  await writeFile(
+    path.join(skillDirectory, "agents", "openai.yaml"),
+    "policy:\n  allow_implicit_invocation: false\n",
+  );
+  const skillsResult = await client.callTool({
+    name: "exec",
+    arguments: {
+      workdir: project,
+      source: "text(await tools.list_skills({}));",
+    },
+  });
+  assert.ok(!skillsResult.isError, JSON.stringify(skillsResult));
+  const skillsText = skillsResult.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  assert.match(skillsText, /packaged-skill/);
+  assert.match(skillsText, /仅用户明确要求使用/);
+  assert.doesNotMatch(
+    skillsText,
+    /PRIVATE_PACKAGED_TRIGGER|PRIVATE_PACKAGED_BODY/,
+  );
+  assert.equal(skillsResult.structuredContent, undefined);
   const patch =
     "*** Begin Patch\n*** Add File: smoke.txt\n+packaged runtime works\n*** End Patch\n";
   const result = await client.callTool({
@@ -202,7 +236,7 @@ try {
   assert.ok(!revoked.isError, JSON.stringify(revoked));
   await assert.rejects(client.readResource({ uri: fileLink.uri }));
   console.log(
-    "PASS: 独立 tarball 安装、CLI、固定 V8、两工具目录、补丁、跨 exec 存储、输出预算、图片说明，以及原生文件资源读取与撤销。",
+    "PASS: 独立 tarball 安装、CLI、固定 V8、两工具目录、补丁、跨 exec 存储、输出预算、图片说明、文件资源，以及 Skill 发现与显式调用策略。",
   );
 } finally {
   await client?.close();

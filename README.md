@@ -71,6 +71,36 @@ stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
 配置修改后重启 exec-mcp。配置可能含凭据，不要提交、分享或复制到对话中。
 
+## Skills
+
+助手可一次发现机器上已有的 Skill 名称、用途和全文路径，匹配任务后再读取完整 `SKILL.md`，
+不会提前把所有正文、脚本和参考资料放进上下文。它不是 Skill 安装器，也不替代项目指令。
+默认发现 `~/.agents/skills/` 和 `~/.codex/skills/`；指定项目路径时，还会发现从当前目录到最近
+Git 根目录的 `.agents/skills/`，支持 Git worktree。没有 Git 根时只检查指定目录自身。
+支持目录和文件软链接；返回真实路径，多个链接指向同一文件只列一次，同名不同文件都保留。
+
+目录默认目标为 **40,000 个 Unicode 字符，约 10,000 tokens**，可在自己的配置里调整：
+
+```toml
+[skills]
+max_chars = 40000
+```
+
+这是字符预算，不是精确模型 Token 数。目录较大时先无损缩短公共路径，再公平保留用途描述的前缀。
+名称、可还原的全文路径和调用策略不截短；如果仅这些信息就超过目标，会明确说明并保留完整目录，
+不以分页或搜索隐藏部分 Skill。修改配置后重启自己的 exec-mcp；Skill 文件修改本身不需要重启，重新发现即可。
+
+不希望助手按任务自行启用某个流程时，在该 Skill 的 `agents/openai.yaml` 中设置：
+
+```yaml
+policy:
+  allow_implicit_invocation: false
+```
+
+这类 Skill 只列名称和路径，标注“仅用户明确要求使用”，不展示触发描述；策略读取或解析失败也采用这一保守方式并警告。
+这是对助手的调用指引，不是限制 Shell 文件访问的安全沙箱。不读取 Codex 的其他配置、插件或启停列表。
+开始使用或切换项目时可直接要求助手先发现 Skills；实际是否遵循指引仍取决于模型。
+
 ## 连接 ChatGPT
 
 首版只使用 **OpenAI Secure MCP Tunnel**，不支持无认证的公网访问。

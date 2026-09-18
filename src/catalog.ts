@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
+import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
 import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
@@ -154,6 +155,17 @@ export const SEARCH_SCHEMA = z
   })
   .strict();
 const PATCH_SCHEMA = z.string().min(1);
+const SKILL_SCHEMA = z
+  .object({
+    workdir: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "项目发现起点；相对 exec.workdir 解析。省略时继承显式的 exec.workdir，否则只列用户级 Skills。",
+      ),
+  })
+  .strict();
 const TERMINAL_OUTPUT = {
   type: "object",
   properties: {
@@ -188,6 +200,12 @@ interface NativeContract {
   freeform?: boolean;
 }
 export const NATIVE_CONTRACTS: readonly NativeContract[] = [
+  {
+    name: "list_skills",
+    schema: SKILL_SCHEMA,
+    output: { type: "string" },
+    description: `实时返回 Skill 目录文本，用 text(result) 一次输出。始终扫描 ~/.agents/skills、~/.codex/skills；有 workdir 时加上从该目录到最近 Git 根的 .agents/skills，无 Git 根时只检查该目录。跟随软链接，按真实路径去重，同名不同文件都保留；不返回正文。按 [skills] max_chars 压缩，默认 ${DEFAULT_SKILL_MAX_CHARS} Unicode 字符（约 10000 tokens）；路径可无损展开，描述公平保留前缀，名称/路径/策略超出目标也不隐藏条目。仅显式 Skill 不展示触发描述；只在用户明确要求使用该项时读全文，“不要使用”或其他文档推荐不算授权。勿另设过小的 exec.max_output_tokens 截断目录。`,
+  },
   {
     name: "import_file",
     schema: IMPORT_FILE_SCHEMA,
@@ -279,6 +297,7 @@ export function bindNative(
   };
 }
 export const EXEC_DESCRIPTION = `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
+首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出完整目录；匹配任务后用 exec_command 读取其真实路径的完整 SKILL.md 再执行。目录仍在上下文中时无需重复列出；仅显式 Skill 必须由用户明确要求使用，不能按任务相似性或其他文档推荐自行读取。
 附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
 store(key,value)/load(key) 直接使用 Codex 原生的对话内存存储，不另设存储配额。key 为字符串，未命中返回 undefined；需宿主的 openai/session，缺失时调用报错。所有 cell 收尾且空闲 ${SESSION_IDLE_MS / 3_600_000} 小时，或服务/host 重启后数据丢失。新 cell 读启动快照，host 完成时合并写入，不依赖外层 wait 收取；脚本报错也可能提交。load 返回副本，修改后需 store，并发同键非事务；大数据或长期数据用文件。

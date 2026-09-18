@@ -6,4 +6,10 @@ Codex Code Mode host 和 patch engine 来自固定版本的 `@openai/codex`，
 [OpenAI Codex](https://github.com/openai/codex)。
 
 Code Mode 的 gRPC 适配与部分测试基于同一作者此前的 codex-mcp 实现重构。
+Skill 目录的公平描述预算与路径别名算法参考并改写自 OpenAI Codex
+`7498521d288b9b3b96ffba4eedf089d8d6e06a84` 的
+[`render.rs`](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/render.rs) 和
+[`aliases.rs`](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/aliases.rs)。
+这些参考代码遵循 [Apache-2.0](proto/LICENSE)，相关源码属于 OpenAI Codex 贡献者；
+本项目只移植必要算法并调整调用策略、预算回退与路径发现，不修改或重新分发一份 Skill Loader 二进制。
 其他依赖的许可证保留于各自软件包中。本项目尚未决定公开发布许可。

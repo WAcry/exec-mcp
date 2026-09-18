@@ -11,6 +11,28 @@ import { configDirectory, shellInvocation } from "../src/host/platform.js";
 import { codexTarget } from "../src/codex-package.js";
 
 describe("configuration and platform boundaries", () => {
+  it("accepts a configurable Skill character budget with a 40000 default and rejects ambiguous knobs", () => {
+    expect(
+      parseConfig(CONFIG_TEMPLATE + "\n[skills]\n", "config.toml").skills,
+    ).toEqual({ max_chars: 40000 });
+    expect(
+      parseConfig(
+        CONFIG_TEMPLATE + "\n[skills]\nmax_chars=80000\n",
+        "config.toml",
+      ).skills,
+    ).toEqual({ max_chars: 80000 });
+    for (const entry of [
+      "max_chars=0",
+      "max_chars=-1",
+      "max_chars=1.5",
+      'max_chars="40000"',
+      "max_tokens=10000",
+      "max_chars=9007199254740992",
+    ])
+      expect(() =>
+        parseConfig(CONFIG_TEMPLATE + `\n[skills]\n${entry}\n`, "config.toml"),
+      ).toThrow("skills");
+  });
   it("requires an explicit private-tunnel trust mode", () => {
     expect(() => parseConfig("[server]\nport=8891", "config.toml")).toThrow(
       "配置字段",

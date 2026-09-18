@@ -29,6 +29,8 @@ import { toolError } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
+import { listSkills } from "./skills/index.js";
+import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -43,7 +45,9 @@ export class ExecRuntime {
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
   private closing: Promise<void> | undefined;
+  private readonly skillMaxChars: number;
   constructor(config: Config, artifacts?: ArtifactStore) {
+    this.skillMaxChars = config.skills?.max_chars ?? DEFAULT_SKILL_MAX_CHARS;
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
     this.discovery = new ToolDiscovery(this.downstream);
@@ -101,6 +105,20 @@ export class ExecRuntime {
           const tools = NATIVE_CONTRACTS.map((contract) =>
             bindNative(contract, async (input, nested) => {
               switch (contract.name) {
+                case "list_skills": {
+                  const requested = (input as { workdir?: string }).workdir;
+                  const workdir =
+                    requested === undefined
+                      ? args.workdir === undefined
+                        ? undefined
+                        : cwd
+                      : resolveUserPath(requested, cwd);
+                  return listSkills({
+                    ...(workdir === undefined ? {} : { workdir }),
+                    maxChars: this.skillMaxChars,
+                    signal: nested.signal,
+                  });
+                }
                 case "import_file": {
                   const inputFile = input as {
                     index: number;

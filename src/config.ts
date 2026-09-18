@@ -6,6 +6,11 @@ import { configDirectory } from "./host/platform.js";
 import { resolveUserPath } from "./util.js";
 import type { DownstreamMcpServerConfig } from "./downstream/config.js";
 import { FILE_CONFIG_SCHEMA, type FileConfig } from "./files/contracts.js";
+import {
+  SKILLS_CONFIG_SCHEMA,
+  DEFAULT_SKILL_MAX_CHARS,
+  type SkillsConfig,
+} from "./skills/types.js";
 
 const strings = z.record(z.string(), z.string());
 const serverSchema = z
@@ -56,6 +61,7 @@ const configSchema = z
   .object({
     server: serverSchema,
     files: FILE_CONFIG_SCHEMA.optional(),
+    skills: SKILLS_CONFIG_SCHEMA.optional(),
     mcp_servers: z.record(z.string().min(1), downstreamSchema).default({}),
   })
   .strict();
@@ -65,8 +71,9 @@ export interface Config {
   access: "openai-tunnel";
   mcpServers: DownstreamMcpServerConfig[];
   files?: FileConfig;
+  skills?: SkillsConfig;
 }
-export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
+export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
 export function defaultConfigPath(): string {
   return (
     process.env.EXEC_MCP_CONFIG ?? path.join(configDirectory(), "config.toml")
@@ -84,7 +91,7 @@ export function parseConfig(text: string, filename: string): Config {
     throw new Error(
       `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
     );
-  const { server, mcp_servers, files } = parsed.data;
+  const { server, mcp_servers, files, skills } = parsed.data;
   const mcpServers: DownstreamMcpServerConfig[] = Object.entries(mcp_servers)
     .filter(([, item]) => item.enabled)
     .map(([name, item]) => {
@@ -117,7 +124,12 @@ export function parseConfig(text: string, filename: string): Config {
         ...policy,
       };
     });
-  return { ...server, mcpServers, ...(files === undefined ? {} : { files }) };
+  return {
+    ...server,
+    mcpServers,
+    ...(files === undefined ? {} : { files }),
+    ...(skills === undefined ? {} : { skills }),
+  };
 }
 export async function loadConfig(
   filename = defaultConfigPath(),

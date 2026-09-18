@@ -1,6 +1,8 @@
 import { chmod, lstat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** node-pty 1.1.0 ships macOS spawn-helper as 0644 (microsoft/node-pty#850).
  * Repair only this installed dependency's regular helper files, including source builds.
@@ -41,6 +43,15 @@ export async function fixNodePtyPermissions(
     );
 }
 
-if (import.meta.main) {
+let entrypoint = false;
+try {
+  entrypoint =
+    !!process.argv[1] &&
+    realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  /* Imports from eval need not have a filesystem entrypoint. */
+}
+if (entrypoint) {
   await fixNodePtyPermissions();
 }

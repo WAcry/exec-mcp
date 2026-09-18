@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defaultConfigPath, initializeConfig, loadConfig } from "./config.js";
 import { resolveCodexBinary, PINNED_CODEX_VERSION } from "./codex-package.js";
 import { CodeModeService } from "./code-mode/service.js";
@@ -77,7 +79,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 }
 // Node resolves the entry module through symlinks (/var -> /private/var on
 // macOS, npm bin links, etc.); argv[1] is not a canonical module identity.
-if (import.meta.main) {
+// Canonical paths also work on the supported Node releases predating import.meta.main.
+let entrypoint = false;
+try {
+  entrypoint =
+    !!process.argv[1] &&
+    realpathSync(process.argv[1]) ===
+      realpathSync(fileURLToPath(import.meta.url));
+} catch {
+  /* An imported module need not have a filesystem entrypoint. */
+}
+if (entrypoint) {
   void main().catch((error) => {
     console.error(
       `exec-mcp：${error instanceof Error ? error.message : String(error)}`,

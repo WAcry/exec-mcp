@@ -73,6 +73,26 @@ stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
 配置修改后重启 exec-mcp。配置可能含凭据，不要提交、分享或复制到对话中。
 
+## 命令 Shell
+
+命令工具使用实例配置的 Shell，不需要 Agent 每次选择。Windows 默认优先 PowerShell 7（`pwsh.exe`），
+没有时使用 Windows PowerShell；macOS/Linux 优先 `$SHELL`，无法使用时 macOS 依次尝试 `/bin/zsh`、`/bin/sh`，Linux 使用 `/bin/sh`。
+exec-mcp 不自动安装 Shell。可以在配置中覆盖：
+
+```toml
+[execution]
+shell = 'C:\Program Files\PowerShell\7\pwsh.exe'
+login = false
+```
+
+`shell` 也可填服务 PATH 中的可执行文件名，如 `pwsh` 或 `bash`；macOS 可填 `/bin/zsh`。
+相对路径以配置文件目录为基准，支持 `~/`。只填可执行文件，不附命令参数；不支持 CMD 或批处理入口。
+默认 `login=false`：PowerShell 不加载 profile，其他 Shell 使用非 login 模式，仍遵循其自身启动文件规则。
+`login=true` 对 PowerShell 表示加载 profile，对其他 Shell 表示 login 模式；分配 PTY 不会自动加载交互配置。
+
+配置在启动时解析；显式配置无效会报错，不换 Shell 重跑命令。修改后重启服务并刷新客户端工具目录。
+这是一次工具参数简化：旧脚本中的 `exec_command({shell, login, ...})` 需移除这两个字段，改由配置统一设置。
+
 ## Skills
 
 助手可一次发现机器上已有的 Skill 名称、用途和全文路径，匹配任务后再读取完整 `SKILL.md`，

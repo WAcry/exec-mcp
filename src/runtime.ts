@@ -8,11 +8,11 @@ import {
 } from "@modelcontextprotocol/server";
 import { CodeModeService } from "./code-mode/service.js";
 import {
-  NATIVE_CONTRACTS,
+  nativeContracts,
   bindNative,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
-  EXEC_DESCRIPTION,
+  execDescription,
   WAIT_DESCRIPTION,
 } from "./catalog.js";
 import type { Config } from "./config.js";
@@ -31,6 +31,7 @@ import { VERSION } from "./version.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
+import { resolveShell } from "./host/shell.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -38,15 +39,21 @@ function sessionScope(context: ServerContext): string | undefined {
   return typeof session === "string" && session.length ? session : undefined;
 }
 export class ExecRuntime {
-  readonly codeMode = new CodeModeService();
-  readonly terminal = new TerminalManager();
+  readonly codeMode: CodeModeService;
+  readonly terminal: TerminalManager;
   readonly patch = new PatchRunner();
   readonly downstream: DownstreamMcpRegistry;
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
   private closing: Promise<void> | undefined;
   private readonly skillMaxChars: number;
+  private readonly native: ReturnType<typeof nativeContracts>;
   constructor(config: Config, artifacts?: ArtifactStore) {
+    // Fail bad shell configuration before creating timers, hosts or listeners.
+    const shell = resolveShell(config.execution);
+    this.terminal = new TerminalManager({ shell });
+    this.native = nativeContracts(shell);
+    this.codeMode = new CodeModeService();
     this.skillMaxChars = config.skills?.max_chars ?? DEFAULT_SKILL_MAX_CHARS;
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
@@ -73,7 +80,7 @@ export class ExecRuntime {
       "exec",
       {
         title: "执行工具代码",
-        description: EXEC_DESCRIPTION,
+        description: execDescription(this.native),
         inputSchema: EXEC_SCHEMA,
         annotations,
         _meta: {
@@ -102,7 +109,7 @@ export class ExecRuntime {
           );
           if (!(await stat(cwd)).isDirectory())
             throw new Error("workdir 必须是目录。");
-          const tools = NATIVE_CONTRACTS.map((contract) =>
+          const tools = this.native.map((contract) =>
             bindNative(contract, async (input, nested) => {
               switch (contract.name) {
                 case "list_skills": {

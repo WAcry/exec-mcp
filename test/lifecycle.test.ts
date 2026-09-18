@@ -103,7 +103,10 @@ describe("real execution lifecycle boundaries", () => {
     expect(result.exit_code).toBe(0);
   });
   it("uses flow control to retain unread terminal bytes rather than dropping them", async () => {
-    const terminal = new TerminalManager(32 * 1024, 8 * 1024);
+    const terminal = new TerminalManager({
+      highWater: 32 * 1024,
+      lowWater: 8 * 1024,
+    });
     cleanup.push(() => terminal.close());
     const first = await terminal.execCommand(
       {

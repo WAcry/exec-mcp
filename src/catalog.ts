@@ -1,6 +1,7 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
+import { shellDescription, type CommandShell } from "./host/shell.js";
 import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
 import {
   HOST_FILE_SCHEMA,
@@ -67,24 +68,13 @@ export const WAIT_SCHEMA = z
   .strict();
 export const COMMAND_SCHEMA = z
   .object({
-    cmd: z.string().min(1).describe("由所选 Shell 解释的命令。"),
+    cmd: z.string().min(1).describe("交给已配置 Shell 的命令代码。"),
     workdir: z
       .string()
       .min(1)
       .describe("本次命令目录；相对路径基于 exec.workdir。")
       .optional(),
-    shell: z
-      .string()
-      .min(1)
-      .describe(
-        "Shell 可执行文件；Windows 默认 powershell.exe，其他系统使用用户 Shell 或 /bin/sh。不支持 cmd.exe。",
-      )
-      .optional(),
-    login: z
-      .boolean()
-      .describe("是否加载 Shell profile；默认 false。")
-      .optional(),
-    tty: z.boolean().describe("true 使用交互式 PTY；默认普通管道。").optional(),
+    tty: z.boolean().describe("true 分配 PTY；默认普通管道。").optional(),
     yield_time_ms: ms(30_000, "等待命令结果，默认 10000 毫秒。"),
   })
   .strict();
@@ -199,7 +189,7 @@ interface NativeContract {
   output?: Record<string, unknown>;
   freeform?: boolean;
 }
-export const NATIVE_CONTRACTS: readonly NativeContract[] = [
+const NATIVE_CONTRACTS: readonly NativeContract[] = [
   {
     name: "list_skills",
     schema: SKILL_SCHEMA,
@@ -229,7 +219,7 @@ export const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "运行本机命令。返回对象；仍在运行或有未读输出时返回 session_id，用 write_stdin 续读。每次最多读取 1 MiB，其余保留在进程会话中，不丢弃。",
+      "仍在运行或有未读输出时返回 session_id，用 write_stdin 续取；exit_code 是 Shell 退出码。每次最多读取 1 MiB，其余保留。",
   },
   {
     name: "write_stdin",
@@ -296,7 +286,21 @@ export function bindNative(
     },
   };
 }
-export const EXEC_DESCRIPTION = `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
+export function nativeContracts(
+  shell: CommandShell,
+): readonly NativeContract[] {
+  return NATIVE_CONTRACTS.map((contract) =>
+    contract.name === "exec_command"
+      ? {
+          ...contract,
+          description: shellDescription(shell) + contract.description,
+        }
+      : contract,
+  );
+}
+
+export function execDescription(contracts: readonly NativeContract[]): string {
+  return `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出完整目录；匹配任务后用 exec_command 读取其真实路径的完整 SKILL.md 再执行。目录仍在上下文中时无需重复列出；仅显式 Skill 必须由用户明确要求使用，不能按任务相似性或其他文档推荐自行读取。
 附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
@@ -309,6 +313,7 @@ audio() 沿用 host 规则：可识别且短于 25 ms 的 WAV 会改为说明文
 source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。仅显式设置 max_output_tokens/wait.max_tokens 才按近似预算截断本次文本，不影响原始工具结果或 store；wait 预算不继承 exec，省略不截断。截断文本未必是有效 JSON，被省略内容不由后续 wait 补发。
 cell_id 不等于终端 session_id；已交回句柄的进程通过后续 exec 内 write_stdin 操作。取消不回滚副作用。仅显式输出必要结果；默认不截断，不自动落盘，超出真实传输边界会报错，操作可能已发生，不自动重试。
 
-本机及发现契约：\n${NATIVE_CONTRACTS.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
+本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
+}
 export const WAIT_DESCRIPTION =
   "续取 exec 返回的运行中 cell_id 的新增输出，或终止该 cell。默认、推荐和最长等待均为 110 秒；完成、主动 yield 或终止时提前返回。可用 max_tokens 限制本次近似文本预算，省略不限量且不继承 exec；媒体与状态保留。终端 session_id 由 exec 内的 write_stdin 操作。";

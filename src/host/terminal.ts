@@ -9,13 +9,12 @@ import {
   throwIfAborted,
   waitUntil,
 } from "../util.js";
-import { shellInvocation, terminateProcessTree } from "./platform.js";
+import { terminateProcessTree } from "./platform.js";
+import { resolveShell, shellInvocation, type CommandShell } from "./shell.js";
 
 export interface ExecCommandInput {
   cmd: string;
   workdir?: string;
-  shell?: string;
-  login?: boolean;
   tty?: boolean;
   yield_time_ms?: number;
 }
@@ -53,14 +52,24 @@ const READ_BYTES = 1024 * 1024;
 const HIGH_WATER = 128 * 1024 * 1024;
 const LOW_WATER = 64 * 1024 * 1024;
 export class TerminalManager {
+  readonly shell: CommandShell;
+  private readonly highWater: number;
+  private readonly lowWater: number;
   private sessions = new Map<string, Session>();
   private unread = 0;
   private paused = false;
   private closed = false;
   constructor(
-    private readonly highWater = HIGH_WATER,
-    private readonly lowWater = LOW_WATER,
-  ) {}
+    options: {
+      shell?: CommandShell;
+      highWater?: number;
+      lowWater?: number;
+    } = {},
+  ) {
+    this.shell = options.shell ?? resolveShell();
+    this.highWater = options.highWater ?? HIGH_WATER;
+    this.lowWater = options.lowWater ?? LOW_WATER;
+  }
 
   async execCommand(
     input: ExecCommandInput,
@@ -73,7 +82,7 @@ export class TerminalManager {
     if (!(await stat(cwd)).isDirectory()) throw new Error("命令目录不存在。");
     this.requireOpen();
     throwIfAborted(signal);
-    const shell = shellInvocation(input.cmd, input.shell, input.login);
+    const shell = shellInvocation(input.cmd, this.shell);
     const backend: Backend = input.tty
       ? {
           kind: "pty",

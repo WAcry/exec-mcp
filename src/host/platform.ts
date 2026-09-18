@@ -20,37 +20,6 @@ export function configDirectory(
     "exec-mcp",
   );
 }
-export function shellInvocation(
-  command: string,
-  shell?: string,
-  login = false,
-  platform = process.platform as string,
-  env: NodeJS.ProcessEnv = process.env,
-): { file: string; args: string[] } {
-  const file =
-    shell ?? (platform === "win32" ? "powershell.exe" : env.SHELL || "/bin/sh");
-  const name = path.win32
-    .basename(file)
-    .toLowerCase()
-    .replace(/\.exe$/, "");
-  if (platform === "win32" && (name === "powershell" || name === "pwsh")) {
-    return {
-      file,
-      args: [
-        "-NoLogo",
-        ...(login ? [] : ["-NoProfile"]),
-        "-NonInteractive",
-        "-Command",
-        `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = $OutputEncoding; ${command}`,
-      ],
-    };
-  }
-  if (name === "cmd")
-    throw new Error(
-      "Windows 请使用 PowerShell/pwsh；不支持 cmd.exe 的二次引号规则。",
-    );
-  return { file, args: [login ? "-lc" : "-c", command] };
-}
 /** Only processes created by this runtime are passed here. */
 export async function terminateProcessTree(
   pid: number,

@@ -7,7 +7,7 @@ import {
   initializeConfig,
   parseConfig,
 } from "../src/config.js";
-import { configDirectory, shellInvocation } from "../src/host/platform.js";
+import { configDirectory } from "../src/host/platform.js";
 import { codexTarget } from "../src/codex-package.js";
 
 describe("configuration and platform boundaries", () => {
@@ -92,14 +92,6 @@ describe("configuration and platform boundaries", () => {
         "C:/Users/test",
       ),
     ).toContain("Roaming");
-    const windows = shellInvocation("echo ok", undefined, false, "win32", {});
-    expect(windows.file).toBe("powershell.exe");
-    expect(windows.args.at(-1)).toContain("UTF8Encoding");
-    expect(windows.args.at(-1)).toMatch(/echo ok$/);
-    expect(shellInvocation("echo ok", undefined, false, "linux", {})).toEqual({
-      file: "/bin/sh",
-      args: ["-c", "echo ok"],
-    });
   });
   it.each(["linux", "darwin", "win32"])(
     "selects pinned packages for %s",

@@ -116,7 +116,9 @@ port = 8891
 `serve` 会先并行连接所有启用的下游 MCP，验证凭据、读取全部工具页并校验输入契约，再开放端口、报告就绪。
 任何启用的服务连接失败、需要登录、目录失败或契约无效，本次启动都会失败退出并清理已启动的客户端，
 不会带着部分工具列表继续运行。不使用的服务可设置 `enabled = false`；未设置 `enabled_tools` 时加载全部工具。
-已有 Skill 或上下文给出工具名称时，助手第一次 exec 即可直接调用，不必先 tool_search；搜索仅查询已加载目录。
+已有 Skill 或上下文给出工具名称时，助手第一次 exec 即可直接调用，不必先 tool_search。
+`ALL_TOOLS` 和 `tools.tool_search` 覆盖同一个已绑定目录：全部本机工具及启用的下游工具。
+本机工具的完整契约同时在外层 exec 描述中提供；搜索后可在同一次 exec 直接调用。
 stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
 `startup_timeout_sec` 默认 30 秒，覆盖该服务的协议协商与全部目录分页；可按需要设置 120、300 等更长时间，
@@ -259,6 +261,11 @@ tunnel-client run --profile exec-mcp
 
 连接后可直接告诉 ChatGPT：“检查我的项目并运行测试”，附上明确的项目路径。
 首次使用建议先执行只读检查，确认访问的是预期机器与目录。
+
+升级或修改工具契约后，重启服务，并在 ChatGPT 的连接设置中 **Refresh（刷新）工具元数据**，再开新对话测试。
+新窗口可能仍使用旧连接元数据；若运行时 ALL_TOOLS 已有新工具，外层说明却仍列出已删除工具，
+应对照服务实际的 `tools/list` 检查连接是否已刷新，不是让 Agent 反复搜索。
+参见 [OpenAI 元数据刷新步骤](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata)。
 
 不要将 `access="openai-tunnel"` 的无认证入口转发到公网；切换其他 Tunnel 时使用文档中的 public + auth 配置。
 隧道可达不代表调用者已经获得授权。公网模式使用外部 OAuth 授权服务器连接 ChatGPT，不要求新增 UI 或更改执行内核。

@@ -162,7 +162,7 @@ export function McpView() {
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           模拟 ChatGPT 在 Code Mode 中调用{" "}
           <code>tools.tool_search(&#123; query &#125;)</code>{" "}
-          时返回的命中工具与说明。
+          时返回的命中工具与说明；范围包含本机工具和已加载的下游工具。
         </p>
 
         <form onSubmit={handleTestSearch} className="flex gap-2">

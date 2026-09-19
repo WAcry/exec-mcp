@@ -621,7 +621,7 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       typeof body.limit === "number"
         ? Math.max(1, Math.min(50, Math.trunc(body.limit)))
         : 8;
-    jsonResponse(res, 200, await runtime.discovery.search(query, limit));
+    jsonResponse(res, 200, runtime.searchTools(query, limit));
     return;
   }
 

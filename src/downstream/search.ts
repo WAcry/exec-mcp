@@ -26,7 +26,11 @@ export interface ToolDescriptor {
   serverName?: string;
   serverTitle?: string;
   namespaceInstructions?: string;
-  tool: Tool;
+  tool: Pick<Tool, "name" | "title" | "description"> & {
+    // Built-in freeform tools have a string schema, unlike MCP's object inputs.
+    inputSchema?: Record<string, unknown> | undefined;
+    outputSchema?: Record<string, unknown> | undefined;
+  };
 }
 
 export interface ToolSearchOptions {
@@ -213,6 +217,8 @@ function identityMatchBoost(query: string, descriptor: ToolDescriptor): number {
     descriptor.tool.name,
   ].map(normalizeIdentity);
   const normalized = normalizeIdentity(query);
+  // A fully qualified callable name wins over another provider's raw tool name.
+  if (normalizeIdentity(descriptor.codeName) === normalized) return 3;
   if (identities.includes(normalized)) {
     return 2;
   }

@@ -161,7 +161,12 @@ describe.each([false, true])(
       );
       expect(jsonOutput(search)).toMatchObject({
         bound: "function",
-        r: { errors: {}, tools: [{ name: "mcp__fixture__add" }] },
+        r: {
+          errors: {},
+          tools: expect.arrayContaining([
+            expect.objectContaining({ name: "mcp__fixture__add" }),
+          ]),
+        },
         result: { structuredContent: { value: 5 } },
       });
       expect(

@@ -331,6 +331,22 @@ enabled = true
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
+  // The installed package searches exactly the catalog bound to this execution.
+  const catalogCheck = await scopedCall(`
+    const complete=await Promise.all(ALL_TOOLS.map(async tool=>{
+      const hit=(await tools.tool_search({query:tool.name,limit:1})).tools[0];
+      return hit?.name===tool.name&&hit?.description===tool.description;
+    }));
+    text({complete:complete.every(Boolean)});`);
+  assert.ok(!catalogCheck.isError, JSON.stringify(catalogCheck));
+  assert.deepEqual(
+    JSON.parse(
+      catalogCheck.content.find(
+        (block) => block.type === "text" && block.text.startsWith("{"),
+      ).text,
+    ),
+    { complete: true },
+  );
   const toolSurface = await scopedCall(
     "text({create:typeof tools.request_user_input_async,read:typeof tools.get_user_input});",
   );

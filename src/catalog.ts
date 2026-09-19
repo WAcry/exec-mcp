@@ -269,7 +269,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "tool_search",
     schema: SEARCH_SCHEMA,
     description:
-      "在已加载的下游目录中进行 BM25 搜索，返回 {tools:[{name,description}],errors}；description 含完整调用契约。",
+      "在本次 ALL_TOOLS 的全部本机及下游工具中进行 BM25 搜索，返回 {tools:[{name,description}],errors}；命中项含完整契约，可在同一 exec 调用。已知名称可直接调用。",
   },
 ];
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -281,16 +281,23 @@ export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 export function describeContract(contract: NativeContract): string {
   return `${contract.description}\n调用：await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\n输入 JSON Schema：${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\n返回 JSON Schema：${JSON.stringify(contract.output)}` : ""}`;
 }
-export function bindNative(
+export function nativeDefinition(
   contract: NativeContract,
-  call: CodeModeToolDefinition["call"],
-): CodeModeToolDefinition {
+): Omit<CodeModeToolDefinition, "call"> {
   return {
     name: contract.name,
     description: describeContract(contract),
     kind: contract.freeform ? "freeform" : "function",
     ...(!contract.freeform ? { inputSchema: jsonSchema(contract.schema) } : {}),
     ...(contract.output ? { outputSchema: contract.output } : {}),
+  };
+}
+export function bindNative(
+  contract: NativeContract,
+  call: CodeModeToolDefinition["call"],
+): CodeModeToolDefinition {
+  return {
+    ...nativeDefinition(contract),
     call: async (raw, context) => {
       const parsed = contract.schema.safeParse(raw);
       if (!parsed.success)
@@ -321,7 +328,7 @@ export function execDescription(
   return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。本机任务使用这里的工具；ChatGPT 容器不共享本机的文件和网络环境。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
-ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
+ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 读取完整契约，tools.tool_search 检索同一目录的全部工具。已知工具可直接 tools[name](args)；搜索不是调用前置步骤，目录更新从下一次 exec 生效。
 本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
 通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
 文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。

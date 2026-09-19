@@ -9,6 +9,7 @@ import {
 import { CodeModeService, sessionScopeKey } from "./code-mode/service.js";
 import {
   nativeContracts,
+  nativeDefinition,
   bindNative,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
@@ -107,6 +108,14 @@ export class ExecRuntime {
   }
   get ready(): boolean {
     return this.initialized && this.closing === undefined;
+  }
+  /** Web diagnostics search the current complete catalog, just like a newly created exec. */
+  searchTools(query: string, limit: number, signal?: AbortSignal) {
+    const tools = [
+      ...this.native.map(nativeDefinition),
+      ...this.discovery.snapshot(),
+    ];
+    return this.discovery.searchFor(tools)(query, limit, signal);
   }
   initialize(...args: Parameters<ToolDiscovery["initialize"]>): Promise<void> {
     this.initialization ??= this.discovery.initialize(...args).then(() => {
@@ -298,7 +307,7 @@ export class ExecRuntime {
                       query: string;
                       limit?: number;
                     };
-                    subcallResult = await this.discovery.search(
+                    subcallResult = search(
                       searchArgs.query,
                       searchArgs.limit ?? 8,
                       nested.signal,
@@ -329,6 +338,8 @@ export class ExecRuntime {
               }
             }),
           );
+          const downstream = this.discovery.snapshot();
+          const search = this.discovery.searchFor([...tools, ...downstream]);
           let codeModeState: "yielded" | "completed" | "terminated" | undefined;
           const execResult = await this.codeMode.exec({
             source: args.source,
@@ -341,7 +352,7 @@ export class ExecRuntime {
               : { maxOutputTokens: args.max_output_tokens }),
             tools: [
               ...tools,
-              ...this.discovery.snapshot().map((tool) => ({
+              ...downstream.map((tool) => ({
                 ...tool,
                 call: async (...parameters: Parameters<typeof tool.call>) => {
                   const started = Date.now();

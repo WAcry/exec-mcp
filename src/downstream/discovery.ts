@@ -8,7 +8,7 @@ import {
   DownstreamMcpRegistry,
   type DownstreamStartupEvent,
 } from "./registry.js";
-import { buildToolSearchIndex, type ToolSearchIndex } from "./search.js";
+import { ToolSearchIndex, type ToolDescriptor } from "./search.js";
 
 interface Prepared {
   tool: DownstreamTool;
@@ -16,8 +16,6 @@ interface Prepared {
 }
 export class ToolDiscovery {
   private cached = new Map<string, Prepared>();
-  private indexed: readonly Prepared[] = [];
-  private index: ToolSearchIndex | undefined;
   constructor(private readonly registry: DownstreamMcpRegistry) {}
   async initialize(
     signal?: AbortSignal,
@@ -31,31 +29,43 @@ export class ToolDiscovery {
       (entry) => entry.definition,
     );
   }
-  async search(
-    query: string,
-    limit: number,
-    signal?: AbortSignal,
-  ): Promise<{
-    tools: { name: string; description: string }[];
-    errors: Record<string, string>;
-  }> {
-    signal?.throwIfAborted();
-    const prepared = this.prepare(this.registry.bindingSnapshot());
-    if (
-      this.index === undefined ||
-      prepared.length !== this.indexed.length ||
-      prepared.some((entry, i) => entry !== this.indexed[i])
-    ) {
-      this.index = buildToolSearchIndex(prepared.map((entry) => entry.tool));
-      this.indexed = prepared;
-    }
-    const matching = this.index.search(query, { limit });
-    return {
-      tools: matching.map((tool) => {
-        const definition = this.cached.get(tool.codeName)!.definition;
-        return { name: definition.name, description: definition.description };
-      }),
-      errors: this.registry.catalogErrors(),
+  /** Capture exactly one exec's callable catalog; search never refreshes or binds tools.
+   * Keep metadata only: a long-lived search must not retain another call's callbacks.
+   */
+  searchFor(tools: readonly Omit<CodeModeToolDefinition, "call">[]) {
+    const visible = new Map<string, { name: string; description: string }>();
+    const descriptors: ToolDescriptor[] = tools.map((tool) => {
+      if (visible.has(tool.name)) throw new Error(`工具名称冲突：${tool.name}`);
+      visible.set(tool.name, {
+        name: tool.name,
+        description: tool.description,
+      });
+      const downstream = this.cached.get(tool.name)?.tool;
+      return (
+        downstream ?? {
+          id: tool.name,
+          codeName: tool.name,
+          serverId: "exec-mcp",
+          tool: {
+            name: tool.name,
+            description: tool.description,
+            ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
+            ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+          },
+        }
+      );
+    });
+    // Most execs call known tools. Build BM25 only when this snapshot is searched.
+    let index: ToolSearchIndex | undefined;
+    return (query: string, limit: number, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      index ??= new ToolSearchIndex(descriptors);
+      return {
+        tools: index
+          .search(query, { limit })
+          .map((tool) => ({ ...visible.get(tool.codeName)! })),
+        errors: this.registry.catalogErrors(),
+      };
     };
   }
   private prepare(tools: readonly DownstreamTool[]): Prepared[] {

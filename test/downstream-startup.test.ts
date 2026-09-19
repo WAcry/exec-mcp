@@ -391,7 +391,7 @@ describe("discovery is a local query, never a tool-unlock handshake", () => {
     const fixture = await httpFixture();
     const server = await start([fixture.definition]);
     const requests = fixture.state.requests;
-    const search = await server.runtime.discovery.search("echo", 8);
+    const search = server.runtime.searchTools("echo", 8);
     expect(search.tools).toHaveLength(1);
     expect(search.errors).toEqual({});
     expect(search).not.toHaveProperty("note");
@@ -414,7 +414,7 @@ describe("discovery is a local query, never a tool-unlock handshake", () => {
     expect(failed.isError).toBe(true);
     expect(fixture.state.calls).toBe(2);
     const listings = fixture.state.lists;
-    const search = await server.runtime.discovery.search("echo", 8);
+    const search = server.runtime.searchTools("echo", 8);
     expect(search.tools).toHaveLength(1);
     expect(search.errors.fixture).toBeTruthy();
     expect(fixture.state.lists).toBe(listings);

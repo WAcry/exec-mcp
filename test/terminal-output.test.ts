@@ -117,7 +117,7 @@ describe("real rolling terminal output, not output files", () => {
     const first = await value.execCommand(
       {
         cmd: nodeCommand(
-          'console.log("BOOT");process.stdin.on("data",()=>process.stdout.write("BURST_START\\n"+"x".repeat(50000)+"BURST_END\\n"));',
+          'console.log("BOOT");process.stdin.once("data",()=>{process.stdout.write("BURST_START\\n"+"x".repeat(20000));setTimeout(()=>process.stdout.write("x".repeat(30000)+"BURST_END\\n"),100);});',
         ),
         yield_time_ms: 0,
       },
@@ -134,10 +134,14 @@ describe("real rolling terminal output, not output files", () => {
       chars: "go",
       yield_time_ms: 0,
     });
+    const sentBytes =
+      Buffer.byteLength(sent.output.replace(marker, "")) +
+      (sent.omitted_bytes ?? 0);
+    const expectedBytes = 50000 + Buffer.byteLength("BURST_START\nBURST_END\n");
     const deadline = Date.now() + 3000;
     while (
-      !sent.output.includes("BURST_END") &&
-      owned.buffer.omittedBytes === 0 &&
+      sentBytes + owned.buffer.bytes + owned.buffer.omittedBytes <
+        expectedBytes &&
       Date.now() < deadline
     )
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -219,7 +223,7 @@ describe("real rolling terminal output, not output files", () => {
 describe.each([false, true])(
   "terminal truncation metadata over MCP (legacy=%s)",
   (legacy) => {
-    it("uses the configured buffer and delivers one explicit truncation marker with first and last output", async () => {
+    it("uses the configured buffer and accounts for head/tail truncation across incremental reads", async () => {
       const connection = await connect(
         { memory: { ...MEMORY_DEFAULTS, terminal_buffer_mib: 1 } },
         legacy,
@@ -228,34 +232,50 @@ describe.each([false, true])(
       const command = nodeCommand(
         'process.stdout.write("START_MARKER\\n"+"x".repeat(2*1024*1024)+"\\nFINAL_MARKER");',
       );
+      // The initial zero-wait response may already consume one or more pipe chunks.
+      // Summarize inside Code Mode so the model guard cannot truncate our test JSON.
+      const summary = `text({...r,output:r.output.length>2000?r.output.slice(0,1000)+r.output.slice(-1000):r.output,retained_bytes:r.output.replace(new RegExp(${JSON.stringify(marker.source)},"g"),"").length});`;
       const first = await connection.client.callTool({
         name: "exec",
         arguments: {
-          source: `text(await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:0}));`,
+          source: `const r=await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:0});${summary}`,
         },
       });
       expect(first.isError).not.toBe(true);
-      const initial = jsonOutput<TerminalResult>(first);
-      expect(initial.session_id).toBeDefined();
-      await connection.runtime.terminal["sessions"].get(initial.session_id!)!
-        .done;
-      const final = await connection.client.callTool({
-        name: "exec",
-        arguments: {
-          source: `const r=await tools.write_stdin({session_id:${JSON.stringify(initial.session_id)},yield_time_ms:0});text({...r,output:r.output.slice(0,1000)+r.output.slice(-1000),raw_bytes:r.output.length});`,
-        },
-      });
-      expect(final.isError).not.toBe(true);
-      expect(final.structuredContent).toBeUndefined();
-      const result = jsonOutput<TerminalResult>(final);
-      expect(result.exit_code).toBe(0);
-      expect(result.truncated).toBe(true);
-      expect(initial.output + result.output).toContain("START_MARKER");
-      expect(result.output).toContain("FINAL_MARKER");
+      type Observed = TerminalResult & { retained_bytes: number };
+      const initial = jsonOutput<Observed>(first);
+      const batches = [initial];
+      if (initial.session_id) {
+        await connection.runtime.terminal["sessions"].get(initial.session_id)!
+          .done;
+        const final = await connection.client.callTool({
+          name: "exec",
+          arguments: {
+            source: `const r=await tools.write_stdin({session_id:${JSON.stringify(initial.session_id)},yield_time_ms:0});${summary}`,
+          },
+        });
+        expect(final.isError).not.toBe(true);
+        expect(final.structuredContent).toBeUndefined();
+        batches.push(jsonOutput<Observed>(final));
+      }
+      expect(batches.at(-1)!.exit_code).toBe(0);
+      expect(batches.some((batch) => batch.truncated)).toBe(true);
+      const output = batches.map((batch) => batch.output).join("");
+      expect(output).toContain("START_MARKER");
+      expect(output).toContain("FINAL_MARKER");
+      for (const batch of batches)
+        expect(batch.retained_bytes).toBeLessThanOrEqual(1024 * 1024);
+      // Verify every original byte is either retained or explicitly accounted for,
+      // rather than assuming the first exec always returns an empty buffer.
       expect(
-        Buffer.byteLength(result.output.replace(marker, "")),
-      ).toBeLessThanOrEqual(1024 * 1024);
-      expect(result.omitted_bytes).toBeGreaterThanOrEqual(1024 * 1024);
+        batches.reduce(
+          (sum, batch) =>
+            sum + batch.retained_bytes + (batch.omitted_bytes ?? 0),
+          0,
+        ),
+      ).toBe(
+        2 * 1024 * 1024 + Buffer.byteLength("START_MARKER\n\nFINAL_MARKER"),
+      );
     });
   },
 );

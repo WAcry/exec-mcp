@@ -49,6 +49,8 @@ export interface CodeModeExecRequest {
   maxOutputTokens?: number;
   /** Public MCP yield_time_ms. It overrides an optional source pragma. */
   yieldTimeMs?: number;
+  /** Internal observability hook; failures must not affect execution. */
+  onState?: (state: "yielded" | "completed" | "terminated") => void;
 }
 
 export interface CodeModeWaitRequest {
@@ -58,6 +60,8 @@ export interface CodeModeWaitRequest {
   maxTokens?: number;
   terminate?: boolean;
   yieldTimeMs?: number;
+  /** Internal observability hook; failures must not affect execution. */
+  onState?: (state: "yielded" | "completed" | "terminated") => void;
 }
 
 export type CodeModeToolResult = CallToolResult;

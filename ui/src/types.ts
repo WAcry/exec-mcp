@@ -1,4 +1,9 @@
-export type CallStatus = "running" | "completed" | "error" | "yielding";
+export type CallStatus =
+  | "running"
+  | "completed"
+  | "error"
+  | "yielding"
+  | "terminated";
 
 export interface SubCallRecord {
   id: string;
@@ -30,8 +35,23 @@ export interface CallRecord {
     [key: string]: unknown;
   };
   subcalls: SubCallRecord[];
+  omittedSubcalls?: number;
+  truncatedFields?: number;
   output?: unknown;
   error?: string;
+}
+
+export interface CallSummary {
+  id: string;
+  sessionId: string;
+  tool: "exec" | "wait";
+  status: CallStatus;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  args: { source?: string; cell_id?: string };
+  subcallCount: number;
+  truncated: boolean;
 }
 
 export interface SessionSummary {
@@ -94,18 +114,13 @@ export interface SystemStatus {
     public_url?: string;
   };
   web: {
+    host: string;
     port: number;
+    exposed: boolean;
     loopbackUrl: string;
-    lanUrl: string;
-    lanSecret?: string;
+    lanUrls: string[];
   };
-  stats: {
-    totalCalls: number;
-    activeSessions: number;
-    errorCalls: number;
-    runningCalls: number;
-    avgDurationMs: number;
-  };
+  stats: ActivityStats;
   memory?: CodeModeMemoryStatus;
   system: {
     platform: string;
@@ -116,9 +131,9 @@ export interface SystemStatus {
 
 export interface SkillItem {
   name: string;
-  description: string;
-  path?: string;
-  location?: string;
+  description?: string;
+  path: string;
+  implicit: boolean;
 }
 
 export interface SkillsResponse {
@@ -133,12 +148,24 @@ export interface McpServerItem {
   name: string;
   transport: "stdio" | "streamable-http";
   command?: string;
-  args?: string[];
+  argsCount?: number;
+  envKeys?: string[];
+  headerNames?: string[];
   cwd?: string;
   url?: string;
   enabledTools?: string[];
   startupTimeoutMs?: number;
   toolTimeoutMs?: number;
+}
+
+export interface ActivityStats {
+  totalCalls: number;
+  activeSessions: number;
+  errorCalls: number;
+  runningCalls: number;
+  avgDurationMs: number;
+  truncatedFields: number;
+  omittedSubcalls: number;
 }
 
 export interface McpToolItem {
@@ -176,6 +203,7 @@ export interface ArtifactItem {
 
 export interface ConfigResponse {
   config_path?: string;
+  config_file?: string;
   config_exists?: boolean;
   [key: string]: unknown;
 }

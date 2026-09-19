@@ -107,6 +107,10 @@ try {
     config,
     originalConfig.replace("port = 8891", "port = 0") +
       `
+[web]
+host = "127.0.0.1"
+port = 0
+
 [[skills.config]]
 name = "packaged-disabled"
 enabled = false
@@ -130,7 +134,7 @@ enabled = true
   child.stderr.on("data", (text) => {
     stderr += text;
   });
-  const url = await new Promise((resolve, reject) => {
+  const started = await new Promise((resolve, reject) => {
     let output = "";
     const timer = setTimeout(
       () => reject(new Error(`packaged server did not start: ${stderr}`)),
@@ -147,10 +151,11 @@ enabled = true
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (text) => {
       output += text;
-      const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/mcp/);
-      if (match) {
+      const mcp = output.match(/http:\/\/127\.0\.0\.1:\d+\/mcp/)?.[0];
+      const web = output.match(/本机访问：(http:\/\/127\.0\.0\.1:\d+\/)/)?.[1];
+      if (mcp && web) {
         clearTimeout(timer);
-        resolve(match[0]);
+        resolve({ mcp, web });
       }
     });
   });
@@ -158,7 +163,13 @@ enabled = true
     { name: "package-smoke", version: "1" },
     { versionNegotiation: { mode: "auto" } },
   );
-  await client.connect(new StreamableHTTPClientTransport(new URL(url)));
+  await client.connect(new StreamableHTTPClientTransport(new URL(started.mcp)));
+  const webPage = await fetch(started.web);
+  assert.equal(webPage.status, 200);
+  assert.match(await webPage.text(), /EXEC MCP 控制台/);
+  const webStatus = await fetch(new URL("/api/status", started.web));
+  assert.equal(webStatus.status, 200);
+  assert.equal((await webStatus.json()).status, "ready");
   assert.deepEqual(
     (await client.listTools()).tools.map((tool) => tool.name),
     ["exec", "wait"],
@@ -233,6 +244,15 @@ enabled = true
     result.content.some(
       (block) => block.type === "text" && block.text.includes("tool_search"),
     ),
+  );
+  const webCalls = await fetch(new URL("/api/calls", started.web));
+  assert.equal(webCalls.status, 200);
+  const webCallBody = await webCalls.json();
+  assert.ok(
+    webCallBody.items.some(
+      (call) => call.tool === "exec" && call.status === "completed",
+    ),
+    JSON.stringify(webCallBody),
   );
   const scopedCall = (source, extra = {}) =>
     client.callTool({

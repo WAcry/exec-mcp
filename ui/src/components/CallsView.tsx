@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { CallRecord, PaginatedResult } from "../types";
+import type { CallRecord, CallSummary, PaginatedResult } from "../types";
 import { CallDetailModal } from "./CallDetailModal";
+import { apiFetch } from "../lib/api";
 import {
   Search,
   CheckCircle2,
   AlertCircle,
   Loader2,
   ArrowRight,
+  Square,
   ChevronLeft,
   ChevronRight,
   Layers,
@@ -14,7 +16,7 @@ import {
 } from "lucide-react";
 
 interface CallsViewProps {
-  callsData: PaginatedResult<CallRecord> | null;
+  callsData: PaginatedResult<CallSummary> | null;
   onPageChange: (page: number) => void;
   onFilterChange: (filters: {
     status?: string;
@@ -36,9 +38,23 @@ export function CallsView({
   onSelectSession,
 }: CallsViewProps) {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
+  const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [toolFilter, setToolFilter] = useState("all");
+
+  const openDetail = async (call: CallSummary) => {
+    setDetailLoading(call.id);
+    try {
+      setSelectedCall(
+        await apiFetch<CallRecord>(`/api/calls/${encodeURIComponent(call.id)}`),
+      );
+    } catch (error) {
+      alert("读取调用详情失败: " + String(error));
+    } finally {
+      setDetailLoading(null);
+    }
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,6 +124,8 @@ export function CallsView({
             <option value="all">所有状态</option>
             <option value="completed">已完成</option>
             <option value="running">运行中</option>
+            <option value="yielding">已交回 cell</option>
+            <option value="terminated">已终止</option>
             <option value="error">错误</option>
           </select>
 
@@ -163,7 +181,7 @@ export function CallsView({
                 callsData.items.map((call) => (
                   <tr
                     key={call.id}
-                    onClick={() => setSelectedCall(call)}
+                    onClick={() => void openDetail(call)}
                     className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
                   >
                     <td className="py-2.5 px-3.5 whitespace-nowrap">
@@ -201,9 +219,9 @@ export function CallsView({
                       </span>
                     </td>
                     <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-600 dark:text-zinc-300">
-                      {call.subcalls.length > 0 ? (
+                      {call.subcallCount > 0 ? (
                         <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-700/60">
-                          {call.subcalls.length} 次
+                          {call.subcallCount} 次{call.truncated ? "+" : ""}
                         </span>
                       ) : (
                         <span className="text-zinc-400">-</span>
@@ -219,7 +237,7 @@ export function CallsView({
                     </td>
                     <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
                       <span className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 group-hover:underline text-[11px] font-sans">
-                        详情 →
+                        {detailLoading === call.id ? "读取中…" : "详情 →"}
                       </span>
                     </td>
                   </tr>
@@ -275,6 +293,9 @@ function StatusIcon({ status }: { status: CallRecord["status"] }) {
   }
   if (status === "yielding") {
     return <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />;
+  }
+  if (status === "terminated") {
+    return <Square className="w-3.5 h-3.5 text-zinc-500" />;
   }
   return <AlertCircle className="w-3.5 h-3.5 text-rose-500" />;
 }

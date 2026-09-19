@@ -12,13 +12,13 @@ import { ConfigView } from "./components/ConfigView";
 import { AuthModal } from "./components/AuthModal";
 import { useAuth } from "./context/AuthContext";
 import { apiFetch } from "./lib/api";
-import { CallRecord, PaginatedResult, SessionSummary } from "./types";
+import type { CallSummary, PaginatedResult, SessionSummary } from "./types";
 
 export function App() {
   const { isAuthenticated, isVerifying, systemStatus, refreshStatus } =
     useAuth();
   const [activeTab, setActiveTab] = useState("calls");
-  const [online, setOnline] = useState(true);
+  const [online, setOnline] = useState(false);
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -29,7 +29,7 @@ export function App() {
     sessionId?: string;
   }>({});
   const [callsData, setCallsData] =
-    useState<PaginatedResult<CallRecord> | null>(null);
+    useState<PaginatedResult<CallSummary> | null>(null);
 
   // Sessions state
   const [sessionsPage, setSessionsPage] = useState(1);
@@ -56,10 +56,11 @@ export function App() {
         params.set("sessionId", callsFilters.sessionId);
       }
 
-      const res = await apiFetch<PaginatedResult<CallRecord>>(
+      const res = await apiFetch<PaginatedResult<CallSummary>>(
         `/api/calls?${params.toString()}`,
       );
       setCallsData(res);
+      if (res.page !== callsPage) setCallsPage(res.page);
       setOnline(true);
     } catch {
       setOnline(false);
@@ -79,6 +80,7 @@ export function App() {
         `/api/sessions?${params.toString()}`,
       );
       setSessionsData(res);
+      if (res.page !== sessionsPage) setSessionsPage(res.page);
     } catch {
       /* ignore */
     }
@@ -86,47 +88,81 @@ export function App() {
 
   // Initial load & Polling fallback
   useEffect(() => {
-    fetchCalls();
-    fetchSessions();
-  }, [fetchCalls, fetchSessions]);
+    if (!isAuthenticated) return;
+    const refresh = () => {
+      void Promise.all([fetchCalls(), fetchSessions(), refreshStatus()]);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    return () => window.clearInterval(timer);
+  }, [fetchCalls, fetchSessions, isAuthenticated, refreshStatus]);
 
   // Real-time Server-Sent Events (SSE) Stream
   useEffect(() => {
     if (!isAuthenticated) return;
 
     let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource("/api/events");
-      eventSource.onopen = () => setOnline(true);
-      eventSource.onerror = () => setOnline(false);
-      eventSource.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.type?.startsWith("call:")) {
-            fetchCalls();
-            fetchSessions();
-            refreshStatus();
+    let refreshTimer: number | undefined;
+    let reconnectTimer: number | undefined;
+    let disposed = false;
+    const scheduleRefresh = () => {
+      if (refreshTimer !== undefined) return;
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        void Promise.all([fetchCalls(), fetchSessions(), refreshStatus()]);
+      }, 150);
+    };
+    const connectEvents = () => {
+      if (disposed) return;
+      try {
+        eventSource?.close();
+        eventSource = new EventSource("/api/events");
+        eventSource.onopen = () => setOnline(true);
+        eventSource.onerror = () => {
+          setOnline(false);
+          eventSource?.close();
+          eventSource = null;
+          void refreshStatus();
+          if (reconnectTimer === undefined)
+            reconnectTimer = window.setTimeout(() => {
+              reconnectTimer = undefined;
+              connectEvents();
+            }, 2000);
+        };
+        eventSource.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type?.startsWith("call:")) scheduleRefresh();
+          } catch {
+            /* ignore ping */
           }
-        } catch {
-          /* ignore ping */
-        }
-      };
-    } catch {
-      /* ignore */
-    }
+        };
+      } catch {
+        reconnectTimer = window.setTimeout(connectEvents, 2000);
+      }
+    };
+    connectEvents();
 
     return () => {
+      disposed = true;
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       eventSource?.close();
     };
   }, [isAuthenticated, fetchCalls, fetchSessions, refreshStatus]);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    setCallsData(null);
+    setSessionsData(null);
+  }, [isAuthenticated]);
 
   const handleClearHistory = async () => {
     if (!confirm("确定要清空所有调用审计流和会话记录吗？")) return;
     try {
       await apiFetch("/api/calls", { method: "DELETE" });
-      fetchCalls();
-      fetchSessions();
-      refreshStatus();
+      setCallsPage(1);
+      await Promise.all([fetchCalls(), fetchSessions(), refreshStatus()]);
     } catch (err) {
       alert("清空失败: " + String(err));
     }
@@ -141,10 +177,17 @@ export function App() {
     setCallsPage(1);
   };
 
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-[#09090b] flex items-center justify-center text-xs text-zinc-500">
+        正在检查 Web UI 访问权限…
+      </div>
+    );
+  }
+  if (!isAuthenticated) return <AuthModal />;
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors duration-150">
-      {!isAuthenticated && !isVerifying && <AuthModal />}
-
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}

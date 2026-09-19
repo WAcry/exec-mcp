@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   CallRecord,
   CallStatus,
@@ -7,11 +8,12 @@ import type {
   SubCallRecord,
   ActivityStats,
 } from "./types.js";
+import { snapshotAuditValue, truncateAuditText } from "./snapshot.js";
 
 export type ActivityEvent =
-  | { type: "call:start"; call: CallRecord }
-  | { type: "call:subcall"; callId: string; subcall: SubCallRecord }
-  | { type: "call:finish"; call: CallRecord }
+  | { type: "call:start"; callId: string; sessionId: string }
+  | { type: "call:subcall"; callId: string; subcallId: string }
+  | { type: "call:finish"; callId: string; status: CallStatus }
   | { type: "call:clear" };
 
 export interface ActiveCallController {
@@ -32,13 +34,27 @@ export interface ActiveCallController {
 
 export class ActivityStore {
   private readonly maxCalls: number;
+  private readonly maxSubcalls: number;
+  private enabled: boolean;
   private calls: CallRecord[] = [];
   private callsById = new Map<string, CallRecord>();
   private sessions = new Map<string, SessionSummary>();
   private listeners = new Set<(event: ActivityEvent) => void>();
 
-  constructor(options: { maxCalls?: number } = {}) {
-    this.maxCalls = options.maxCalls ?? 1000;
+  constructor(
+    options: {
+      maxCalls?: number;
+      maxSubcalls?: number;
+      enabled?: boolean;
+    } = {},
+  ) {
+    this.maxCalls = options.maxCalls ?? 200;
+    this.maxSubcalls = options.maxSubcalls ?? 50;
+    this.enabled = options.enabled ?? true;
+    if (!Number.isSafeInteger(this.maxCalls) || this.maxCalls < 1)
+      throw new Error("活动审计 maxCalls 必须是正安全整数。");
+    if (!Number.isSafeInteger(this.maxSubcalls) || this.maxSubcalls < 2)
+      throw new Error("活动审计 maxSubcalls 必须至少为 2。");
   }
 
   subscribe(listener: (event: ActivityEvent) => void): () => void {
@@ -63,19 +79,25 @@ export class ActivityStore {
     sessionId: string;
     args: CallRecord["args"];
   }): ActiveCallController {
-    const id = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    if (!this.enabled) return disabledCall(params);
+    const id = `call_${randomUUID()}`;
     const startTime = Date.now();
     const startedAt = new Date(startTime).toISOString();
     const sessionId = params.sessionId || "default";
 
+    const capturedArgs = this.snapshotArgs(params.args);
+    const args = capturedArgs.value;
     const call: CallRecord = {
       id,
       sessionId,
       tool: params.tool,
       status: "running",
       startedAt,
-      args: params.args,
+      args,
       subcalls: [],
+      ...(capturedArgs.truncatedFields
+        ? { truncatedFields: capturedArgs.truncatedFields }
+        : {}),
     };
 
     this.calls.unshift(call);
@@ -85,6 +107,7 @@ export class ActivityStore {
       const removed = this.calls.pop();
       if (removed) {
         this.callsById.delete(removed.id);
+        this.rebuildSession(removed.sessionId);
       }
     }
 
@@ -106,10 +129,10 @@ export class ActivityStore {
       tool: params.tool,
       status: "running",
       timestamp: startedAt,
-      preview: this.extractPreview(params.tool, params.args),
+      preview: this.extractPreview(params.tool, args),
     };
 
-    this.emit({ type: "call:start", call });
+    this.emit({ type: "call:start", callId: id, sessionId });
 
     let finished = false;
 
@@ -117,24 +140,29 @@ export class ActivityStore {
       id,
       call,
       recordSubcall: (subcallInput) => {
+        const input = snapshotAuditValue(subcallInput.input, 4096);
+        const output =
+          subcallInput.output === undefined
+            ? undefined
+            : snapshotAuditValue(subcallInput.output, 8192);
+        const error =
+          subcallInput.error === undefined
+            ? undefined
+            : truncateAuditText(subcallInput.error, 4096);
         const subcall: SubCallRecord = {
-          id:
-            subcallInput.id ??
-            `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: subcallInput.id ?? `sub_${randomUUID()}`,
           timestamp: subcallInput.timestamp ?? new Date().toISOString(),
           name: subcallInput.name,
           durationMs: subcallInput.durationMs,
-          input: subcallInput.input,
-          ...(subcallInput.output !== undefined
-            ? { output: subcallInput.output }
-            : {}),
-          ...(subcallInput.error !== undefined
-            ? { error: subcallInput.error }
-            : {}),
+          input: input.value,
+          ...(output === undefined ? {} : { output: output.value }),
+          ...(error === undefined ? {} : { error: error.value }),
           status: subcallInput.status,
         };
-        call.subcalls.push(subcall);
-        this.emit({ type: "call:subcall", callId: id, subcall });
+        if (input.truncated || output?.truncated || error?.truncated)
+          call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+        if (this.callsById.has(id)) this.pushSubcall(call, subcall);
+        this.emit({ type: "call:subcall", callId: id, subcallId: subcall.id });
         return subcall;
       },
       finish: ({ status, output, error }) => {
@@ -144,11 +172,21 @@ export class ActivityStore {
         call.status = status;
         call.endedAt = new Date(endTime).toISOString();
         call.durationMs = endTime - startTime;
-        if (output !== undefined) call.output = output;
-        if (error !== undefined) call.error = error;
+        if (output !== undefined && this.callsById.has(id)) {
+          const snapshot = snapshotAuditValue(output, 16 * 1024);
+          call.output = snapshot.value;
+          if (snapshot.truncated)
+            call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+        }
+        if (error !== undefined && this.callsById.has(id)) {
+          const snapshot = truncateAuditText(error, 4096);
+          call.error = snapshot.value;
+          if (snapshot.truncated)
+            call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+        }
 
         const currentSession = this.sessions.get(sessionId);
-        if (currentSession) {
+        if (currentSession && this.callsById.has(id)) {
           if (status === "error") {
             currentSession.errorCount++;
           }
@@ -159,7 +197,7 @@ export class ActivityStore {
           }
         }
 
-        this.emit({ type: "call:finish", call });
+        this.emit({ type: "call:finish", callId: id, status });
         return call;
       },
     };
@@ -170,7 +208,7 @@ export class ActivityStore {
   }
 
   getCalls(options: CallFilterOptions = {}): PaginatedResult<CallRecord> {
-    const page = Math.max(1, options.page ?? 1);
+    const requestedPage = Math.max(1, options.page ?? 1);
     const pageSize = Math.max(1, Math.min(100, options.pageSize ?? 20));
 
     let filtered = this.calls;
@@ -217,6 +255,7 @@ export class ActivityStore {
 
     const total = filtered.length;
     const totalPages = Math.ceil(total / pageSize) || 1;
+    const page = Math.min(requestedPage, totalPages);
     const offset = (page - 1) * pageSize;
     const items = filtered.slice(offset, offset + pageSize);
 
@@ -236,7 +275,7 @@ export class ActivityStore {
       pageSize?: number;
     } = {},
   ): PaginatedResult<SessionSummary> {
-    const page = Math.max(1, options.page ?? 1);
+    const requestedPage = Math.max(1, options.page ?? 1);
     const pageSize = Math.max(1, Math.min(100, options.pageSize ?? 20));
 
     let list = Array.from(this.sessions.values()).sort(
@@ -255,6 +294,7 @@ export class ActivityStore {
 
     const total = list.length;
     const totalPages = Math.ceil(total / pageSize) || 1;
+    const page = Math.min(requestedPage, totalPages);
     const offset = (page - 1) * pageSize;
     const items = list.slice(offset, offset + pageSize);
 
@@ -290,6 +330,14 @@ export class ActivityStore {
       runningCalls,
       avgDurationMs:
         finishedCount > 0 ? Math.round(totalDuration / finishedCount) : 0,
+      truncatedFields: this.calls.reduce(
+        (total, call) => total + (call.truncatedFields ?? 0),
+        0,
+      ),
+      omittedSubcalls: this.calls.reduce(
+        (total, call) => total + (call.omittedSubcalls ?? 0),
+        0,
+      ),
     };
   }
 
@@ -298,6 +346,12 @@ export class ActivityStore {
     this.callsById.clear();
     this.sessions.clear();
     this.emit({ type: "call:clear" });
+  }
+
+  disable(): void {
+    if (!this.enabled) return;
+    this.enabled = false;
+    this.clear();
   }
 
   private extractPreview(tool: string, args: CallRecord["args"]): string {
@@ -310,4 +364,98 @@ export class ActivityStore {
     }
     return `${tool}()`;
   }
+
+  private snapshotArgs(args: CallRecord["args"]): {
+    value: CallRecord["args"];
+    truncatedFields: number;
+  } {
+    const result: CallRecord["args"] = {};
+    let truncated = 0;
+    for (const [key, value] of Object.entries(args)) {
+      if (value === undefined) continue;
+      if (key === "source" && typeof value === "string") {
+        const snapshot = truncateAuditText(value, 16 * 1024);
+        result.source = snapshot.value;
+        if (snapshot.truncated) truncated++;
+        continue;
+      }
+      const snapshot = snapshotAuditValue(value, 8192);
+      result[key] = snapshot.value;
+      if (snapshot.truncated) truncated++;
+    }
+    return { value: result, truncatedFields: truncated };
+  }
+
+  private pushSubcall(call: CallRecord, subcall: SubCallRecord): void {
+    if (call.subcalls.length < this.maxSubcalls) {
+      call.subcalls.push(subcall);
+      return;
+    }
+    const head = Math.max(1, Math.floor(this.maxSubcalls / 5));
+    call.subcalls.splice(head, 1);
+    call.subcalls.push(subcall);
+    call.omittedSubcalls = (call.omittedSubcalls ?? 0) + 1;
+  }
+
+  private rebuildSession(sessionId: string): void {
+    const calls = this.calls.filter((call) => call.sessionId === sessionId);
+    if (!calls.length) {
+      this.sessions.delete(sessionId);
+      return;
+    }
+    const newest = calls[0]!;
+    const oldest = calls.at(-1)!;
+    this.sessions.set(sessionId, {
+      id: sessionId,
+      callCount: calls.length,
+      errorCount: calls.filter((call) => call.status === "error").length,
+      firstSeen: oldest.startedAt,
+      lastActive: newest.endedAt ?? newest.startedAt,
+      lastCall: {
+        id: newest.id,
+        tool: newest.tool,
+        status: newest.status,
+        ...(newest.durationMs === undefined
+          ? {}
+          : { durationMs: newest.durationMs }),
+        timestamp: newest.startedAt,
+        preview: this.extractPreview(newest.tool, newest.args),
+      },
+    });
+  }
+}
+
+function disabledCall(params: {
+  tool: "exec" | "wait";
+  sessionId: string;
+  args: CallRecord["args"];
+}): ActiveCallController {
+  const call: CallRecord = {
+    id: "audit-disabled",
+    sessionId: params.sessionId || "unscoped",
+    tool: params.tool,
+    status: "running",
+    startedAt: "",
+    args: {},
+    subcalls: [],
+  };
+  return {
+    id: call.id,
+    call,
+    recordSubcall(subcall) {
+      return {
+        id: subcall.id ?? "audit-disabled",
+        timestamp: subcall.timestamp ?? "",
+        name: subcall.name,
+        durationMs: subcall.durationMs,
+        input: "[审计已关闭]",
+        status: subcall.status,
+        ...(subcall.error === undefined ? {} : { error: "[审计已关闭]" }),
+      };
+    },
+    finish(result) {
+      call.status = result.status;
+      return call;
+    },
+  };
 }

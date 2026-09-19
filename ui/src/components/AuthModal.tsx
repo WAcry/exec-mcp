@@ -14,6 +14,8 @@ export function AuthModal() {
     const ok = await verifyToken(inputToken.trim());
     if (!ok) {
       setErrorMsg("密钥不正确或已失效，请检查终端启动日志中的一次性密钥。");
+    } else {
+      setInputToken("");
     }
   };
 
@@ -28,8 +30,8 @@ export function AuthModal() {
           局域网访问授权
         </h2>
         <p className="mt-1.5 text-xs text-center text-zinc-500 dark:text-zinc-400">
-          您当前通过局域网 (0.0.0.0) 访问 EXEC MCP
-          控制台，请输入终端启动时输出的一次性动态访问密钥以继续。
+          当前请求未通过 Web UI 鉴权。请输入服务启动日志中的本次访问密钥，
+          或重新打开带有 <code>#token=…</code> 片段的局域网链接。
         </p>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
@@ -43,6 +45,9 @@ export function AuthModal() {
                 type="password"
                 placeholder="例如: a3f89e2c..."
                 value={inputToken}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 onChange={(e) => {
                   setInputToken(e.target.value);
                   setErrorMsg("");
@@ -72,7 +77,7 @@ export function AuthModal() {
 
         <div className="mt-5 pt-3 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 justify-center">
           <Server className="w-3 h-3" />
-          <span>本地 127.0.0.1 访问无需输入密钥</span>
+          <span>默认配置仅监听本机回环；局域网开放需要显式配置</span>
         </div>
       </div>
     </div>

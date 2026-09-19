@@ -13,8 +13,14 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem("exec_ui_theme");
-    return (saved as Theme) || "system";
+    try {
+      const saved = localStorage.getItem("exec_ui_theme");
+      if (saved === "light" || saved === "dark" || saved === "system")
+        return saved;
+    } catch {
+      /* A blocked storage API should not prevent the console from loading. */
+    }
+    return "system";
   });
 
   const [systemDark, setSystemDark] = useState<boolean>(() => {
@@ -42,7 +48,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
-    localStorage.setItem("exec_ui_theme", newTheme);
+    try {
+      localStorage.setItem("exec_ui_theme", newTheme);
+    } catch {
+      /* Keep the in-memory choice for this page. */
+    }
   };
 
   const toggleTheme = () => {

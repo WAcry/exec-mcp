@@ -244,6 +244,17 @@ export class ArtifactStore {
     return { revoked: true };
   }
 
+  /** Instance-management UI already sits behind the Web console boundary; it
+   * revokes by opaque export id without pretending to be a ChatGPT conversation. */
+  async revokeFromInstance(id: string): Promise<{ revoked: boolean }> {
+    const record = this.#records.get(id);
+    if (!record || !this.#valid(record))
+      throw new Error("文件资源不存在或已失效。");
+    this.#retire(record);
+    await record.removing;
+    return { revoked: true };
+  }
+
   available(id: string, scope?: string): boolean {
     try {
       this.#lookup(id, scope);

@@ -3,39 +3,50 @@ import type { ServerResponse } from "node:http";
 export class SseBroker {
   private clients = new Set<ServerResponse>();
   private heartbeatTimer?: NodeJS.Timeout | undefined;
+  private readonly maxClients: number;
 
-  constructor() {
+  constructor(options: { maxClients?: number } = {}) {
+    this.maxClients = options.maxClients ?? 16;
     this.heartbeatTimer = setInterval(() => {
       this.ping();
     }, 15_000);
     this.heartbeatTimer.unref();
   }
 
-  addClient(res: ServerResponse): void {
+  addClient(res: ServerResponse): boolean {
+    if (this.clients.size >= this.maxClients) return false;
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
       "X-Accel-Buffering": "no",
     });
 
-    res.write(
-      `data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`,
-    );
+    if (
+      !res.write(
+        `data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`,
+      )
+    ) {
+      res.end();
+      return true;
+    }
 
     this.clients.add(res);
 
     res.on("close", () => {
       this.clients.delete(res);
     });
+    return true;
   }
 
   broadcast(event: unknown): void {
     const payload = `data: ${JSON.stringify(event)}\n\n`;
     for (const client of this.clients) {
       try {
-        client.write(payload);
+        if (!client.write(payload)) {
+          this.clients.delete(client);
+          client.end();
+        }
       } catch {
         this.clients.delete(client);
       }
@@ -45,11 +56,25 @@ export class SseBroker {
   private ping(): void {
     for (const client of this.clients) {
       try {
-        client.write(": ping\n\n");
+        if (!client.write(": ping\n\n")) {
+          this.clients.delete(client);
+          client.end();
+        }
       } catch {
         this.clients.delete(client);
       }
     }
+  }
+
+  disconnectClients(): void {
+    for (const client of this.clients) {
+      try {
+        client.end();
+      } catch {
+        /* Ignore an already closed response. */
+      }
+    }
+    this.clients.clear();
   }
 
   close(): void {
@@ -57,13 +82,6 @@ export class SseBroker {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
-    for (const client of this.clients) {
-      try {
-        client.end();
-      } catch {
-        /* Ignore */
-      }
-    }
-    this.clients.clear();
+    this.disconnectClients();
   }
 }

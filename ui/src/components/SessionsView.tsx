@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
-import { SessionSummary, PaginatedResult, NativeSessionItem } from "../types";
+import type {
+  SessionSummary,
+  PaginatedResult,
+  NativeSessionItem,
+} from "../types";
 import { apiFetch } from "../lib/api";
 import {
   Layers,
@@ -29,15 +33,19 @@ export function SessionsView({
   );
 
   useEffect(() => {
-    apiFetch<{ sessions: NativeSessionItem[] }>("/api/native-sessions")
-      .then((res) => {
-        const map: Record<string, NativeSessionItem> = {};
-        for (const s of res.sessions) {
-          if (s.scope) map[s.scope] = s;
-        }
-        setNativeMap(map);
-      })
-      .catch(() => {});
+    const refresh = () =>
+      apiFetch<{ sessions: NativeSessionItem[] }>("/api/native-sessions")
+        .then((res) => {
+          const map: Record<string, NativeSessionItem> = {};
+          for (const session of res.sessions) {
+            if (session.scope) map[session.scope] = session;
+          }
+          setNativeMap(map);
+        })
+        .catch(() => {});
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -52,7 +60,7 @@ export function SessionsView({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
             type="text"
-            placeholder="搜索 OpenAI 会话标识符或最近调用..."
+            placeholder="搜索会话关联摘要或最近调用..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
@@ -67,7 +75,8 @@ export function SessionsView({
         {!sessionsData || sessionsData.items.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
             暂未捕获到任何会话。当 ChatGPT 附带{" "}
-            <code>_meta["openai/session"]</code> 调用时，将自动归类建组。
+            <code>_meta["openai/session"]</code>{" "}
+            调用时，将按不可逆摘要归类建组。
           </div>
         ) : (
           sessionsData.items.map((session) => (

@@ -11,6 +11,7 @@ import {
   Settings,
   HardDrive,
   FileCode2,
+  LogOut,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -21,7 +22,7 @@ interface HeaderProps {
 
 export function Header({ activeTab, setActiveTab, online }: HeaderProps) {
   const { theme, setTheme } = useTheme();
-  const { systemStatus } = useAuth();
+  const { systemStatus, logout } = useAuth();
 
   const navItems = [
     { id: "calls", label: "调用审计流", icon: Activity },
@@ -95,9 +96,21 @@ export function Header({ activeTab, setActiveTab, online }: HeaderProps) {
           {/* Right Actions: SSE Status & Theme Toggle */}
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200/80 dark:border-zinc-800 whitespace-nowrap shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
-              <span>SSE 监听中</span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${online ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+              />
+              <span>{online ? "事件流已连接" : "事件流已断开"}</span>
             </div>
+
+            {systemStatus && !systemStatus.isLoopback && (
+              <button
+                onClick={() => void logout()}
+                className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                title="退出 Web UI"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             {/* Theme switcher */}
             <div className="flex items-center p-0.5 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 shrink-0">

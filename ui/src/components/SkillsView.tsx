@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { SkillsResponse } from "../types";
+import type { SkillsResponse } from "../types";
 import { apiFetch } from "../lib/api";
 import {
   FileCode2,
@@ -29,7 +29,7 @@ export function SkillsView() {
   }, []);
 
   const totalChars = data?.totalChars ?? 0;
-  const maxChars = data?.maxChars ?? 10000;
+  const maxChars = data?.maxChars ?? 40000;
   const pct = Math.min(100, Math.round((totalChars / maxChars) * 100));
 
   return (
@@ -38,11 +38,11 @@ export function SkillsView() {
         <div>
           <h2 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
             <FileCode2 className="w-3.5 h-3.5 text-zinc-400" />
-            本机与项目 Skills 目录 (tools.list_skills)
+            用户级 Skills 目录 (tools.list_skills)
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            单次发现目录，字符预算控制在约 10,000 tokens。全文由 ChatGPT
-            按需通过系统命令读取。
+            此页扫描 ~/.agents/skills 与 ~/.codex/skills；项目级 Skills 由
+            ChatGPT 在具体 workdir 下发现。完整正文仍按需读取。
           </p>
         </div>
 
@@ -88,13 +88,12 @@ export function SkillsView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {!data || data.skills.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
-            未在当前环境或工作区发现任何 Skill 定义。支持{" "}
-            <code>.cursor/skills/</code> 等标准规范路径。
+            未在 ~/.agents/skills 或 ~/.codex/skills 中发现启用的 Skill。
           </div>
         ) : (
           data.skills.map((skill) => (
             <div
-              key={skill.name}
+              key={skill.path}
               className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs space-y-2.5 flex flex-col justify-between"
             >
               <div>
@@ -105,10 +104,16 @@ export function SkillsView() {
                   <h3 className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
                     {skill.name}
                   </h3>
+                  {!skill.implicit && (
+                    <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 whitespace-nowrap">
+                      仅显式调用
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  {skill.description || "暂无描述信息"}
+                  {skill.description ||
+                    "仅在用户明确指定时读取；触发描述未向模型公开。"}
                 </p>
               </div>
 

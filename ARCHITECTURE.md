@@ -20,6 +20,10 @@ ChatGPT 是主 Agent；服务不是另一个模型推理循环。
 执行内核不知道请求经过哪一种 Tunnel，也不拥有用户的项目或 Git 工作流。
 项目路径不是 Workspace 身份，执行句柄不是持久任务身份。
 
+Web 控制台只观察和管理同一运行时的有界临时状态，不是执行内核、认证提供方或第二个 Agent。
+默认只监听回环地址；局域网开放、浏览器认证、审计裁剪和静态资源边界见
+[ADR-009](docs/adr-009-web-console.md)。
+
 Skill 发现只把远端文档的元数据交给 Agent，不自动装载正文或执行脚本。
 一次完整目录、软链接路径、显式调用策略和可调压缩预算见 [ADR-006](docs/adr-006-skill-catalog.md)。
 同一对话复用原生 session 并通过 host 的 store/load 显式共享内存数据；每次 exec 的 V8 isolate 和工具快照仍独立。

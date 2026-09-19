@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { McpServersResponse } from "../types";
+import type { McpServersResponse } from "../types";
 import { apiFetch } from "../lib/api";
 import { CodeBlock } from "./CodeBlock";
 import { Wrench, Server, Search, ChevronRight } from "lucide-react";
@@ -80,7 +80,8 @@ export function McpView() {
                   {s.transport === "stdio" ? (
                     <div>
                       <span className="text-zinc-400 font-sans">命令: </span>
-                      {s.command} {s.args?.join(" ")}
+                      {s.command}
+                      {s.argsCount ? `（${s.argsCount} 个参数，值已隐藏）` : ""}
                     </div>
                   ) : (
                     <div>
@@ -96,6 +97,22 @@ export function McpView() {
                       {s.cwd}
                     </div>
                   )}
+                  {s.envKeys?.length ? (
+                    <div>
+                      <span className="text-zinc-400 font-sans">
+                        环境变量键:{" "}
+                      </span>
+                      {s.envKeys.join(", ")}
+                    </div>
+                  ) : null}
+                  {s.headerNames?.length ? (
+                    <div>
+                      <span className="text-zinc-400 font-sans">
+                        HTTP Header 键:{" "}
+                      </span>
+                      {s.headerNames.join(", ")}
+                    </div>
+                  ) : null}
                 </div>
 
                 {s.enabledTools && (
@@ -150,13 +167,13 @@ export function McpView() {
           </button>
         </form>
 
-        {searchResult && (
+        {searchResult !== null && (
           <div className="mt-3 space-y-1.5">
             <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
               检索命中结果:
             </span>
             <CodeBlock
-              code={JSON.stringify(searchResult, null, 2)}
+              code={JSON.stringify(searchResult, null, 2) ?? "null"}
               language="json"
               maxHeight="max-h-64"
             />

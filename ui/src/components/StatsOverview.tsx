@@ -1,5 +1,12 @@
-import { ActivityStats } from "../types";
-import { Activity, Clock, AlertCircle, Layers, Zap } from "lucide-react";
+import type { ActivityStats } from "../types";
+import {
+  Activity,
+  Clock,
+  AlertCircle,
+  Layers,
+  Zap,
+  Scissors,
+} from "lucide-react";
 
 interface StatsOverviewProps {
   stats: ActivityStats;
@@ -41,10 +48,18 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
       unit: "ms",
       icon: Clock,
     },
+    {
+      label: "审计裁剪",
+      value: stats.truncatedFields + stats.omittedSubcalls,
+      unit: "处",
+      icon: Scissors,
+      active: stats.truncatedFields + stats.omittedSubcalls > 0,
+      activeColor: "bg-amber-500",
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
       {cards.map((c, i) => {
         const Icon = c.icon;
         return (

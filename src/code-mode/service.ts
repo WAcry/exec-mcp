@@ -213,6 +213,7 @@ export class CodeModeService {
         undefined,
         request.takeAttachments,
       );
+      notifyState(request.onState, outcome.state);
       return await this.#modelResult(
         outcome,
         elapsedSeconds(startedAt),
@@ -269,6 +270,7 @@ export class CodeModeService {
           request.cellId,
           owner.takeAttachments,
         );
+        notifyState(request.onState, outcome.state);
         return this.#modelResult(
           outcome,
           elapsedSeconds(startedAt),
@@ -661,6 +663,19 @@ export class CodeModeService {
   }
 }
 
+function notifyState(
+  observer:
+    | ((state: "yielded" | "completed" | "terminated") => void)
+    | undefined,
+  state: "yielded" | "completed" | "terminated",
+): void {
+  try {
+    observer?.(state);
+  } catch {
+    /* Web observability must never change execution semantics. */
+  }
+}
+
 function assertMatchingScope(
   ownerScope: string | undefined,
   requestedScope: string | undefined,
@@ -771,7 +786,7 @@ function validateYieldTime(
   }
 }
 
-function sessionScopeKey(scope: string | undefined): string | undefined {
+export function sessionScopeKey(scope: string | undefined): string | undefined {
   if (scope === undefined || scope === "") return undefined;
   return crypto.createHash("sha256").update(scope, "utf8").digest("base64url");
 }

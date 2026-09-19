@@ -13,9 +13,7 @@ import {
   Cpu,
   Layers,
   AlertTriangle,
-  CheckCircle2,
   AlertCircle,
-  HelpCircle,
 } from "lucide-react";
 
 export function TerminalsView() {

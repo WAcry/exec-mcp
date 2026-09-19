@@ -1,4 +1,9 @@
-export type CallStatus = "running" | "completed" | "error" | "yielding";
+export type CallStatus =
+  | "running"
+  | "completed"
+  | "error"
+  | "yielding"
+  | "terminated";
 
 export interface SubCallRecord {
   id: string;
@@ -36,6 +41,8 @@ export interface CallRecord {
     [key: string]: unknown;
   };
   subcalls: SubCallRecord[];
+  omittedSubcalls?: number | undefined;
+  truncatedFields?: number | undefined;
   output?: unknown | undefined;
   error?: string | undefined;
 }
@@ -75,20 +82,14 @@ export interface PaginatedResult<T> {
   totalPages: number;
 }
 
-export interface WebServerOptions {
-  port?: number | undefined;
-  host?: string | undefined;
-  token?: string | undefined;
-  publicDir?: string | undefined;
-  configPath?: string | undefined;
-}
-
 export interface ActivityStats {
   totalCalls: number;
   activeSessions: number;
   errorCalls: number;
   runningCalls: number;
   avgDurationMs: number;
+  truncatedFields: number;
+  omittedSubcalls: number;
 }
 
 export interface CodeModeMemoryStatus {

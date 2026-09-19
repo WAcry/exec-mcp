@@ -61,11 +61,21 @@ export function cellId(result: CallToolResult): string {
 }
 export function nodeCommand(source: string): string {
   const script = `eval(Buffer.from('${Buffer.from(source).toString("base64")}','base64').toString())`;
-  const quote = (value: string): string =>
-    process.platform === "win32"
-      ? `'${value.replaceAll("'", "''")}'`
-      : `'${value.replaceAll("'", "'\\''")}'`;
-  return `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} -e ${quote(script)}${process.platform === "win32" ? "; exit $LASTEXITCODE" : ""}`;
+  return `${nodeExecutable()} -e ${shellQuote(script)}${powershellExitCode()}`;
+}
+export function nodeFileCommand(filename: string): string {
+  return `${nodeExecutable()} ${shellQuote(filename)}${powershellExitCode()}`;
+}
+function nodeExecutable(): string {
+  return `${process.platform === "win32" ? "& " : ""}${shellQuote(process.execPath)}`;
+}
+function powershellExitCode(): string {
+  return process.platform === "win32" ? "; exit $LASTEXITCODE" : "";
+}
+function shellQuote(value: string): string {
+  return process.platform === "win32"
+    ? `'${value.replaceAll("'", "''")}'`
+    : `'${value.replaceAll("'", "'\\''")}'`;
 }
 export async function connect(overrides: Partial<Config> = {}, legacy = false) {
   const server = await startServer({

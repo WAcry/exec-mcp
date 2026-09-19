@@ -21,6 +21,11 @@ import {
   DEFAULT_SKILL_MAX_CHARS,
   type SkillsConfig,
 } from "./skills/types.js";
+import {
+  WEB_CONFIG_SCHEMA,
+  WEB_DEFAULTS,
+  type WebConfig,
+} from "./web/config.js";
 
 const strings = z.record(z.string(), z.string());
 const serverSchema = z
@@ -76,6 +81,7 @@ const configSchema = z
     files: FILE_CONFIG_SCHEMA.optional(),
     skills: SKILLS_CONFIG_SCHEMA.optional(),
     memory: MEMORY_SCHEMA.optional(),
+    web: WEB_CONFIG_SCHEMA.optional(),
     execution: z
       .object({
         shell: z
@@ -101,8 +107,9 @@ export interface Config {
   skills?: SkillsConfig;
   execution?: ExecutionConfig;
   memory?: MemoryConfig;
+  web?: WebConfig;
 }
-export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [execution]\n# shell = "pwsh" # 可执行文件名或路径；省略则按系统自动选择。\n# login = false\n\n# [memory]\n# code_mode_high_water_mib = ${MEMORY_DEFAULTS.code_mode_high_water_mib}\n# idle_retention_hours = ${MEMORY_DEFAULTS.idle_retention_hours}\n# terminal_buffer_mib = ${MEMORY_DEFAULTS.terminal_buffer_mib}\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
+export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [web]\n# enabled = ${WEB_DEFAULTS.enabled}\n# host = "${WEB_DEFAULTS.host}" # 默认仅本机；明确改为 0.0.0.0 或 :: 才开放局域网。\n# port = ${WEB_DEFAULTS.port}\n\n# [execution]\n# shell = "pwsh" # 可执行文件名或路径；省略则按系统自动选择。\n# login = false\n\n# [memory]\n# code_mode_high_water_mib = ${MEMORY_DEFAULTS.code_mode_high_water_mib}\n# idle_retention_hours = ${MEMORY_DEFAULTS.idle_retention_hours}\n# terminal_buffer_mib = ${MEMORY_DEFAULTS.terminal_buffer_mib}\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
 export function defaultConfigPath(): string {
   return (
     process.env.EXEC_MCP_CONFIG ?? path.join(configDirectory(), "config.toml")
@@ -129,6 +136,7 @@ export function parseConfig(text: string, filename: string): Config {
     auth,
     tunnel,
     memory,
+    web,
   } = parsed.data;
   validatePublicAccess({
     ...server,
@@ -206,6 +214,7 @@ export function parseConfig(text: string, filename: string): Config {
     ...(tunnel === undefined ? {} : { tunnel }),
     ...(files === undefined ? {} : { files }),
     ...(memory === undefined ? {} : { memory }),
+    ...(web === undefined ? {} : { web }),
     ...(skills === undefined ? {} : { skills }),
     ...(execution === undefined
       ? {}

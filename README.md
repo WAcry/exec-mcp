@@ -4,7 +4,8 @@
 以及调用你配置的其他 MCP 服务。继续使用 ChatGPT，不需要迁移项目或打开另一套聊天界面。
 
 助手可以在一次调用里组合独立操作、并发执行并整理结果，减少机械性的往返。
-工具说明使用中文；支持 ChatGPT 文件导入和产物交付，当前没有控制面板、内建 Skills 管理或问题表单。
+工具说明使用中文；支持 ChatGPT 文件导入和产物交付，并提供可关闭的本机 Web 管理控制台。
+控制台用于观察和管理当前实例，不是另一套聊天界面，也不增加模型或子 Agent。
 
 > **当前是可从源码运行的首版，尚未发布 npm 包或正式安装器。**
 > CI 包含 Linux、Windows、macOS 的 Node 20/22/24 真实执行与独立打包安装验证（含管道和 PTY）。
@@ -39,16 +40,38 @@ node dist/src/cli.js serve
 
 ### Web UI 控制台
 
-`exec-mcp serve` 启动时，会自动就绪现代化的 Web UI 控制台：
-- **本机回环访问（免密）**：`http://localhost:8892/`
-- **局域网访问（0.0.0.0）**：`http://<局域网IP>:8892/?token=<随机高熵动态密钥>`
-- 支持 **Light Mode 与 Dark Mode** 实时无缝切换
-- 实时监听 ChatGPT 调用流（`exec`、`wait`、源代码展开、耗时分析）
-- 按 OpenAI 对话 Session（`_meta["openai/session"]`）自动分组与分页检索
-- 内部子调用链路（`tools.exec_command`、`tools.apply_patch`、下游 MCP）逐级追踪
-- 下游 MCP 服务配置与 BM25 `tool_search` 探针模拟器
-- 本机与项目 Skills 目录列表及字符预算监控
-- 交互式活动终端进程监控、产物文件附件生命周期管理与安全配置脱敏查看
+`exec-mcp serve` 默认同时启动 Web 控制台：
+
+```text
+http://127.0.0.1:8893/
+```
+
+默认只监听本机回环地址。8891 留给 MCP，8892 可供独立文件下载入口使用；端口冲突会明确失败，
+不会自动寻找并占用其他端口。可以配置或关闭：
+
+```toml
+[web]
+enabled = true
+host = "127.0.0.1"
+port = 8893
+```
+
+控制台提供 Light/Dark 模式、`exec`/`wait` 调用摘要与详情、子调用耗时、原生 session 和内存状态、
+终端滚动缓冲、Skills、下游 MCP 检索诊断，以及导出产物查看与撤销。对话使用与原生 session 相同的
+不可逆摘要归组，不在浏览器中展示原始 `_meta["openai/session"]`。
+
+调用审计只保存在当前进程内，重启即清空；记录数量和单项体积有宽松上限，过大的源码、参数、结果或
+子调用会保留首尾并标注裁剪。这只影响控制台副本，不改变 MCP 的实际返回或副作用。配置页面隐藏凭据值、
+HTTP header/env 值和命令参数；但命令及工具结果本身仍可能包含敏感内容，因此该控制台属于高权限界面。
+前端静态资源随包构建，不在运行时加载第三方字体、脚本或遥测。
+设置 `enabled = false` 时不会继续在后台采集上述审计副本；Web 启动失败也会停止采集。
+
+确需局域网访问时显式设置 `host = "0.0.0.0"`（或 IPv6 的 `"::"`）。启动日志会打印带
+`#token=…` fragment 的本次访问链接；fragment 不随 HTTP 请求或 Referrer 发送，前端只用它换取
+HttpOnly cookie，并立即从地址栏移除。默认不会把 Web UI 交给 Cloudflare/Tailscale 的 MCP Tunnel。
+本机重新生成密钥后，旧 cookie 和已经建立的事件流都会立即失效。
+当前局域网 UI 使用 HTTP，只适合受信任网络；不要直接公开到互联网或在不可信 Wi-Fi 上使用。
+完整边界见 [ADR-009](docs/adr-009-web-console.md)。
 
 ## 配置
 
@@ -69,6 +92,12 @@ node dist/src/cli.js serve
 access = "openai-tunnel"
 host = "127.0.0.1"
 port = 8891
+
+# 可选：Web 管理控制台。默认就是下面的回环配置。
+# [web]
+# enabled = true
+# host = "127.0.0.1"
+# port = 8893
 
 # 可选：本机 stdio MCP。
 # [mcp_servers.local]

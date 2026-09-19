@@ -6,7 +6,7 @@ import {
   type ServerContext,
   type ResourceLink,
 } from "@modelcontextprotocol/server";
-import { CodeModeService } from "./code-mode/service.js";
+import { CodeModeService, sessionScopeKey } from "./code-mode/service.js";
 import {
   nativeContracts,
   bindNative,
@@ -88,7 +88,9 @@ export class ExecRuntime {
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
     this.discovery = new ToolDiscovery(this.downstream);
-    this.activity = activity ?? new ActivityStore();
+    // startServer() can be embedded without a Web console. Only an explicit
+    // observer enables capture, so a hidden audit trail is never the default.
+    this.activity = activity ?? new ActivityStore({ enabled: false });
   }
   get ready(): boolean {
     return this.closing === undefined;
@@ -144,7 +146,7 @@ export class ExecRuntime {
         };
         const callTracker = this.activity.startCall({
           tool: "exec",
-          sessionId: scope ?? "default",
+          sessionId: sessionScopeKey(scope) ?? "unscoped",
           args: callArgs,
         });
         let pending: { id: string; content: ResourceLink }[] = [];
@@ -313,6 +315,7 @@ export class ExecRuntime {
               }
             }),
           );
+          let codeModeState: "yielded" | "completed" | "terminated" | undefined;
           const execResult = await this.codeMode.exec({
             source: args.source,
             takeAttachments,
@@ -325,9 +328,18 @@ export class ExecRuntime {
               : { yieldTimeMs: args.yield_time_ms }),
             ...(scope === undefined ? {} : { sessionScope: scope }),
             signal,
+            onState: (state) => {
+              codeModeState = state;
+            },
           });
           callTracker.finish({
-            status: execResult.isError ? "error" : "completed",
+            status: execResult.isError
+              ? "error"
+              : codeModeState === "yielded"
+                ? "yielding"
+                : codeModeState === "terminated"
+                  ? "terminated"
+                  : "completed",
             output: execResult,
           });
           return execResult;
@@ -370,10 +382,11 @@ export class ExecRuntime {
         };
         const callTracker = this.activity.startCall({
           tool: "wait",
-          sessionId: scope ?? "default",
+          sessionId: sessionScopeKey(scope) ?? "unscoped",
           args: waitArgs,
         });
         try {
+          let codeModeState: "yielded" | "completed" | "terminated" | undefined;
           const waitResult = await this.codeMode.wait({
             cellId: args.cell_id,
             ...(args.max_tokens === undefined
@@ -387,9 +400,18 @@ export class ExecRuntime {
               : { terminate: args.terminate }),
             ...(scope === undefined ? {} : { sessionScope: scope }),
             signal: context.mcpReq.signal,
+            onState: (state) => {
+              codeModeState = state;
+            },
           });
           callTracker.finish({
-            status: waitResult.isError ? "error" : "completed",
+            status: waitResult.isError
+              ? "error"
+              : codeModeState === "yielded"
+                ? "yielding"
+                : codeModeState === "terminated"
+                  ? "terminated"
+                  : "completed",
             output: waitResult,
           });
           return waitResult;

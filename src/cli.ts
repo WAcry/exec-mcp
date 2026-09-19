@@ -9,6 +9,8 @@ import { startServer } from "./server.js";
 import { startWebServer } from "./web/server.js";
 import { VERSION } from "./version.js";
 import { runTunnel } from "./tunnel.js";
+import { effectiveWebConfig } from "./web/config.js";
+import { ActivityStore } from "./web/activity.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -83,23 +85,33 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   if (command !== "serve") throw new Error(`未知子命令：${command}`);
   const config = await loadConfig(filename);
-  const server = await startServer(config);
+  const web = effectiveWebConfig(config.web);
+  const activity = new ActivityStore({ enabled: web.enabled });
+  const server = await startServer(config, { activity });
 
   let webServer: Awaited<ReturnType<typeof startWebServer>> | undefined;
-  try {
-    webServer = await startWebServer(server.runtime, config, {
-      port: 8892,
-      host: "0.0.0.0",
-      configPath: filename,
-    });
-  } catch (err) {
-    console.warn(
-      `Web UI 服务启动失败：${err instanceof Error ? err.message : String(err)}`,
-    );
+  if (web.enabled) {
+    try {
+      webServer = await startWebServer(server.runtime, config, {
+        port: web.port,
+        host: web.host,
+        configPath: filename,
+        mcpUrl: server.url,
+      });
+    } catch (error) {
+      server.runtime.activity.disable();
+      console.warn(
+        `Web UI 服务启动失败，MCP 仍可使用：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const webMsg = webServer
-    ? `\nWeb UI 控制台：\n  - 本地访问：${webServer.loopbackUrl}\n  - 局域网访问（0.0.0.0，带一次性动态密钥）：${webServer.lanUrl}`
+    ? `\nWeb UI 控制台：\n  - 本机访问：${webServer.loopbackUrl}${
+        webServer.lanUrls.length
+          ? `\n  - 局域网访问（链接片段含本次启动密钥）：\n${webServer.lanUrls.map((url) => `    ${url}`).join("\n")}`
+          : ""
+      }`
     : "";
 
   console.log(
@@ -113,9 +125,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    void Promise.allSettled([server.close(), webServer?.close()]).catch(() => {
-      console.error("服务关闭时发生清理错误。");
-      process.exitCode = 1;
+    const tasks = [server.close(), ...(webServer ? [webServer.close()] : [])];
+    void Promise.allSettled(tasks).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        console.error("服务关闭时发生清理错误。");
+        process.exitCode = 1;
+      }
     });
   };
   process.once("SIGINT", stop);

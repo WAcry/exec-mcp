@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 import { stripVTControlCharacters } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TerminalManager, type TerminalResult } from "../src/host/terminal.js";
-import { nodeCommand, observeTerminal } from "./helpers.js";
+import { nodeCommand, nodeFileCommand, observeTerminal } from "./helpers.js";
 
 let root: string;
 let sequence = 0;
@@ -70,8 +70,10 @@ async function start(terminal: TerminalManager, tty: boolean, body: string) {
       fs.writeFileSync(emitted,'emitted');
     },5);
   `;
+  const script = prefix + ".cjs";
+  await writeFile(script, source);
   const first = await terminal.execCommand(
-    { cmd: nodeCommand(source), tty, yield_time_ms: 0 },
+    { cmd: nodeFileCommand(script), tty, yield_time_ms: 0 },
     root,
   );
   expect(first.session_id).toBeDefined();
@@ -89,7 +91,7 @@ async function drain(terminal: TerminalManager, first: TerminalResult) {
 const flood = "FLOOD_DATA_0123456789".repeat(3) + "\n";
 const payload = flood.repeat(1100); // About 64 KiB; keep PTY lines shorter than its width.
 function normalized(text: string) {
-  return stripVTControlCharacters(text).replaceAll("\r\n", "\n");
+  return stripVTControlCharacters(text).replaceAll("\r", "");
 }
 
 describe("one terminal's backlog does not suppress another terminal's progress", () => {

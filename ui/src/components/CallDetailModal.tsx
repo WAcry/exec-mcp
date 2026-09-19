@@ -10,6 +10,7 @@ import {
   Loader2,
   FolderOpen,
   ArrowRight,
+  Square,
   FileCode,
   Zap,
 } from "lucide-react";
@@ -92,6 +93,7 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
             <span>工具内部调用流</span>
             <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 font-mono text-zinc-600 dark:text-zinc-400">
               {call.subcalls.length}
+              {call.omittedSubcalls ? `+${call.omittedSubcalls}` : ""}
             </span>
           </button>
           <button
@@ -199,6 +201,12 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
 
           {activeTab === "subcalls" && (
             <div className="space-y-3">
+              {(call.omittedSubcalls ?? 0) > 0 && (
+                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
+                  为限制常驻内存，中间省略了 {call.omittedSubcalls}{" "}
+                  条子调用；保留最早与最新记录。
+                </div>
+              )}
               {call.subcalls.length === 0 ? (
                 <div className="p-10 text-center text-zinc-400 text-xs">
                   本次执行中没有调用任何底层 tools.* 原语或下游 MCP 工具。
@@ -238,7 +246,9 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                           入参 (Arguments):
                         </span>
                         <CodeBlock
-                          code={JSON.stringify(sub.input, null, 2)}
+                          code={
+                            JSON.stringify(sub.input, null, 2) ?? "undefined"
+                          }
                           language="json"
                           maxHeight="max-h-36"
                         />
@@ -253,7 +263,8 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                             code={
                               typeof sub.output === "string"
                                 ? sub.output
-                                : JSON.stringify(sub.output, null, 2)
+                                : (JSON.stringify(sub.output, null, 2) ??
+                                  "undefined")
                             }
                             language="json"
                             maxHeight="max-h-44"
@@ -275,6 +286,12 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
 
           {activeTab === "output" && (
             <div className="space-y-3">
+              {(call.truncatedFields ?? 0) > 0 && (
+                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
+                  审计视图有 {call.truncatedFields}{" "}
+                  个字段因体积过大被保留首尾；原工具结果不受影响。
+                </div>
+              )}
               {call.error && (
                 <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
                   <h5 className="font-semibold text-xs flex items-center gap-1 mb-1">
@@ -301,7 +318,9 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                 <div className="p-8 text-center text-zinc-400 text-xs">
                   {call.status === "running"
                     ? "任务正在执行，暂无返回结果..."
-                    : "无输出结果"}
+                    : call.status === "terminated"
+                      ? "执行已终止，没有更多输出。"
+                      : "无输出结果"}
                 </div>
               )}
             </div>
@@ -334,6 +353,14 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
         <ArrowRight className="w-3 h-3" />
         让出控制权
+      </span>
+    );
+  }
+  if (status === "terminated") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
+        <Square className="w-3 h-3" />
+        已终止
       </span>
     );
   }

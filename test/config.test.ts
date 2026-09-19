@@ -11,6 +11,26 @@ import { configDirectory } from "../src/host/platform.js";
 import { codexTarget } from "../src/codex-package.js";
 
 describe("configuration and platform boundaries", () => {
+  it("keeps the Web console loopback-only by default and validates explicit exposure", () => {
+    expect(parseConfig(CONFIG_TEMPLATE, "config.toml").web).toBeUndefined();
+    expect(
+      parseConfig(
+        CONFIG_TEMPLATE + '\n[web]\nenabled=true\nhost="0.0.0.0"\nport=9000\n',
+        "config.toml",
+      ).web,
+    ).toEqual({ enabled: true, host: "0.0.0.0", port: 9000 });
+    for (const value of [
+      'host="localhost"',
+      'host="192.168.1.10"',
+      "port=-1",
+      "port=65536",
+      'enabled="true"',
+      "unknown=true",
+    ])
+      expect(() =>
+        parseConfig(CONFIG_TEMPLATE + `\n[web]\n${value}\n`, "config.toml"),
+      ).toThrow("web");
+  });
   it("accepts a configurable Skill character budget with a 40000 default and rejects ambiguous knobs", () => {
     expect(
       parseConfig(CONFIG_TEMPLATE + "\n[skills]\n", "config.toml").skills,

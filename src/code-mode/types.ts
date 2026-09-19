@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
+import type { MemoryReader } from "../host/process-memory.js";
 
 export type CodeModeToolKind = "function" | "freeform";
 
@@ -63,6 +64,10 @@ export type CodeModeToolResult = CallToolResult;
 
 export interface CodeModeServiceOptions {
   sessionIdleMs?: number;
+  memoryHighWaterBytes?: number;
+  memoryCheckIntervalMs?: number;
+  memoryCloseTimeoutMs?: number;
+  memoryReader?: MemoryReader;
   defaultExecYieldTimeMs?: number;
   defaultWaitYieldTimeMs?: number;
   hostBinary?: string;

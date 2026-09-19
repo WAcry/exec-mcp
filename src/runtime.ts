@@ -32,6 +32,7 @@ import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
 import { resolveShell } from "./host/shell.js";
+import { MEMORY_SCHEMA, MiB } from "./memory.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -47,6 +48,7 @@ export class ExecRuntime {
   readonly artifacts: ArtifactStore;
   private closing: Promise<void> | undefined;
   private readonly skillMaxChars: number;
+  private readonly idleHours: number;
   private readonly skillConfig: readonly SkillSetting[];
   private readonly native: ReturnType<typeof nativeContracts>;
   private readonly securitySchemes:
@@ -61,9 +63,19 @@ export class ExecRuntime {
           : undefined;
     // Fail bad shell configuration before creating timers, hosts or listeners.
     const shell = resolveShell(config.execution);
-    this.terminal = new TerminalManager({ shell });
+    const memory = MEMORY_SCHEMA.parse(config.memory ?? {});
+    this.idleHours = memory.idle_retention_hours;
+    const idleMs = Math.round(memory.idle_retention_hours * 3_600_000);
+    this.terminal = new TerminalManager({
+      shell,
+      bufferBytes: memory.terminal_buffer_mib * MiB,
+      idleMs,
+    });
     this.native = nativeContracts(shell);
-    this.codeMode = new CodeModeService();
+    this.codeMode = new CodeModeService({
+      sessionIdleMs: idleMs,
+      memoryHighWaterBytes: memory.code_mode_high_water_mib * MiB,
+    });
     this.skillMaxChars = config.skills?.max_chars ?? DEFAULT_SKILL_MAX_CHARS;
     this.skillConfig = config.skills?.config ?? [];
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
@@ -91,7 +103,7 @@ export class ExecRuntime {
       "exec",
       {
         title: "执行工具代码",
-        description: execDescription(this.native),
+        description: execDescription(this.native, this.idleHours),
         inputSchema: EXEC_SCHEMA,
         annotations,
         _meta: {

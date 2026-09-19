@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 import { configDirectory } from "./host/platform.js";
 import { resolveUserPath } from "./util.js";
 import type { ExecutionConfig } from "./host/shell.js";
+import { MEMORY_SCHEMA, MEMORY_DEFAULTS, type MemoryConfig } from "./memory.js";
 import {
   AUTH_SCHEMA,
   TUNNEL_SCHEMA,
@@ -74,6 +75,7 @@ const configSchema = z
     tunnel: TUNNEL_SCHEMA.optional(),
     files: FILE_CONFIG_SCHEMA.optional(),
     skills: SKILLS_CONFIG_SCHEMA.optional(),
+    memory: MEMORY_SCHEMA.optional(),
     execution: z
       .object({
         shell: z
@@ -98,8 +100,9 @@ export interface Config {
   files?: FileConfig;
   skills?: SkillsConfig;
   execution?: ExecutionConfig;
+  memory?: MemoryConfig;
 }
-export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [execution]\n# shell = "pwsh" # 可执行文件名或路径；省略则按系统自动选择。\n# login = false\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
+export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [execution]\n# shell = "pwsh" # 可执行文件名或路径；省略则按系统自动选择。\n# login = false\n\n# [memory]\n# code_mode_high_water_mib = ${MEMORY_DEFAULTS.code_mode_high_water_mib}\n# idle_retention_hours = ${MEMORY_DEFAULTS.idle_retention_hours}\n# terminal_buffer_mib = ${MEMORY_DEFAULTS.terminal_buffer_mib}\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
 export function defaultConfigPath(): string {
   return (
     process.env.EXEC_MCP_CONFIG ?? path.join(configDirectory(), "config.toml")
@@ -117,8 +120,16 @@ export function parseConfig(text: string, filename: string): Config {
     throw new Error(
       `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
     );
-  const { server, mcp_servers, files, skills, execution, auth, tunnel } =
-    parsed.data;
+  const {
+    server,
+    mcp_servers,
+    files,
+    skills,
+    execution,
+    auth,
+    tunnel,
+    memory,
+  } = parsed.data;
   validatePublicAccess({
     ...server,
     ...(auth ? { auth } : {}),
@@ -194,6 +205,7 @@ export function parseConfig(text: string, filename: string): Config {
     ...(auth === undefined ? {} : { auth }),
     ...(tunnel === undefined ? {} : { tunnel }),
     ...(files === undefined ? {} : { files }),
+    ...(memory === undefined ? {} : { memory }),
     ...(skills === undefined ? {} : { skills }),
     ...(execution === undefined
       ? {}

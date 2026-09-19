@@ -233,7 +233,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "仍在运行或有未读输出时返回 session_id，用 write_stdin 续取；exit_code 是 Shell 退出码。每次最多读取 1 MiB，其余保留。",
+      "运行或未读时返回 session_id，write_stdin 续取；exit_code 为 Shell 退出码。每次≤1 MiB；超限保留首尾，truncated/omitted_bytes 标明丢失。",
   },
   {
     name: "write_stdin",
@@ -313,12 +313,15 @@ export function nativeContracts(
   );
 }
 
-export function execDescription(contracts: readonly NativeContract[]): string {
+export function execDescription(
+  contracts: readonly NativeContract[],
+  idleHours = SESSION_IDLE_MS / 3_600_000,
+): string {
   return `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出完整目录；匹配任务后用 exec_command 读取其真实路径的完整 SKILL.md 再执行。目录仍在上下文中时无需重复列出；仅显式 Skill 必须由用户明确要求使用，不能按任务相似性或其他文档推荐自行读取。
 附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
-store(key,value)/load(key) 直接使用 Codex 原生的对话内存存储，不另设存储配额。key 为字符串，未命中返回 undefined；需宿主的 openai/session，缺失时调用报错。所有 cell 收尾且空闲 ${SESSION_IDLE_MS / 3_600_000} 小时，或服务/host 重启后数据丢失。新 cell 读启动快照，host 完成时合并写入，不依赖外层 wait 收取；脚本报错也可能提交。load 返回副本，修改后需 store，并发同键非事务；大数据或长期数据用文件。
+store(key,value)/load(key) 使用原生对话内存存储；key 为字符串，未命中返回 undefined；需宿主的 openai/session。空闲 ${idleHours} 小时、内存压力回收或服务/host 重启后数据可能丢失；同一对话可重新 exec，旧 cell_id 不迁移。新 cell 读启动快照，host 完成时合并写入；脚本报错也可能提交。load 返回副本，修改后需 store，并发同键非事务；长期数据用文件。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约。外部能力先 tools.tool_search；新方法下一次 exec 才绑定。不要猜名称或参数。
 返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。

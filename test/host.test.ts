@@ -15,8 +15,10 @@ async function directory(): Promise<string> {
   directories.push(value);
   return value;
 }
-function terminal(): TerminalManager {
-  const value = new TerminalManager();
+function terminal(bufferBytes?: number): TerminalManager {
+  const value = new TerminalManager(
+    bufferBytes === undefined ? {} : { bufferBytes },
+  );
   terminals.push(value);
   return value;
 }
@@ -105,8 +107,8 @@ describe("real local processes", () => {
     expect(result.output).toBe("hello😀");
     expect(result.exit_code).toBe(0);
   });
-  it("reads Unicode output in lossless increments instead of truncating", async () => {
-    const value = terminal();
+  it("reads complete Unicode output in increments when it fits the configured buffer", async () => {
+    const value = terminal(4 * 1024 * 1024);
     const first = await value.execCommand(
       { cmd: nodeCommand('process.stdout.write("汉😀".repeat(350000))') },
       await directory(),

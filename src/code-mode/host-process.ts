@@ -11,6 +11,10 @@ import {
 const MAX_STARTUP_OUTPUT_BYTES = 16 * 1024;
 const DEFAULT_TERMINATION_GRACE_MS = 3_000;
 type HostChild = ChildProcessByStdio<null, Readable, Readable>;
+export interface HostIdentity {
+  readonly pid: number;
+  readonly generation: number;
+}
 
 export class CodeModeHostProcess {
   readonly #binaryOverride: string | undefined;
@@ -21,6 +25,9 @@ export class CodeModeHostProcess {
   #client: CodeModeHostClient | undefined;
   #startPromise: Promise<CodeModeHostClient> | undefined;
   #stopping = false;
+  #stopPromise: Promise<void> | undefined;
+  #identity: HostIdentity | undefined;
+  #generation = 0;
 
   constructor(options: {
     binary?: string;
@@ -42,19 +49,38 @@ export class CodeModeHostProcess {
   }
 
   start(): Promise<CodeModeHostClient> {
+    if (this.#stopPromise) return this.#stopPromise.then(() => this.start());
+    if (this.#stopping && this.#child)
+      return this.stop().then(() => this.start());
     this.#startPromise ??= this.#start();
     return this.#startPromise;
   }
 
-  async stop(): Promise<void> {
+  get identity(): HostIdentity | undefined {
+    return this.#identity;
+  }
+
+  stop(): Promise<void> {
+    this.#stopPromise ??= this.#stop().finally(() => {
+      this.#stopPromise = undefined;
+    });
+    return this.#stopPromise;
+  }
+
+  async #stop(): Promise<void> {
     this.#stopping = true;
     const child = this.#child;
+    const opening = this.#startPromise;
     this.#client?.close();
     this.#client = undefined;
     this.#startPromise = undefined;
     if (child === undefined) return;
     await terminateAndReap(child, this.#terminationGraceMs);
-    if (this.#child === child) this.#child = undefined;
+    await opening?.catch(() => undefined);
+    if (this.#child === child) {
+      this.#child = undefined;
+      this.#identity = undefined;
+    }
   }
 
   async #start(): Promise<CodeModeHostClient> {
@@ -67,6 +93,10 @@ export class CodeModeHostProcess {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.#child = child;
+    this.#identity =
+      child.pid === undefined
+        ? undefined
+        : Object.freeze({ pid: child.pid, generation: ++this.#generation });
 
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -100,6 +130,7 @@ export class CodeModeHostProcess {
       if (this.#child !== child) return;
       this.#client = undefined;
       this.#child = undefined;
+      this.#identity = undefined;
       this.#startPromise = undefined;
       if (startupReady && !this.#stopping) this.#onUnexpectedExit(exitError);
     });
@@ -120,7 +151,10 @@ export class CodeModeHostProcess {
     } catch (error) {
       client?.close();
       await terminateAndReap(child, this.#terminationGraceMs);
-      if (this.#child === child) this.#child = undefined;
+      if (this.#child === child) {
+        this.#child = undefined;
+        this.#identity = undefined;
+      }
       this.#startPromise = undefined;
       throw error;
     }
@@ -138,21 +172,32 @@ async function terminateAndReap(
   )
     return;
 
+  let onClose!: () => void;
   const closed = new Promise<void>((resolve) => {
-    child.once("close", () => resolve());
+    onClose = resolve;
   });
-  if (child.exitCode !== null || child.signalCode !== null) return;
-
-  child.kill("SIGTERM");
-  const stopped = await Promise.race([
-    closed.then(() => true),
-    delay(graceMs).then(() => false),
-  ]);
-  if (stopped) return;
-
-  if (child.exitCode === null && child.signalCode === null)
-    child.kill("SIGKILL");
-  await closed;
+  child.once("close", onClose);
+  try {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill("SIGTERM");
+    const stopped = await Promise.race([
+      closed.then(() => true),
+      delay(graceMs).then(() => false),
+    ]);
+    if (stopped) return;
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGKILL");
+    const reaped = await Promise.race([
+      closed.then(() => true),
+      delay(DEFAULT_TERMINATION_GRACE_MS).then(() => false),
+    ]);
+    if (!reaped)
+      throw new Error(
+        "Code Mode host 终止尚未确认；本次操作失败，后续调用可重新尝试恢复，不自动重跑命令。",
+      );
+  } finally {
+    child.removeListener("close", onClose);
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {

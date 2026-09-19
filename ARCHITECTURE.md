@@ -23,7 +23,8 @@ ChatGPT 是主 Agent；服务不是另一个模型推理循环。
 Skill 发现只把远端文档的元数据交给 Agent，不自动装载正文或执行脚本。
 一次完整目录、软链接路径、显式调用策略和可调压缩预算见 [ADR-006](docs/adr-006-skill-catalog.md)。
 同一对话复用原生 session 并通过 host 的 store/load 显式共享内存数据；每次 exec 的 V8 isolate 和工具快照仍独立。
-不在外层另建缓存或存储配额；仅在整个 session 长时间空闲后释放，接受原生存储不保证内存总量有界的取舍。
+不在外层另建 store 缓存或逐 key 配额；对原生 host 做宽松压力回收，终端未读日志保留有界首尾。
+对话元数据关联键和原生 session 代次分离，回收旧实例不能永久损坏该对话或清理新实例。
 
 复用 Codex 的 Code Mode host 和 patch engine，不引入完整 App Server、模型客户端，
 也不共享机器上 Codex 的配置或会话数据库。

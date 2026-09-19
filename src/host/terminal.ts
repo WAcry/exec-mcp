@@ -11,6 +11,8 @@ import {
 } from "../util.js";
 import { terminateProcessTree } from "./platform.js";
 import { inheritedEnvironment } from "../environment.js";
+import { DEFAULT_IDLE_MS, MEMORY_DEFAULTS, MiB } from "../memory.js";
+import { RollingOutputBuffer } from "./output-buffer.js";
 import {
   resolveCommandShell,
   resolveShell,
@@ -40,6 +42,8 @@ export interface TerminalResult {
   wall_time_seconds: number;
   session_id?: string;
   exit_code?: number;
+  truncated?: true;
+  omitted_bytes?: number;
 }
 type Backend =
   | { kind: "pipe"; process: ChildProcessWithoutNullStreams }
@@ -47,9 +51,9 @@ type Backend =
 interface Session {
   id: string;
   backend: Backend;
-  chunks: Buffer[];
-  bytes: number;
-  paused: boolean;
+  buffer: RollingOutputBuffer;
+  touched: number;
+  observers: number;
   mutex: AsyncMutex;
   done: Promise<number>;
   finish(code: number): void;
@@ -58,24 +62,33 @@ interface Session {
   terminating?: Promise<void>;
 }
 const READ_BYTES = 1024 * 1024;
-const HIGH_WATER = 128 * 1024 * 1024;
-const LOW_WATER = 64 * 1024 * 1024;
 export class TerminalManager {
   readonly shell: CommandShell;
-  private readonly highWater: number;
-  private readonly lowWater: number;
+  private readonly bufferBytes: number;
+  private readonly idleMs: number;
+  private readonly timer: NodeJS.Timeout;
   private sessions = new Map<string, Session>();
   private closed = false;
   constructor(
     options: {
       shell?: CommandShell;
-      highWater?: number;
-      lowWater?: number;
+      bufferBytes?: number;
+      idleMs?: number;
     } = {},
   ) {
     this.shell = options.shell ?? resolveShell();
-    this.highWater = options.highWater ?? HIGH_WATER;
-    this.lowWater = options.lowWater ?? LOW_WATER;
+    this.bufferBytes =
+      options.bufferBytes ?? MEMORY_DEFAULTS.terminal_buffer_mib * MiB;
+    this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
+    if (
+      !Number.isSafeInteger(this.bufferBytes) ||
+      this.bufferBytes < 64 ||
+      !Number.isFinite(this.idleMs) ||
+      this.idleMs <= 0
+    )
+      throw new Error("终端缓冲大小或空闲保留时间无效。");
+    this.timer = setInterval(() => this.sweep(), Math.min(this.idleMs, 60_000));
+    this.timer.unref();
   }
 
   async execCommand(
@@ -119,9 +132,9 @@ export class TerminalManager {
     const session: Session = {
       id: randomHandle("term"),
       backend,
-      chunks: [],
-      bytes: 0,
-      paused: false,
+      buffer: new RollingOutputBuffer(this.bufferBytes),
+      touched: Date.now(),
+      observers: 1,
       mutex: new AsyncMutex(),
       done,
       finish,
@@ -130,6 +143,7 @@ export class TerminalManager {
     const ended = (code: number): void => {
       if (session.exitCode !== undefined) return;
       session.exitCode = code;
+      session.touched = Date.now();
       session.finish(code);
       session.outputReady?.();
     };
@@ -161,6 +175,8 @@ export class TerminalManager {
         "命令启动后等待被取消；进程已请求终止，已发生的副作用不会回滚。",
         { cause: error },
       );
+    } finally {
+      session.observers--;
     }
   }
 
@@ -173,58 +189,65 @@ export class TerminalManager {
     const session = this.sessions.get(input.session_id);
     if (!session)
       throw new Error(`未知或已读完的终端会话：${input.session_id}`);
-    if (input.terminate) await this.terminate(session);
-    return session.mutex.run(async () => {
-      throwIfAborted(signal);
-      if (!this.sessions.has(session.id))
-        throw new Error("终端输出已经由另一次调用读完。");
-      const started = performance.now();
-      const { backend } = session;
-      if (input.cols !== undefined && input.rows !== undefined) {
-        if (backend.kind !== "pty")
-          throw new Error("只有 PTY 会话可以调整尺寸。");
-        backend.process.resize(input.cols, input.rows);
-      }
-      if (input.close_stdin && backend.kind === "pty")
-        throw new Error(
-          "PTY 不支持关闭单独的 stdin；按程序约定发送 EOF 字符。",
-        );
-      if (input.chars || input.close_stdin) {
-        if (session.exitCode !== undefined)
-          throw new Error("进程已退出，不能继续写入。");
-        if (backend.kind === "pty") backend.process.write(input.chars ?? "");
-        else {
-          await new Promise<void>((resolve, reject) => {
-            const callback = (error?: Error | null): void =>
-              error ? reject(error) : resolve();
-            if (input.close_stdin)
-              backend.process.stdin.end(input.chars ?? "", callback);
-            else backend.process.stdin.write(input.chars!, callback);
-          });
+    session.touched = Date.now();
+    session.observers++;
+    try {
+      if (input.terminate) await this.terminate(session);
+      return await session.mutex.run(async () => {
+        throwIfAborted(signal);
+        if (!this.sessions.has(session.id))
+          throw new Error("终端输出已经由另一次调用读完。");
+        const started = performance.now();
+        const { backend } = session;
+        if (input.cols !== undefined && input.rows !== undefined) {
+          if (backend.kind !== "pty")
+            throw new Error("只有 PTY 会话可以调整尺寸。");
+          backend.process.resize(input.cols, input.rows);
         }
-      }
-      // Existing unread output is useful immediately, even for a long requested wait.
-      if (session.bytes === 0 && session.exitCode === undefined) {
-        try {
-          // A live process may be waiting for more input, or blocked by our output
-          // high-water mark. New output must wake the reader before process exit.
-          await waitUntil(
-            new Promise<void>((resolve) => {
-              session.outputReady = resolve;
-            }),
-            input.yield_time_ms ??
-              (input.chars || input.close_stdin ? 250 : 110_000),
-            signal,
+        if (input.close_stdin && backend.kind === "pty")
+          throw new Error(
+            "PTY 不支持关闭单独的 stdin；按程序约定发送 EOF 字符。",
           );
-        } finally {
-          delete session.outputReady;
+        if (input.chars || input.close_stdin) {
+          if (session.exitCode !== undefined)
+            throw new Error("进程已退出，不能继续写入。");
+          if (backend.kind === "pty") backend.process.write(input.chars ?? "");
+          else {
+            await new Promise<void>((resolve, reject) => {
+              const callback = (error?: Error | null): void =>
+                error ? reject(error) : resolve();
+              if (input.close_stdin)
+                backend.process.stdin.end(input.chars ?? "", callback);
+              else backend.process.stdin.write(input.chars!, callback);
+            });
+          }
         }
-      }
-      return this.collect(session, started);
-    });
+        // Existing unread output is useful immediately, even for a long requested wait.
+        if (!session.buffer.pending && session.exitCode === undefined) {
+          try {
+            // Progress is useful before a live process exits or asks for more input.
+            await waitUntil(
+              new Promise<void>((resolve) => {
+                session.outputReady = resolve;
+              }),
+              input.yield_time_ms ??
+                (input.chars || input.close_stdin ? 250 : 110_000),
+              signal,
+            );
+          } finally {
+            delete session.outputReady;
+          }
+        }
+        return this.collect(session, started);
+      });
+    } finally {
+      session.observers--;
+      session.touched = Date.now();
+    }
   }
   async close(): Promise<void> {
     this.closed = true;
+    clearInterval(this.timer);
     const sessions = [...this.sessions.values()];
     const results = await Promise.allSettled(
       sessions.map((session) => this.terminate(session)),
@@ -239,37 +262,16 @@ export class TerminalManager {
   }
   private append(session: Session, text: string): void {
     if (!this.sessions.has(session.id)) return;
-    const chunk = Buffer.from(text);
-    session.chunks.push(chunk);
-    session.bytes += chunk.length;
+    session.buffer.append(text);
     session.outputReady?.();
-    this.backpressure(session);
   }
   private collect(session: Session, started: number): TerminalResult {
-    const chunks: Buffer[] = [];
-    let remaining = READ_BYTES;
-    while (remaining && session.chunks.length) {
-      const chunk = session.chunks[0]!;
-      let count = Math.min(chunk.length, remaining);
-      while (
-        count < chunk.length &&
-        count > 0 &&
-        (chunk[count]! & 0xc0) === 0x80
-      )
-        count--;
-      if (!count) break;
-      chunks.push(chunk.subarray(0, count));
-      remaining -= count;
-      session.bytes -= count;
-      if (count === chunk.length) session.chunks.shift();
-      else session.chunks[0] = chunk.subarray(count);
-    }
-    this.backpressure(session);
+    session.touched = Date.now();
     const result: TerminalResult = {
-      output: Buffer.concat(chunks).toString("utf8"),
+      ...session.buffer.read(READ_BYTES),
       wall_time_seconds: (performance.now() - started) / 1000,
     };
-    if (session.exitCode === undefined || session.bytes)
+    if (session.exitCode === undefined || session.buffer.pending)
       result.session_id = session.id;
     else {
       result.exit_code = session.exitCode;
@@ -277,10 +279,20 @@ export class TerminalManager {
     }
     return result;
   }
+  /** Expire finished, unobserved records only; never terminate a user process by age. */
+  private sweep(): void {
+    const deadline = Date.now() - this.idleMs;
+    for (const session of this.sessions.values())
+      if (
+        session.exitCode !== undefined &&
+        !session.observers &&
+        session.touched <= deadline
+      )
+        this.remove(session);
+  }
   private terminate(session: Session): Promise<void> {
     session.terminating ??= (async () => {
       if (session.exitCode !== undefined) return;
-      this.pause(session, false);
       const pid = session.backend.process.pid;
       if (pid !== undefined) {
         await terminateProcessTree(pid);
@@ -294,32 +306,7 @@ export class TerminalManager {
   }
   private remove(session: Session): void {
     if (!this.sessions.delete(session.id)) return;
-    session.bytes = 0;
-    session.chunks = [];
-  }
-  private pause(session: Session, value: boolean): void {
-    if (session.exitCode !== undefined || session.paused === value) return;
-    session.paused = value;
-    const { backend } = session;
-    if (backend.kind === "pty") {
-      if (value) backend.process.pause();
-      else backend.process.resume();
-    } else
-      for (const stream of [backend.process.stdout, backend.process.stderr]) {
-        if (value) stream.pause();
-        else stream.resume();
-      }
-  }
-  private backpressure(session: Session): void {
-    // An unread producer cannot prevent other sessions from reporting progress.
-    // Once stopping, keep its streams draining so process close can be observed.
-    if (session.terminating) return;
-    this.pause(
-      session,
-      session.paused
-        ? session.bytes > this.lowWater
-        : session.bytes >= this.highWater,
-    );
+    session.buffer.clear();
   }
   private requireOpen(): void {
     if (this.closed) throw new Error("终端管理器已关闭。");

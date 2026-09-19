@@ -1,5 +1,4 @@
 export const MAX_PAYLOAD_BYTES = 48 * 1024 * 1024;
-export const CELL_HEAP_BYTES = 256 * 1024 * 1024;
 
 /** This guards a serialized payload, not total process RSS or model context. */
 export function encodePayload(

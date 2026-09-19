@@ -23,8 +23,8 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
-function manager(highWater = 4096, lowWater = 2048) {
-  const value = new TerminalManager({ highWater, lowWater });
+function manager(bufferBytes = 4096) {
+  const value = new TerminalManager({ bufferBytes });
   managers.push(value);
   return value;
 }
@@ -118,7 +118,7 @@ describe("one terminal's backlog does not suppress another terminal's progress",
             `process.stdout.write(${JSON.stringify(payload)});`,
           );
           await noisy.release();
-          await until(() => state(terminal, noisy.id).bytes >= 4096);
+          await until(() => state(terminal, noisy.id).buffer.bytes >= 4096);
           const probe = before ?? (await createProbe());
           await probe.release();
           await until(() => exists(probe.emitted)); // The child wrote its log even if the reader is paused.
@@ -136,7 +136,9 @@ describe("one terminal's backlog does not suppress another terminal's progress",
           );
           expect(ready.output).toContain("probe-ready");
           expect(ready.session_id).toBe(probe.id); // The probe remains a live long-running process.
-          expect(state(terminal, noisy.id).bytes).toBeGreaterThanOrEqual(4096);
+          expect(state(terminal, noisy.id).buffer.bytes).toBeGreaterThanOrEqual(
+            4096,
+          );
           await writeFile(progressGate, "go");
           const progress = await observeTerminal(
             await terminal.writeStdin({
@@ -148,7 +150,9 @@ describe("one terminal's backlog does not suppress another terminal's progress",
           );
           expect(progress.session_id).toBe(probe.id);
           expect(progress.output).not.toContain("probe-ready");
-          expect(state(terminal, noisy.id).bytes).toBeGreaterThanOrEqual(4096);
+          expect(state(terminal, noisy.id).buffer.bytes).toBeGreaterThanOrEqual(
+            4096,
+          );
 
           const stopped = await terminal.writeStdin({
             session_id: noisy.id,
@@ -166,7 +170,7 @@ describe("one terminal's backlog does not suppress another terminal's progress",
       }
     }
 
-  it("does not impose a shared pause when each producer is individually below the high watermark", async () => {
+  it("does not impose a shared pause when each producer is individually below the buffer capacity", async () => {
     const terminal = manager();
     const first = await start(
       terminal,
@@ -182,8 +186,8 @@ describe("one terminal's backlog does not suppress another terminal's progress",
     await second.release();
     await until(
       () =>
-        state(terminal, first.id).bytes === 3072 &&
-        state(terminal, second.id).bytes === 3072,
+        state(terminal, first.id).buffer.bytes === 3072 &&
+        state(terminal, second.id).buffer.bytes === 3072,
     );
     for (const id of [first.id, second.id]) {
       const backend = state(terminal, id).backend;
@@ -196,16 +200,16 @@ describe("one terminal's backlog does not suppress another terminal's progress",
   });
 });
 
-describe("per-producer flow control and cleanup", () => {
-  it("retains a complete UTF-8 stdout/stderr stream while other sessions are left unread", async () => {
-    const terminal = manager();
+describe("per-producer rolling output and cleanup", () => {
+  it("retains complete UTF-8 output within its configured capacity while other sessions are left unread", async () => {
+    const terminal = manager(4 * 1024 * 1024);
     const abandoned = await start(
       terminal,
       false,
       `process.stdout.write(${JSON.stringify(payload)});`,
     );
     await abandoned.release();
-    await until(() => state(terminal, abandoned.id).bytes >= 4096);
+    await until(() => state(terminal, abandoned.id).buffer.bytes >= 4096);
     const stdout = "汉😀".repeat(350_000);
     const stderr = "ERROR_資料\n".repeat(500);
     const source =
@@ -223,12 +227,15 @@ describe("per-producer flow control and cleanup", () => {
       Buffer.byteLength(stdout + stderr),
     );
     expect(result.output).not.toContain("\ufffd");
-    expect(state(terminal, abandoned.id).bytes).toBeGreaterThanOrEqual(4096);
+    expect(state(terminal, abandoned.id).buffer.bytes).toBeGreaterThanOrEqual(
+      4096,
+    );
   });
 
-  it("resumes only the drained producer below its own low watermark", async () => {
+  it("retains each producer's bounded unread output without pausing either one", async () => {
     const MiB = 1024 * 1024;
-    const terminal = manager(3 * MiB, MiB / 2);
+    const capacity = 3 * MiB;
+    const terminal = manager(capacity);
     const a = await start(
       terminal,
       false,
@@ -243,40 +250,34 @@ describe("per-producer flow control and cleanup", () => {
     await b.release();
     await until(
       () =>
-        state(terminal, a.id).bytes >= 3 * MiB &&
-        state(terminal, b.id).bytes >= 3 * MiB,
+        state(terminal, a.id).buffer.omittedBytes === MiB &&
+        state(terminal, b.id).buffer.omittedBytes === MiB,
     );
-    const paused = (id: string) => {
+    let output = "",
+      omitted = 0;
+    while (state(terminal, a.id).buffer.pending) {
+      const part = await terminal.writeStdin({
+        session_id: a.id,
+        yield_time_ms: 0,
+      });
+      output += part.output;
+      omitted += part.omitted_bytes ?? 0;
+    }
+    expect(omitted).toBe(MiB);
+    expect(output.replace(/\n\[中间已省略[^\n]*\]\n/g, "")).toBe(
+      "a".repeat(capacity),
+    );
+    expect(state(terminal, b.id).buffer.bytes).toBe(capacity);
+    for (const id of [a.id, b.id]) {
       const backend = state(terminal, id).backend;
       if (backend.kind !== "pipe") throw new Error("expected pipe");
-      return backend.process.stdout.isPaused();
-    };
-    expect(paused(a.id)).toBe(true);
-    expect(paused(b.id)).toBe(true);
-    const part = await terminal.writeStdin({
-      session_id: a.id,
-      yield_time_ms: 0,
-    });
-    expect(Buffer.byteLength(part.output)).toBe(MiB);
-    expect(state(terminal, a.id).bytes).toBeGreaterThan(MiB / 2);
-    expect(paused(a.id)).toBe(true);
-    expect(paused(b.id)).toBe(true);
-    const result = await observeTerminal(
-      part,
-      async (input) => {
-        const next = await terminal.writeStdin(input);
-        expect(paused(b.id)).toBe(true);
-        return next;
-      },
-      (collected) => collected.output.length >= 4 * MiB,
-    );
-    expect(result.output).toBe("a".repeat(4 * MiB));
-    expect(paused(a.id)).toBe(false);
-    expect(paused(b.id)).toBe(true);
+      expect(backend.process.stdout.isPaused()).toBe(false);
+      expect(backend.process.stderr.isPaused()).toBe(false);
+    }
   });
 
   it.each([false, true])(
-    "terminates a paused streaming writer without blocking an unrelated session (PTY=%s)",
+    "terminates an overflowing streaming writer without blocking an unrelated session (PTY=%s)",
     async (tty) => {
       const terminal = manager();
       const writer = await start(
@@ -285,7 +286,7 @@ describe("per-producer flow control and cleanup", () => {
         'function pump(){while(process.stdout.write("continuous-data\\n".repeat(256))){}process.stdout.once("drain",pump);}pump();',
       );
       await writer.release();
-      await until(() => state(terminal, writer.id).bytes >= 4096);
+      await until(() => state(terminal, writer.id).buffer.bytes >= 4096);
       const stopping = terminal.writeStdin({
         session_id: writer.id,
         terminate: true,
@@ -311,16 +312,16 @@ describe("per-producer flow control and cleanup", () => {
   );
 
   it.each([false, true])(
-    "preserves all buffered output when a finite paused producer is read to completion (PTY=%s)",
+    "preserves all output within a sufficient configured buffer (PTY=%s)",
     async (tty) => {
-      const terminal = manager();
+      const terminal = manager(128 * 1024);
       const finite = await start(
         terminal,
         tty,
         `process.stdout.write(${JSON.stringify(payload)},()=>process.exit(0));`,
       );
       await finite.release();
-      await until(() => state(terminal, finite.id).bytes >= 4096);
+      await until(() => state(terminal, finite.id).buffer.bytes >= 4096);
       const result = await drain(terminal, finite.first);
       expect(result.exit_code).toBe(0);
       expect(normalized(result.output)).toContain(payload);

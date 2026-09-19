@@ -307,6 +307,20 @@ enabled = true
         block.text.includes("Only plain serializable objects can be stored"),
     ),
   );
+  const noisyFixture = path.join(project, "bounded-output.cjs");
+  await writeFile(
+    noisyFixture,
+    'process.stdout.write("HEAD_MARKER\\n"+"x".repeat(2*1024*1024)+"\\nTAIL_MARKER");',
+  );
+  const noisyCommand = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(noisyFixture)}${process.platform === "win32" ? "; exit $LASTEXITCODE" : ""}`;
+  const noisy = await terminalCall(
+    `text(await tools.exec_command({cmd:${JSON.stringify(noisyCommand)},yield_time_ms:30000}));`,
+  );
+  assert.equal(noisy.exit_code, 0);
+  assert.equal(noisy.truncated, true);
+  assert.ok(noisy.omitted_bytes >= 1024 * 1024);
+  assert.match(noisy.output, /HEAD_MARKER/);
+  assert.match(noisy.output, /TAIL_MARKER/);
   assert.ok(
     undefinedStore.content.some(
       (block) => block.type === "text" && block.text === '{"value":null}',
@@ -365,6 +379,41 @@ enabled = true
   const installedServer = pathToFileURL(
     path.join(isolated, "node_modules", "exec-mcp", "dist", "src", "server.js"),
   ).href;
+  const installedCodeMode = pathToFileURL(
+    path.join(
+      isolated,
+      "node_modules",
+      "exec-mcp",
+      "dist",
+      "src",
+      "code-mode",
+      "service.js",
+    ),
+  ).href;
+  const resetCheck = await run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+    import assert from 'node:assert/strict';
+    import {CodeModeService} from ${JSON.stringify(installedCodeMode)};
+    const service=new CodeModeService({memoryHighWaterBytes:1,memoryCheckIntervalMs:60000});
+    try {
+      const run=source=>service.exec({source,tools:[],sessionScope:'unchanged-package-conversation'});
+      assert.ok(!(await run('store("old",42);')).isError);
+      await service.checkMemory();
+      const fresh=await run('text(load("old")===undefined);store("new",7);');
+      assert.ok(!fresh.isError&&fresh.content.some(x=>x.type==='text'&&x.text==='true'));
+      const next=await run('text(load("new"));');
+      assert.ok(!next.isError&&next.content.some(x=>x.type==='text'&&x.text==='7'));
+      console.log('MEMORY_RECOVERY_OK');
+    }finally{await service.close();}
+  `,
+    ],
+    { cwd: isolated, timeout: 30_000 },
+  );
+  assert.match(resetCheck.stdout, /MEMORY_RECOVERY_OK/);
   const publicCheck = await run(
     process.execPath,
     [
@@ -396,7 +445,7 @@ enabled = true
   assert.match(publicCheck.stdout, /PUBLIC_AUTH_OK/);
   await assert.rejects(executeCli(["tunnel", "--config", config])); // The private mode must never publish a tunnel.
   console.log(
-    "PASS: 独立 tarball 安装、CLI、管道/PTY、固定 V8、文件/Skill，以及公网认证和私有模式 Tunnel 拒绝。",
+    "PASS: 独立安装、CLI、管道/PTY、滚动日志、原生会话压力重建、文件/Skill，以及认证和私有 Tunnel 拒绝。",
   );
 } finally {
   await client?.close();

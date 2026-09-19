@@ -62,27 +62,38 @@ const run = (
 ) => value.exec({ source, sessionScope, tools: [] });
 
 describe("native host pressure reclamation", () => {
-  it("uses the actual owned-host memory sampler and recovers the same scope with a deliberately tiny test threshold", async () => {
-    const { value } = service([], {
-      memoryHighWaterBytes: 1,
-      memoryReader: processMemory.readProcessMemory,
-    });
-    await run(value, 'store("before",42);');
-    const old = opened[0]!;
-    // The OS sampler may transiently fail while PowerShell/ps observes a newly
-    // spawned host. Production retries on the next maintenance tick; mirror
-    // that behavior instead of making one sampling attempt a CI contract.
-    const deadline = Date.now() + 10_000;
-    while (old.usable && Date.now() < deadline) {
-      await value.checkMemory();
-      if (old.usable) await pause(100);
-    }
-    expect(old.usable).toBe(false);
-    const result = await run(value, 'text(load("before")===undefined);');
-    expect(jsonOutput(result)).toBe(true);
-    expect(opened[1]).not.toBe(old);
-    expect(opened[1]!.usable).toBe(true);
-  });
+  it(
+    "uses the actual owned-host memory sampler and recovers the same scope with a deliberately tiny test threshold",
+    { timeout: 45_000 },
+    async () => {
+      const sampler = vi.fn(processMemory.readProcessMemory);
+      const { value } = service([], {
+        memoryHighWaterBytes: 1,
+        memoryReader: sampler,
+      });
+      await run(value, 'store("before",42);');
+      const old = opened[0]!;
+      // The OS sampler may transiently fail while PowerShell/ps observes a newly
+      // spawned host. Production retries on the next maintenance tick; mirror
+      // that behavior instead of making one sampling attempt a CI contract. A cold
+      // Windows PowerShell can exhaust its 5s timeout twice on a busy runner; allow
+      // several bounded sampling attempts here without changing production limits.
+      const deadline =
+        Date.now() + (process.platform === "win32" ? 30_000 : 10_000);
+      while (old.usable && Date.now() < deadline) {
+        await value.checkMemory();
+        if (old.usable) await pause(100);
+      }
+      expect(
+        old.usable,
+        `host should be retired after ${sampler.mock.calls.length} real OS sampling attempts`,
+      ).toBe(false);
+      const result = await run(value, 'text(load("before")===undefined);');
+      expect(jsonOutput(result)).toBe(true);
+      expect(opened[1]).not.toBe(old);
+      expect(opened[1]!.usable).toBe(true);
+    },
+  );
   it("excludes sessions opened while a memory sample is in flight", async () => {
     const started = gate(),
       finishSample = gate<number>();

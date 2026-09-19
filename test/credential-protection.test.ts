@@ -20,6 +20,8 @@ const fault = vi.hoisted(() => ({
   stage: "" as "" | "sync" | "rename" | "rotation",
   target: "",
   observedEncrypted: false,
+  busyRenames: 0,
+  renameCalls: 0,
 }));
 vi.mock("node:fs", async (original) => {
   const fs = await original<typeof import("node:fs")>();
@@ -32,6 +34,13 @@ vi.mock("node:fs", async (original) => {
         fs.writeFileSync(fault.target, "newer-token-from-user");
     },
     renameSync(from: string, to: string) {
+      fault.renameCalls++;
+      if (fault.busyRenames > 0) {
+        fault.busyRenames--;
+        throw Object.assign(new Error("fixture file sharing conflict"), {
+          code: "EBUSY",
+        });
+      }
       fault.observedEncrypted = fs
         .readFileSync(from, "utf8")
         .startsWith("exec-mcp:token:v1:");
@@ -50,8 +59,11 @@ beforeEach(() => {
   fault.stage = "";
   fault.target = "";
   fault.observedEncrypted = false;
+  fault.busyRenames = 0;
+  fault.renameCalls = 0;
 });
 afterEach(async () => {
+  vi.unstubAllGlobals();
   for (const root of directories.splice(0))
     await rm(root, { recursive: true, force: true });
 });
@@ -66,6 +78,28 @@ async function file() {
 }
 
 describe("lightweight token-file protection", () => {
+  it("retries brief Windows replacement conflicts and keeps persistent failure bounded", async () => {
+    const { root, target } = await file();
+    const actualProcess = process;
+    vi.stubGlobal(
+      "process",
+      new Proxy(actualProcess, {
+        get: (object, key) =>
+          key === "platform" ? "win32" : Reflect.get(object, key),
+      }),
+    );
+    fault.busyRenames = 2;
+    expect(readTokenFile(target, "fixture")).toBe(token);
+    expect(fault.renameCalls).toBe(3);
+    expect(await readdir(root)).toEqual(["token.txt"]);
+    await writeFile(target, token);
+    fault.renameCalls = 0;
+    fault.busyRenames = 100;
+    expect(() => readTokenFile(target, "fixture")).toThrow("EBUSY");
+    expect(fault.renameCalls).toBe(6);
+    expect(await readFile(target, "utf8")).toBe(token);
+    expect(await readdir(root)).toEqual(["token.txt"]);
+  });
   it("protects plaintext once, uses fresh nonces, and accepts a pasted replacement on the next startup", async () => {
     const first = await file();
     const second = await file();

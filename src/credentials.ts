@@ -143,27 +143,50 @@ function protect(
  * Corrupt/version-unknown envelopes fail without rewriting or falling back to another credential.
  */
 export function readTokenFile(filename: string, field: string): string {
-  let stage: "read" | "decode" | "protect" = "read";
-  try {
-    const target = realpathSync(filename);
-    const original = snapshot(target);
-    if (!isUtf8(original.bytes)) throw new Error();
-    const text = original.bytes.toString("utf8").trim();
-    if (text.startsWith(FAMILY)) {
-      stage = "decode";
-      return decode(text);
+  for (let attempt = 0; ; attempt++) {
+    let stage: "read" | "decode" | "protect" = "read";
+    try {
+      const target = realpathSync(filename);
+      const original = snapshot(target);
+      if (!isUtf8(original.bytes)) throw new Error();
+      const text = original.bytes.toString("utf8").trim();
+      if (text.startsWith(FAMILY)) {
+        stage = "decode";
+        return decode(text);
+      }
+      const token = plainToken(original.bytes);
+      stage = "protect";
+      protect(filename, target, original, token);
+      return token;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      // Windows replacement can briefly conflict with another startup's open file.
+      // Retry only filesystem contention, re-reading the latest value each time;
+      // malformed envelopes and detected edits remain errors, not credential fallback.
+      if (
+        process.platform === "win32" &&
+        attempt < 5 &&
+        ["EACCES", "EPERM", "EBUSY", "EEXIST", "ENOENT"].includes(code ?? "")
+      ) {
+        Atomics.wait(
+          new Int32Array(new SharedArrayBuffer(4)),
+          0,
+          0,
+          25 * 2 ** attempt,
+        );
+        continue;
+      }
+      const detail =
+        stage === "decode"
+          ? "加密 token 文件损坏或版本不支持；请使用兼容版本或用新明文 token 覆盖原文件。"
+          : stage === "protect"
+            ? "无法保存 token 文件的轻量加密；请确认文件及所在目录可写，或稍后重试。未回退使用明文。"
+            : "必须是可读、非空的普通 token 文件；明文最多 64 KiB。";
+      const reason =
+        typeof code === "string" && /^E[A-Z0-9_]{1,30}$/.test(code)
+          ? `（${code}）`
+          : "";
+      throw new Error(`${field}：${detail}${reason}凭据未回显。`);
     }
-    const token = plainToken(original.bytes);
-    stage = "protect";
-    protect(filename, target, original, token);
-    return token;
-  } catch {
-    const detail =
-      stage === "decode"
-        ? "加密 token 文件损坏或版本不支持；请使用兼容版本或用新明文 token 覆盖原文件。"
-        : stage === "protect"
-          ? "无法保存 token 文件的轻量加密；请确认文件及所在目录可写，或稍后重试。未回退使用明文。"
-          : "必须是可读、非空的普通 token 文件；明文最多 64 KiB。";
-    throw new Error(`${field}：${detail}凭据未回显。`);
   }
 }

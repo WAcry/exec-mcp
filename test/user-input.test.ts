@@ -37,6 +37,25 @@ const events = (store: UserInputStore, scope = "chat-a") =>
     );
 
 describe("durable per-conversation asynchronous input", () => {
+  it("rejects an escape-heavy question that could never fit a complete answer event", async () => {
+    const { store } = await database();
+    const request = {
+      request_key: "encoded-question",
+      questions: [
+        {
+          title: "Choose one",
+          options: Array.from(
+            { length: 7 },
+            (_, index) => "\u0001".repeat(499) + index,
+          ),
+        },
+      ],
+    };
+    expect(Buffer.byteLength(JSON.stringify(request))).toBeLessThan(24000);
+    expect(REQUEST_INPUT_SCHEMA.safeParse(request).success).toBe(false);
+    expect(() => store.create("chat-a", request)).toThrow("问题参数无效或过长");
+    expect(store.list().total).toBe(0);
+  });
   it("creates immediately, assigns stable ids, deduplicates retries and rejects changed content for the same key", async () => {
     const { store } = await database();
     const created = store.create("chat-a", payload);

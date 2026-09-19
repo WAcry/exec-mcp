@@ -70,3 +70,10 @@ SQLite 保存问题与答复版本，同一事务提交答案和待投递事件�
 
 参考：[OpenAI 对话元数据及可见结果](https://developers.openai.com/plugins/reference)、
 [浏览器通知权限与限制](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API/Using_the_Notifications_API)。
+
+## 原生数据库的安装边界
+
+依赖版本同时核对 engines 和预编译资产。[better-sqlite3 12.10](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.10.0) 起取消 Node 20 预编译，
+[12.9.1](https://github.com/WiseLibs/better-sqlite3/releases/tag/v12.9.1) 提示 Electron 预编译问题并推荐回到 12.9.0；固定仍提供目标平台 Node 20/22/24 构建的稳定版本，
+避免让普通 Windows 安装依赖 C++ 编译器。Node 26 不在当前依赖支持范围，安装元数据同步收窄。
+升级时验证三平台独立安装，而不只看 Linux 编译或 engines 声明通过。

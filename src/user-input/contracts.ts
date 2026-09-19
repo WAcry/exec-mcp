@@ -26,6 +26,10 @@ export const QUESTION_SCHEMA = z
     (value) =>
       !value.options || new Set(value.options).size === value.options.length,
     "同题选项须互不相同。",
+  )
+  .refine(
+    (value) => Buffer.byteLength(JSON.stringify(value)) <= 8000,
+    "单题编码后最多 8000 字节，以保留完整答复空间。",
   );
 export const REQUEST_INPUT_SCHEMA = z
   .object({

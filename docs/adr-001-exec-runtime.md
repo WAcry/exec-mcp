@@ -43,7 +43,7 @@ tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先�
 
 Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路径，不以 WSL 冒充。
 系统路径、Shell、PTY、子进程树与安装位置由平台适配处理；
-Shell 由实例配置选择，不由每次命令选择；工具说明与实际执行共用同一解析结果，见 [ADR-007](adr-007-command-shell.md)。
+实例配置提供 Shell 默认值，命令可单次覆盖且不影响后续调用；默认说明与执行共用同一解析结果，见 [ADR-007](adr-007-command-shell.md)。
 不能把 `bash`、POSIX 信号、systemd 或某台机器的主目录写成共同前提。
 发布必须验证各目标平台的 host、补丁入口和进程清理，不能只检查平台包“存在”。
 具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。

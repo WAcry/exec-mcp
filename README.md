@@ -75,7 +75,7 @@ stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 
 ## 命令 Shell
 
-命令工具使用实例配置的 Shell，不需要 Agent 每次选择。Windows 默认优先 PowerShell 7（`pwsh.exe`），
+命令工具默认使用实例配置的 Shell，不需要 Agent 每次选择；也支持用可选的 `shell`、`login` 覆盖单次调用。Windows 默认优先 PowerShell 7（`pwsh.exe`），
 没有时使用 Windows PowerShell；macOS/Linux 优先 `$SHELL`，无法使用时 macOS 依次尝试 `/bin/zsh`、`/bin/sh`，Linux 使用 `/bin/sh`。
 exec-mcp 不自动安装 Shell。可以在配置中覆盖：
 
@@ -91,7 +91,10 @@ login = false
 `login=true` 对 PowerShell 表示加载 profile，对其他 Shell 表示 login 模式；分配 PTY 不会自动加载交互配置。
 
 配置在启动时解析；显式配置无效会报错，不换 Shell 重跑命令。修改后重启服务并刷新客户端工具目录。
-这是一次工具参数简化：旧脚本中的 `exec_command({shell, login, ...})` 需移除这两个字段，改由配置统一设置。
+逐调用的 `shell` 与 `login` 各自独立覆盖，未指定的字段继承实例默认值；
+`execution.login=false` 是默认模式，不禁止本次显式使用 `login=true`。
+单次 Shell 的相对路径以最终命令工作目录为基准，配置路径仍相对配置文件；裸名称均从服务 PATH 查找。
+覆盖仅影响这次新建进程，不改变后续命令、并发命令或已有 `session_id`；无效覆盖会报错，不换 Shell 重跑。
 
 ## Skills
 

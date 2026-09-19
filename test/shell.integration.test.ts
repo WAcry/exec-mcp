@@ -167,10 +167,66 @@ describe.each(variants())(
       expect(result.exit_code).toBe(9);
       expect(JSON.parse(result.output)).toEqual({ cwd, arg: "plain-value" });
     });
-    it("supports PTY input with the same configured executable and preserves its exit code", async () => {
+    it("supports independent overrides alongside simultaneous default commands", async () => {
       const selected = shell();
       const cwd = await directory();
-      const terminal = manager(selected);
+      const defaults = resolveShell({
+        shell: process.platform === "win32" ? "pwsh.exe" : "/bin/sh",
+        login: false,
+      });
+      const terminal = manager(defaults);
+      const code = ps(selected)
+        ? "[Console]::WriteLine($PSVersionTable.PSVersion.Major);exit 3"
+        : 'printf "%s\\n" "$0";exit 3';
+      const [changed, regular] = await Promise.all([
+        terminal.execCommand(
+          { cmd: code, shell: selected.file, login: false, yield_time_ms: 0 },
+          cwd,
+        ),
+        terminal.execCommand(
+          { cmd: "echo CONFIGURED_DEFAULT", yield_time_ms: 0 },
+          cwd,
+        ),
+      ]);
+      const [result, normal] = await Promise.all([
+        observeTerminal(changed, (input) => terminal.writeStdin(input)),
+        observeTerminal(regular, (input) => terminal.writeStdin(input)),
+      ]);
+      expect(result.exit_code).toBe(3);
+      if (selected.kind === "pwsh")
+        expect(Number(result.output.trim())).toBeGreaterThanOrEqual(7);
+      else if (selected.kind === "powershell")
+        expect(Number(result.output.trim())).toBe(5);
+      else
+        expect(
+          result.output
+            .trim()
+            .replaceAll("\\", "/")
+            .split("/")
+            .at(-1)!
+            .replace(/\.exe$/i, ""),
+        ).toBe(selected.kind);
+      expect(normal).toMatchObject({ exit_code: 0 });
+      expect(normal.output.trim()).toBe("CONFIGURED_DEFAULT");
+      expect(terminal.shell).toBe(defaults);
+      const later = await observeTerminal(
+        await terminal.execCommand(
+          { cmd: "echo STILL_DEFAULT", yield_time_ms: 0 },
+          cwd,
+        ),
+        (input) => terminal.writeStdin(input),
+      );
+      expect(later.output.trim()).toBe("STILL_DEFAULT");
+      expect(terminal.shell.login).toBe(false);
+    });
+    it("keeps an overridden PTY attached to its original process after another default command", async () => {
+      const selected = shell();
+      const cwd = await directory();
+      const defaults = resolveShell({
+        shell: process.platform === "win32" ? "pwsh.exe" : "/bin/sh",
+        login: false,
+      });
+      const terminal = manager(defaults);
       const script = path.join(cwd, "pty fixture.cjs");
       await writeFile(
         script,
@@ -180,7 +236,13 @@ describe.each(variants())(
         command(script, selected) +
         (ps(selected) ? "; exit $LASTEXITCODE" : "");
       const first = await terminal.execCommand(
-        { cmd: source, tty: true, yield_time_ms: 0 },
+        {
+          cmd: source,
+          shell: selected.file,
+          login: false,
+          tty: true,
+          yield_time_ms: 0,
+        },
         cwd,
       );
       const ready = await observeTerminal(
@@ -188,6 +250,14 @@ describe.each(variants())(
         (input) => terminal.writeStdin(input),
         (result) => result.output.includes("SHELL_PTY_READY"),
       );
+      const intervening = await observeTerminal(
+        await terminal.execCommand(
+          { cmd: "echo BETWEEN_COMMANDS", yield_time_ms: 0 },
+          cwd,
+        ),
+        (input) => terminal.writeStdin(input),
+      );
+      expect(intervening.output.trim()).toBe("BETWEEN_COMMANDS");
       const part = await terminal.writeStdin({
         session_id: ready.session_id!,
         chars: "hello 中文\r",
@@ -200,6 +270,7 @@ describe.each(variants())(
       );
       expect(result.output).toContain("SHELL_PTY_REPLY:hello 中文");
       expect(result.exit_code).toBe(6);
+      expect(terminal.shell).toBe(defaults);
     });
     it("uses the configured dialect in both the top-level description and ALL_TOOLS", async () => {
       const selected = shell();
@@ -222,8 +293,8 @@ describe.each(variants())(
       const entry = jsonOutput<{ description: string }>(output);
       expect(entry.description).toContain(shellDescription(selected));
       expect(tools[0]!.description).toContain(entry.description);
-      expect(entry.description).not.toContain('"shell"');
-      expect(entry.description).not.toContain('"login"');
+      expect(entry.description).toContain('"shell"');
+      expect(entry.description).toContain('"login"');
       if (ps(selected)) {
         const version = await connection.client.callTool({
           name: "exec",
@@ -245,13 +316,87 @@ describe.each(variants())(
 );
 
 describe.each([false, true])(
-  "config-only Shell through MCP (legacy=%s)",
+  "per-command Shell through MCP (legacy=%s)",
   (legacy) => {
-    it("rejects shell and login overrides before invoking the command", async () => {
+    it("accepts an override without changing the default advertised to the next call", async () => {
+      const windows = process.platform === "win32";
+      const defaults = windows ? "pwsh.exe" : "/bin/sh";
+      const alternate = windows ? "powershell.exe" : "/bin/bash";
+      const probe = windows
+        ? "[Console]::WriteLine($PSVersionTable.PSVersion.Major)"
+        : 'printf "%s\\n" "$0"';
+      const connection = await connect(
+        { execution: { shell: defaults, login: false } },
+        legacy,
+      );
+      connections.push(connection);
+      const before = (await connection.client.listTools()).tools;
+      const result = await connection.client.callTool({
+        name: "exec",
+        arguments: {
+          source: `text(await tools.exec_command(${JSON.stringify({ cmd: probe, shell: alternate, login: false, yield_time_ms: 30000 })}));`,
+        },
+      });
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      const changed = jsonOutput<{ output: string; exit_code: number }>(result);
+      expect(changed.exit_code).toBe(0);
+      expect(changed.output.trim()).toBe(windows ? "5" : "/bin/bash");
+      const next = await connection.client.callTool({
+        name: "exec",
+        arguments: {
+          source: `text(await tools.exec_command(${JSON.stringify({ cmd: probe, yield_time_ms: 30000 })}));`,
+        },
+      });
+      expect(next.isError, JSON.stringify(next)).not.toBe(true);
+      const unchanged = jsonOutput<{ output: string; exit_code: number }>(next);
+      expect(unchanged.exit_code).toBe(0);
+      if (windows)
+        expect(Number(unchanged.output.trim())).toBeGreaterThanOrEqual(7);
+      else expect(unchanged.output.trim()).toBe("/bin/sh");
+      expect((await connection.client.listTools()).tools).toEqual(before);
+    });
+    it("resolves an override from the nested command workdir, not the server or outer exec directory", async () => {
+      const root = await directory();
+      const cwd = path.join(root, "command directory");
+      await mkdir(cwd);
+      const executable = findShellExecutable(
+        process.platform === "win32" ? "powershell.exe" : "/bin/bash",
+      )!;
+      expect(executable).toBeTruthy();
+      const engine = path.join(cwd, "engine");
+      await symlink(
+        path.dirname(executable),
+        engine,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const connection = await connect({}, legacy);
+      connections.push(connection);
+      const cmd =
+        process.platform === "win32"
+          ? "[Console]::WriteLine((Get-Location).Path)"
+          : "pwd";
+      const result = await connection.client.callTool({
+        name: "exec",
+        arguments: {
+          workdir: root,
+          source: `text(await tools.exec_command(${JSON.stringify({ cmd, workdir: "command directory", shell: `./engine/${path.basename(executable)}`, login: false, yield_time_ms: 30000 })}));`,
+        },
+      });
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(
+        jsonOutput<{ output: string; exit_code: number }>(result),
+      ).toMatchObject({ exit_code: 0 });
+      expect(jsonOutput<{ output: string }>(result).output.trim()).toBe(cwd);
+    });
+    it("rejects invalid override types before invoking the command", async () => {
       const connection = await connect({}, legacy);
       connections.push(connection);
       const root = await directory();
-      for (const extra of [{ shell: "bash" }, { login: true }]) {
+      for (const extra of [
+        { shell: " " },
+        { shell: "bad\0name" },
+        { login: "true" },
+      ]) {
         const result = await connection.client.callTool({
           name: "exec",
           arguments: {
@@ -266,12 +411,42 @@ describe.each([false, true])(
         code: "ENOENT",
       });
     });
+    it("rejects unavailable or unsupported overrides instead of executing with the default", async () => {
+      const connection = await connect({}, legacy);
+      connections.push(connection);
+      const root = await directory();
+      for (const shell of [path.join(root, "missing-shell"), "cmd.exe"]) {
+        const result = await connection.client.callTool({
+          name: "exec",
+          arguments: {
+            workdir: root,
+            source: `text(await tools.exec_command(${JSON.stringify({ cmd: "echo wrote > marker", shell })}));`,
+          },
+        });
+        expect(result.isError).toBe(true);
+        expect(texts(result).join("\n")).toMatch(/指定的 Shell|不支持 CMD/);
+      }
+      await expect(readFile(path.join(root, "marker"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      const later = await connection.client.callTool({
+        name: "exec",
+        arguments: {
+          source:
+            'text(await tools.exec_command({cmd:"echo DEFAULT_STILL_WORKS",yield_time_ms:30000}));',
+        },
+      });
+      expect(later.isError).not.toBe(true);
+      expect(jsonOutput<{ output: string }>(later).output).toContain(
+        "DEFAULT_STILL_WORKS",
+      );
+    });
   },
 );
 
 describe("fixed executable identity and native startup rules", () => {
-  it.skipIf(process.platform !== "darwin")(
-    "keeps zsh login and interactive startup rules separate, even with a PTY",
+  it.skipIf(process.platform === "win32" || !findShellExecutable("/bin/zsh"))(
+    "applies per-command login overrides without changing zsh defaults or interactive startup rules",
     async () => {
       const root = await directory();
       const previous = process.env.ZDOTDIR;
@@ -286,15 +461,16 @@ describe("fixed executable identity and native startup rules", () => {
       await writeFile(path.join(root, ".zshrc"), "export SHELL_TEST_RC=rc\n");
       process.env.ZDOTDIR = root;
       try {
-        for (const login of [false, true])
+        const terminal = manager(
+          resolveShell({ shell: "/bin/zsh", login: true }),
+        );
+        for (const login of [undefined, false, true])
           for (const tty of [false, true]) {
-            const terminal = manager(
-              resolveShell({ shell: "/bin/zsh", login }),
-            );
             const first = await terminal.execCommand(
               {
                 cmd: 'print -r -- "$SHELL_TEST_ENV|${SHELL_TEST_PROFILE-unset}|${SHELL_TEST_RC-unset}|$options[interactive]|$options[login]"',
                 tty,
+                ...(login === undefined ? {} : { login }),
               },
               root,
             );
@@ -303,8 +479,11 @@ describe("fixed executable identity and native startup rules", () => {
             );
             expect(result.exit_code).toBe(0);
             expect(result.output.trim()).toBe(
-              login ? "env|profile|unset|off|on" : "env|unset|unset|off|off",
+              (login ?? true)
+                ? "env|profile|unset|off|on"
+                : "env|unset|unset|off|off",
             );
+            expect(terminal.shell.login).toBe(true);
           }
       } finally {
         if (previous === undefined) delete process.env.ZDOTDIR;
@@ -317,7 +496,7 @@ describe("fixed executable identity and native startup rules", () => {
       connect({
         execution: { shell: path.join(await directory(), "missing-shell") },
       }),
-    ).rejects.toThrow("execution.shell");
+    ).rejects.toThrow("指定的 Shell");
   });
   it.skipIf(process.platform === "win32")(
     "keeps the selected executable after PATH changes and does not fall back when it disappears",

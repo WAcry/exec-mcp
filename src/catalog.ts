@@ -68,11 +68,25 @@ export const WAIT_SCHEMA = z
   .strict();
 export const COMMAND_SCHEMA = z
   .object({
-    cmd: z.string().min(1).describe("交给已配置 Shell 的命令代码。"),
+    cmd: z.string().min(1).describe("交给所选 Shell 的命令代码。"),
     workdir: z
       .string()
       .min(1)
       .describe("本次命令目录；相对路径基于 exec.workdir。")
+      .optional(),
+    shell: z
+      .string()
+      .min(1)
+      .refine((value) => !!value.trim() && !value.includes("\0"))
+      .describe(
+        "本次 Shell 可执行文件名或路径；省略使用实例默认值。相对路径基于本次命令目录。",
+      )
+      .optional(),
+    login: z
+      .boolean()
+      .describe(
+        "本次启动模式；省略继承实例配置。PowerShell 控制 profile，其他 Shell 控制 login；不改变后续命令。",
+      )
       .optional(),
     tty: z.boolean().describe("true 分配 PTY；默认普通管道。").optional(),
     yield_time_ms: ms(30_000, "等待命令结果，默认 10000 毫秒。"),

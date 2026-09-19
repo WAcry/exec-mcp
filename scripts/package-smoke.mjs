@@ -230,8 +230,15 @@ try {
     return JSON.parse(body.text);
   };
   for (const tty of [false, true]) {
+    // Exercise the optional Direct-style overrides, then reuse the instance default.
+    const overrides = tty
+      ? {}
+      : {
+          shell: process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+          login: false,
+        };
     let part = await terminalCall(
-      `text(await tools.exec_command({cmd:${JSON.stringify(command)},tty:${tty},yield_time_ms:0}));`,
+      `text(await tools.exec_command(${JSON.stringify({ cmd: command, tty, yield_time_ms: 0, ...overrides })}));`,
     );
     let output = part.output;
     const deadline = Date.now() + 30_000;

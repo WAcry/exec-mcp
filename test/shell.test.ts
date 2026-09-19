@@ -12,6 +12,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   resolveShell,
+  resolveCommandShell,
   shellDescription,
   shellInvocation,
   findShellExecutable,
@@ -121,7 +122,7 @@ describe("one configured shell per runtime", () => {
         { shell: "missing.exe" },
         { platform: "win32", env: {}, lookup: find.lookup },
       ),
-    ).toThrow("execution.shell");
+    ).toThrow("指定的 Shell");
     expect(find.calls).toEqual(["powershell.exe", "missing.exe"]);
   });
   it("selects the inherited Unix shell, then zsh on macOS or sh on Linux", () => {
@@ -272,19 +273,29 @@ describe("shell command construction and concise contracts", () => {
       ]);
     },
   );
-  it("exposes no per-command interpreter/profile selectors and generates both descriptions from the same contract", () => {
+  it("exposes optional per-command selectors and generates both default descriptions from the same contract", () => {
     expect(Object.keys(COMMAND_SCHEMA.shape)).toEqual([
       "cmd",
       "workdir",
+      "shell",
+      "login",
       "tty",
       "yield_time_ms",
     ]);
     expect(
       COMMAND_SCHEMA.safeParse({ cmd: "echo ok", shell: "bash" }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       COMMAND_SCHEMA.safeParse({ cmd: "echo ok", login: true }).success,
-    ).toBe(false);
+    ).toBe(true);
+    for (const shell of ["", " ", "bad\0name", 7, null])
+      expect(COMMAND_SCHEMA.safeParse({ cmd: "echo ok", shell }).success).toBe(
+        false,
+      );
+    for (const login of ["true", "false", 0, null])
+      expect(COMMAND_SCHEMA.safeParse({ cmd: "echo ok", login }).success).toBe(
+        false,
+      );
     for (const kind of [
       "pwsh",
       "powershell",
@@ -306,6 +317,7 @@ describe("shell command construction and concise contracts", () => {
       )!;
       expect(execDescription(contracts)).toContain(describeContract(command));
       expect(command.description).toContain(shellDescription(shell));
+      if (kind !== "other") expect(command.description).toContain("默认");
       expect(command.description).not.toMatch(
         /探索|你可以|如果你|未知|Git Bash|\/private\/path/,
       );
@@ -358,5 +370,86 @@ describe("TOML execution configuration", () => {
           "config.toml",
         ),
       ).toThrow("execution");
+  });
+});
+
+describe("independent per-command overrides", () => {
+  it("inherits both defaults, and an explicit false can override a configured true without re-resolving the executable", () => {
+    for (const login of [false, true]) {
+      const defaults = Object.freeze({
+        file: "/already/selected/pwsh",
+        kind: "pwsh" as const,
+        login,
+        platform: "linux",
+      });
+      expect(resolveCommandShell(defaults, {}, "/unused")).toBe(defaults);
+      for (const override of [false, true]) {
+        const selected = resolveCommandShell(
+          defaults,
+          { login: override },
+          "/unused",
+        );
+        expect(selected).toEqual({ ...defaults, login: override });
+        expect(Object.isFrozen(selected)).toBe(true);
+        expect(
+          shellInvocation("echo test", selected).args.includes("-NoProfile"),
+        ).toBe(!override);
+      }
+      expect(defaults.login).toBe(login);
+    }
+  });
+  it("resolves a relative executable against the command directory and inherits login even when shell changes", async () => {
+    const root = await directory();
+    const name = process.platform === "win32" ? "bash.exe" : "bash";
+    const file = path.join(root, name);
+    await writeFile(file, "resolver fixture");
+    if (process.platform !== "win32") await chmod(file, 0o755);
+    for (const login of [false, true]) {
+      const defaults = Object.freeze({
+        file: "/configured/pwsh",
+        kind: "pwsh" as const,
+        login,
+        platform: process.platform,
+      });
+      const selected = resolveCommandShell(
+        defaults,
+        { shell: `./${name}` },
+        root,
+      );
+      expect(selected).toMatchObject({ file, kind: "bash", login });
+      expect(
+        resolveCommandShell(
+          defaults,
+          { shell: `./${name}`, login: !login },
+          root,
+        ),
+      ).toMatchObject({ file, kind: "bash", login: !login });
+      expect(resolveCommandShell(defaults, {}, root)).toBe(defaults);
+      expect(defaults.file).toBe("/configured/pwsh");
+    }
+  });
+  it("does not interpret a bare name as a command-directory executable", async () => {
+    const root = await directory();
+    const name = "exec-mcp-test-not-on-path-143989";
+    const file = path.join(
+      root,
+      process.platform === "win32" ? name + ".exe" : name,
+    );
+    await writeFile(file, "fixture");
+    if (process.platform !== "win32") await chmod(file, 0o755);
+    const defaults = resolveShell();
+    expect(() => resolveCommandShell(defaults, { shell: name }, root)).toThrow(
+      "指定的 Shell",
+    );
+    expect(
+      resolveCommandShell(defaults, { shell: `./${path.basename(file)}` }, root)
+        .file,
+    ).toBe(file);
+    expect(() =>
+      resolveCommandShell(defaults, { shell: "cmd.exe" }, root),
+    ).toThrow("不支持");
+    expect(() =>
+      resolveCommandShell(defaults, { shell: "pwsh -Command" }, root),
+    ).toThrow("指定的 Shell");
   });
 });

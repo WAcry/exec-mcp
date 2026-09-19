@@ -10,11 +10,18 @@ import {
   waitUntil,
 } from "../util.js";
 import { terminateProcessTree } from "./platform.js";
-import { resolveShell, shellInvocation, type CommandShell } from "./shell.js";
+import {
+  resolveCommandShell,
+  resolveShell,
+  shellInvocation,
+  type CommandShell,
+} from "./shell.js";
 
 export interface ExecCommandInput {
   cmd: string;
   workdir?: string;
+  shell?: string;
+  login?: boolean;
   tty?: boolean;
   yield_time_ms?: number;
 }
@@ -82,7 +89,8 @@ export class TerminalManager {
     if (!(await stat(cwd)).isDirectory()) throw new Error("命令目录不存在。");
     this.requireOpen();
     throwIfAborted(signal);
-    const shell = shellInvocation(input.cmd, this.shell);
+    const selected = resolveCommandShell(this.shell, input, cwd);
+    const shell = shellInvocation(input.cmd, selected);
     const backend: Backend = input.tty
       ? {
           kind: "pty",

@@ -40,7 +40,7 @@ function variable(
   return name === undefined ? undefined : env[name];
 }
 
-/** Resolve one executable at startup, never interpolate it into a shell command. */
+/** Resolve an executable without interpolating it into a shell command. */
 export function findShellExecutable(
   name: string,
   platform = process.platform as string,
@@ -98,19 +98,19 @@ export function resolveShell(
       /\.(cmd|bat)$/i.test(file)
     )
       throw new Error(
-        "execution.shell 不支持 CMD 或批处理入口；请指定 Shell 可执行文件。",
+        "Shell 不支持 CMD 或批处理入口；请指定 Shell 可执行文件。",
       );
   };
   const selected = config.shell;
   let file: string | undefined;
   if (selected !== undefined) {
     if (!selected.trim() || selected.includes("\0"))
-      throw new Error("execution.shell 必须是可执行文件名或路径。");
+      throw new Error("Shell 必须是可执行文件名或路径。");
     rejectBatch(selected);
     file = lookup(expand(selected));
     if (!file)
       throw new Error(
-        "找不到或无法执行 execution.shell；请检查配置与服务的 PATH。",
+        "找不到或无法执行指定的 Shell；请检查路径与服务的 PATH。",
       );
   } else {
     const candidates: string[] = [];
@@ -165,6 +165,29 @@ export function resolveShell(
   return Object.freeze({ file, kind, login: config.login ?? false, platform });
 }
 
+/** Per-command overrides are independent; never mutate the configured default. */
+export function resolveCommandShell(
+  defaults: CommandShell,
+  overrides: ExecutionConfig,
+  workdir: string,
+): CommandShell {
+  const login = overrides.login ?? defaults.login;
+  if (overrides.shell === undefined)
+    return login === defaults.login
+      ? defaults
+      : Object.freeze({ ...defaults, login });
+
+  const paths = defaults.platform === "win32" ? path.win32 : path.posix;
+  let shell = overrides.shell;
+  if (
+    !/^~[\\/]/.test(shell) &&
+    (shell.includes("/") ||
+      (defaults.platform === "win32" && shell.includes("\\")))
+  )
+    shell = paths.resolve(workdir, shell);
+  return resolveShell({ shell, login }, { platform: defaults.platform });
+}
+
 export function shellInvocation(
   command: string,
   shell: CommandShell,
@@ -191,7 +214,7 @@ export function shellDescription(shell: CommandShell): string {
   if (shell.kind === "pwsh" || shell.kind === "powershell") {
     const name =
       shell.kind === "pwsh" ? "PowerShell（pwsh）" : "Windows PowerShell";
-    return `在 ${name} 中执行命令${shell.login ? "（加载 profile）" : "（不加载 profile）"}。`;
+    return `默认在 ${name} 中执行命令${shell.login ? "（加载 profile）" : "（不加载 profile）"}。`;
   }
   const names: Partial<Record<ShellKind, string>> = {
     bash: "Bash",
@@ -201,6 +224,6 @@ export function shellDescription(shell: CommandShell): string {
   };
   const name = names[shell.kind];
   return name
-    ? `在 ${name} 中执行命令${shell.login ? "（login 模式）" : ""}。`
+    ? `默认在 ${name} 中执行命令${shell.login ? "（login 模式）" : ""}。`
     : "运行 Shell 命令。";
 }

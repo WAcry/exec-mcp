@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -17,6 +18,7 @@ import {
   jsonOutput,
   nodeCommand,
   observeTerminal,
+  texts,
 } from "./helpers.js";
 
 const connections: Awaited<ReturnType<typeof connect>>[] = [];
@@ -27,7 +29,7 @@ const SKILL_RULE =
 const FILE_EDIT_RULE =
   "创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。";
 const MULTILINE_RULE =
-  "多行字符串优先用模板字面量；需保留反斜杠时用 String.raw。两者仍有反引号和 ${...} 语义；补丁以 *** Begin Patch 起始，标记顶格、正文缩进保留。";
+  '多行字符串优先用模板字面量；需保留反斜杠时用 String.raw。模板正文的反引号用 ${"`"} 插入，代码围栏用 ${"`".repeat(3)}，字面量 ${name} 用 ${"${"}name}；String.raw 会保留转义用的反斜杠。补丁以 *** Begin Patch 起始，标记顶格、正文缩进保留。';
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -281,6 +283,166 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
         "    indented",
         "",
       ].join("\n"),
+    );
+  });
+  it("rejects an unescaped Markdown fence during parsing before any patch or subsequent command runs", async () => {
+    const connection = await connect({}, legacy);
+    connections.push(connection);
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "exec-invalid-template-"),
+    );
+    directories.push(directory);
+    const marker =
+      "*** Begin Patch\n*** Add File: before.txt\n+not executed\n*** End Patch\n";
+    const source = [
+      `await tools.apply_patch(${JSON.stringify(marker)});`,
+      "const patch = String.raw`*** Begin Patch",
+      "*** Add File: broken.md",
+      "+```console",
+      "+echo example",
+      "+```",
+      "*** End Patch",
+      "`;",
+      "text(await tools.apply_patch(patch));",
+      `await tools.apply_patch(${JSON.stringify(marker.replace("before.txt", "after.txt"))});`,
+    ].join("\n");
+    const result = await connection.client.callTool({
+      name: "exec",
+      arguments: { workdir: directory, source },
+    });
+    expect(result.isError).toBe(true);
+    const message = texts(result).join("\n");
+    expect(message).toContain("SyntaxError");
+    expect(message).toContain("解析阶段");
+    expect(message).toContain("```console");
+    for (const filename of ["before.txt", "broken.md", "after.txt"])
+      await expect(
+        readFile(path.join(directory, filename)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+  it("runs the exact documented Markdown patch and preserves interpolated delimiters without reparsing them", async () => {
+    const connection = await connect({}, legacy);
+    connections.push(connection);
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "exec-markdown-example-"),
+    );
+    directories.push(directory);
+    const doc = await readFile(
+      new URL("../docs/code-mode-examples.md", import.meta.url),
+      "utf8",
+    );
+    const section = doc.slice(doc.indexOf("## 含 Markdown 的多行补丁"));
+    const source = /```js\n([\s\S]*?)\n```/.exec(section)?.[1];
+    expect(source).toBeDefined();
+    const result = await connection.client.callTool({
+      name: "exec",
+      arguments: { workdir: directory, source: source! },
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(jsonOutput<{ success: boolean }>(result).success).toBe(true);
+    expect(
+      await readFile(path.join(directory, "patch-example.md"), "utf8"),
+    ).toBe(
+      [
+        "# Review notes",
+        "Use `review` mode.",
+        "```console",
+        "uv run demo.py",
+        "```",
+        "Literal placeholder: ${name}",
+        String.raw`Windows path: C:\work\new\file.txt`,
+        String.raw`Regex: Sig\[\d+\]`,
+        String.raw`Literal escape: \uXXXX`,
+        "",
+      ].join("\n"),
+    );
+    // String.raw preserves the escape backslash; template substitutions do not reparse their text.
+    const semantics = await connection.client.callTool({
+      name: "exec",
+      arguments: {
+        source: [
+          "text({",
+          "rawTick: String.raw`\\``,",
+          "rawSlot: String.raw`\\${name}`,",
+          "cookedTick: `\\``,",
+          "cookedSlot: `\\${name}`",
+          "});",
+        ].join("\n"),
+      },
+    });
+    expect(semantics.isError, JSON.stringify(semantics)).not.toBe(true);
+    expect(jsonOutput(semantics)).toEqual({
+      rawTick: "\\`",
+      rawSlot: "\\${name}",
+      cookedTick: "`",
+      cookedSlot: "${name}",
+    });
+  });
+  it("creates and updates a large Markdown patch without argv-sized text, sentinel replacement or delimiter corruption", async () => {
+    const connection = await connect({}, legacy);
+    connections.push(connection);
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "exec-large-markdown-"),
+    );
+    directories.push(directory);
+    const count = 1600;
+    // These are the source's native substitutions, not preprocessing applied by the service.
+    const block =
+      [
+        '+Use ${"`"}review${"`"} with ${"${"}name}.',
+        '+${"`".repeat(3)}console',
+        String.raw`+C:\work\new\task.txt`,
+        String.raw`+Regex: Sig\[\d+\]; literal \uXXXX, \n, \\server\share`,
+        '+${"`".repeat(3)}',
+        "+    indented 中文😀",
+        "+Keep §, ~~~, __BACKTICK__ and __DOLLAR__ as ordinary text.",
+        "+",
+      ].join("\n") + "\n";
+    const source = [
+      "const created = await tools.apply_patch(String.raw`*** Begin Patch",
+      "*** Add File: large.md",
+      "+# Original",
+      block.repeat(count) + "+END_MARKER\n*** End Patch",
+      "`);",
+      "const updated = await tools.apply_patch(String.raw`*** Begin Patch",
+      "*** Update File: large.md",
+      "@@",
+      "-# Original",
+      "+# Updated",
+      "*** End Patch",
+      "`);",
+      "text({created,updated});",
+    ].join("\n");
+    expect(Buffer.byteLength(source)).toBeGreaterThan(256 * 1024);
+    const result = await connection.client.callTool({
+      name: "exec",
+      arguments: { workdir: directory, source },
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    const value = jsonOutput<{
+      created: { success: boolean };
+      updated: { success: boolean };
+    }>(result);
+    expect(value.created.success).toBe(true);
+    expect(value.updated.success).toBe(true);
+    const expectedBlock =
+      [
+        "Use `review` with ${name}.",
+        "```console",
+        String.raw`C:\work\new\task.txt`,
+        String.raw`Regex: Sig\[\d+\]; literal \uXXXX, \n, \\server\share`,
+        "```",
+        "    indented 中文😀",
+        "Keep §, ~~~, __BACKTICK__ and __DOLLAR__ as ordinary text.",
+        "",
+      ].join("\n") + "\n";
+    const expected = Buffer.from(
+      "# Updated\n" + expectedBlock.repeat(count) + "END_MARKER\n",
+    );
+    const actual = await readFile(path.join(directory, "large.md"));
+    expect(actual.length).toBe(expected.length);
+    expect(createHash("sha256").update(actual).digest("hex")).toBe(
+      createHash("sha256").update(expected).digest("hex"),
     );
   });
 });

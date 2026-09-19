@@ -58,6 +58,39 @@ text(await tools.exec_command({
 
 服务不擅自修改错误策略。原生程序的退出码可用 `exit $LASTEXITCODE` 显式传回。
 
+## 含 Markdown 的多行补丁
+
+`String.raw` 保留反斜杠，但模板正文中的反引号仍结束模板，`${...}` 仍执行插值。
+Markdown 的内联代码和围栏使用字符串值插入，字面量 `${name}` 也这样处理；
+插入的值只是文本，不会再次作为 JavaScript 解析。
+
+```js
+const patch = String.raw`*** Begin Patch
+*** Add File: patch-example.md
++# Review notes
++Use ${"`"}review${"`"} mode.
++${"`".repeat(3)}console
++uv run demo.py
++${"`".repeat(3)}
++Literal placeholder: ${"${"}name}
++Windows path: C:\work\new\file.txt
++Regex: Sig\[\d+\]
++Literal escape: \uXXXX
+*** End Patch
+`;
+text(await tools.apply_patch(patch));
+```
+
+这里的 ``${"`"}`` 是字符串插值，不是占位符替换；没有需要保证“不出现在正文里”的特殊符号。
+同样适用于更新已有文件和一个补丁内的多个文件。补丁从第一字符的 `*** Begin Patch` 开始，
+标记顶格；新增行的 `+` 后保留文件实际缩进。
+
+在 `String.raw` 中用反斜杠转义反引号或美元插值开头，反斜杠也会进入最终文本，不能据此保证原文保真。
+正文已在变量中时直接传递，或把该变量作为一个完整插值值；自动生成 JavaScript 源码时，可由
+`JSON.stringify` 编码已有字符串。它无法修复在求值前就已经语法错误的模板。
+不默认采用全局 `replaceAll`、Base64 或服务端猜测修复，避免误改正文、增加另一层编码或改变补丁内容。
+语言语义见 [String.raw](https://tc39.es/ecma262/multipage/text-processing.html#sec-string.raw)。
+
 ## Windows 路径、正则与多行脚本
 
 JavaScript 普通字符串会先解释反斜杠。多行 Shell 脚本可用 `String.raw` 保留这一层反斜杠；

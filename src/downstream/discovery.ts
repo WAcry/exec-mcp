@@ -87,14 +87,14 @@ export class ToolDiscovery {
         `来源：${tool.serverId}。${tool.namespaceInstructions ? `服务说明（原文）：${tool.namespaceInstructions}\n` : ""}${tool.tool.description ?? ""}`,
         `调用：await tools.${tool.codeName}(args)。args 必须满足以下 JSON Schema：`,
         JSON.stringify(schema),
-        `返回 MCP CallToolResult；先检查 isError，优先使用 structuredContent，content 保留不同文本及媒体。`,
+        `返回 MCP CallToolResult：{content,structuredContent?,isError?}。`,
         ...(tool.tool.outputSchema
           ? [
               `structuredContent 契约：${JSON.stringify(tool.tool.outputSchema)}`,
             ]
           : []),
         ...(tool.tool.annotations
-          ? [`上游提示（非授权）：${JSON.stringify(tool.tool.annotations)}`]
+          ? [`上游工具提示：${JSON.stringify(tool.tool.annotations)}`]
           : []),
       ].join("\n");
       const definition: CodeModeToolDefinition = {

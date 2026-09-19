@@ -72,6 +72,27 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 检索规则沿用可解释的 BM25，支持标识符和中文词项；不用 embedding 服务，也不要求 Agent 自写排序。
 实际工具说明从可执行定义生成，不在 ADR 维护另一份完整提示词或 schema。
 
+## 工具说明写给第一次使用它的 Agent
+
+优先描述当前能做什么、参数与默认值、结果怎样使用，以及会改变调用正确性的语义。
+设计讨论中的“不要做某事”不是自动追加的提示词；旧项目的参数、未实现的功能、内部回收或压缩算法，
+留在相应 ADR/README。只有自然调用容易踩到且 schema/返回值未说明的区别，才值得额外提醒。
+例如隔离 JS 与实际机器的边界、未 await 的调用被丢弃、cell_id 与终端 session_id 的区别、
+待输出媒体和自动交付的文件链接，均会直接影响调用；“补丁不要传旧对象”则由字符串契约已经消除歧义。
+
+对照固定 Codex rust-v0.155.1 的 [Code Mode 契约](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/code-mode-protocol/src/description.rs)、
+[命令定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/shell_spec.rs)、
+[补丁定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)、
+[图片定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/view_image_spec.rs)、
+[检索定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/tool_search_spec.rs) 和基础提示词，
+保留共同的工具形状与关键语义，采用中文正向表达。可借鉴上游对工具编排、异步生命周期、媒体参数和 wait 增量结果的说明，
+不整体复制其 system prompt、审批/沙箱工作流、未接入的 helper 或不同的预算默认值。
+Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机器离线；本项目明确外部访问通过 tools.* 执行。
+
+工具说明不重复具体 Skill 路径压缩与字符预算：常规调用只需要名称/用途/全文路径，
+发生压缩时由那份返回目录给出路径前缀的还原方式和省略标记。显式调用策略仍在目录中保留。
+完整 schema 继续作为参数/结果事实来源，不为省文字丢字段，也不以模型“足够聪明”为理由省略会改变正确用法的区别。
+
 ## 与 Codex 对齐到哪里
 
 参考快照 `8b78600dc85cc265d7e7e827f6aa903875405287` 中，

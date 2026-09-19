@@ -254,12 +254,6 @@ export class ExecRuntime {
                     subcallResult = exported.info;
                     break;
                   }
-                  case "revoke_file":
-                    subcallResult = await this.artifacts.revoke(
-                      (input as { id: string }).id,
-                      scope,
-                    );
-                    break;
                   case "exec_command":
                     subcallResult = await this.terminal.execCommand(
                       input as ExecCommandInput,

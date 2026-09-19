@@ -248,7 +248,9 @@ enabled = true
       expect(tools[0]!.description).toContain(
         "先 text(await tools.list_skills({}))",
       );
-      expect(tools[0]!.description).toContain("40000");
+      expect(tools[0]!.description).not.toMatch(
+        /40000|max_chars|round.?robin/i,
+      );
       await skill(
         path.join(environment.home, ".agents", "skills", "generic"),
         "generic",

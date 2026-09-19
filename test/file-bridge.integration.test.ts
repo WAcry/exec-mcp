@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -201,7 +201,7 @@ describe.each([false, true])(
       expect(ended.isError).toBe(true);
       expect(links(ended)).toEqual([]);
     });
-    it("keeps native links on script errors but removes explicitly revoked pending links", async () => {
+    it("keeps links on script errors but omits exports retired by management before delivery", async () => {
       const t = await setup(legacy);
       await writeFile(path.join(t.dir, "file"), "data");
       const failed = await t.exec(
@@ -211,11 +211,23 @@ describe.each([false, true])(
       expect(failed.isError).toBe(true);
       expect(links(failed)).toHaveLength(1);
       expect((await t.read(links(failed)[0]!.uri)).contents).toHaveLength(1);
-      const revoked = await t.exec(
-        'const file=await tools.export_file({path:"file"});await tools.revoke_file({id:file.id});',
+      const exportFile = t.server.runtime.artifacts.exportFile.bind(
+        t.server.runtime.artifacts,
       );
-      expect(revoked.isError).not.toBe(true);
-      expect(links(revoked)).toEqual([]);
+      const retired = vi
+        .spyOn(t.server.runtime.artifacts, "exportFile")
+        .mockImplementationOnce(async (...args) => {
+          const value = await exportFile(...args);
+          await t.server.runtime.artifacts.revokeFromInstance(value.info.id);
+          return value;
+        });
+      try {
+        const result = await t.exec('await tools.export_file({path:"file"});');
+        expect(result.isError).not.toBe(true);
+        expect(links(result)).toEqual([]);
+      } finally {
+        retired.mockRestore();
+      }
     });
     it("retains input bindings through waits without reattaching or downloading other files", async () => {
       const t = await setup(legacy);
@@ -276,7 +288,7 @@ describe("isolated downloadable files endpoint", () => {
         )
       ).status,
     ).toBe(404);
-    await t.exec(`await tools.revoke_file({id:${JSON.stringify(info.id)}});`);
+    await t.server.runtime.artifacts.revokeFromInstance(info.id);
     expect((await fetch(url)).status).toBe(404);
   });
   it("never silently publishes a file when URL delivery has not been enabled", async () => {

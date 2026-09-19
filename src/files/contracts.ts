@@ -58,13 +58,13 @@ export const HOST_FILE_SCHEMA = z
     download_url: z
       .string()
       .min(1)
-      .describe("宿主注入的临时下载地址；不要自行构造、改写或输出。"),
+      .describe("由宿主绑定的临时下载地址，仅供服务端下载使用。"),
     file_id: z.string().min(1).describe("宿主提供的不透明文件标识。"),
     mime_type: z.string().optional().describe("宿主提供的 MIME 类型，可省略。"),
     file_name: z
       .string()
       .optional()
-      .describe("宿主提供的文件名，可省略；不作为保存路径。"),
+      .describe("宿主提供的原文件名；保存位置由 destination 指定。"),
     size: z
       .number()
       .int()
@@ -80,7 +80,7 @@ export const IMPORT_FILE_SCHEMA = z
       .number()
       .int()
       .nonnegative()
-      .describe("本次 exec.files 的零基索引；不接收文件引用或 URL。"),
+      .describe("本次 exec.files 中目标文件的零基索引。"),
     destination: z
       .string()
       .min(1)
@@ -102,22 +102,12 @@ export const EXPORT_FILE_SCHEMA = z
       .min(1)
       .max(255)
       .optional()
-      .describe("交付文件名，不得包含目录分隔符或控制字符；默认源文件名。"),
+      .describe("交付时的单个文件名，默认源文件名。"),
     delivery: z
       .enum(["resource", "url"])
       .optional()
       .describe(
         "默认 resource 经 MCP 读取；url 显式发布限时下载链接，须已配置独立下载入口。",
-      ),
-  })
-  .strict();
-export const REVOKE_FILE_SCHEMA = z
-  .object({
-    id: z
-      .string()
-      .min(1)
-      .describe(
-        "export_file 返回的导出 id；撤销后拒绝新读取，已经开始的读取可能完成。",
       ),
   })
   .strict();

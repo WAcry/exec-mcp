@@ -414,10 +414,23 @@ enabled = true
     Buffer.from(resource.contents[0].blob, "base64").toString("utf8"),
     "packaged runtime works\n",
   );
-  const revoked = await scopedCall(
-    'await tools.revoke_file({id:load("export-id")});',
+  const exportState = await scopedCall(
+    'text({id:load("export-id"),revoke:typeof tools.revoke_file,listed:ALL_TOOLS.some(t=>t.name==="revoke_file")});',
   );
-  assert.ok(!revoked.isError, JSON.stringify(revoked));
+  assert.ok(!exportState.isError, JSON.stringify(exportState));
+  const exportInfo = JSON.parse(
+    exportState.content.findLast(
+      (block) => block.type === "text" && block.text.startsWith("{"),
+    ).text,
+  );
+  assert.equal(exportInfo.revoke, "undefined");
+  assert.equal(exportInfo.listed, false);
+  const revoked = await fetch(new URL("/api/artifacts/revoke", started.web), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-exec-web": "1" },
+    body: JSON.stringify({ id: exportInfo.id }),
+  });
+  assert.equal(revoked.status, 200);
   await assert.rejects(client.readResource({ uri: fileLink.uri }));
   const installedServer = pathToFileURL(
     path.join(isolated, "node_modules", "exec-mcp", "dist", "src", "server.js"),

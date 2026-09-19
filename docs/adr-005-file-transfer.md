@@ -5,7 +5,7 @@
 ## 决定与原因
 
 顶层仍只有 exec/wait。ChatGPT 文件绑定放在可选的 `exec.files`，通过
-`openai/fileParams` 标记；内部 import_file/export_file/revoke_file 编排导入、交付与撤销。
+`openai/fileParams` 标记；内部 import_file/export_file 编排导入与交付。
 这样导入、处理、导出能共享一次外层调用，不为简单传输额外引入任务或 UI。
 完整字节不穿过 V8、模型文本或 store；不让 Agent 手工搬运 Base64。
 
@@ -14,6 +14,13 @@
 普通执行不依赖附件；无文件或索引不符时明确失败，不猜测其他消息中的附件。
 文件 schema 声明四个官方字段，仅 download_url/file_id 必填；工具说明与原始宿主数据区分。
 输入依据：[OpenAI 文件参数](https://developers.openai.com/plugins/reference#define-file-inputs)。
+
+## 导出生命周期与工具表面
+
+不再向模型提供 revoke_file，也不保留隐藏别名。个人日常交付通常只需导入与导出，
+短期快照已自动过期；偶发的提前撤销不值得常驻在每次 exec 的工具目录里。
+保留 Web 控制台的显式撤销以及内部失败清理、到期/关闭清理，用户仍能提前收回公开 URL 的后续访问。
+这是模型工具表面的收敛，不是删除资源生命周期或改变已经开始的下载能否收回的语义。
 
 ## 导入不留下半个目标文件
 

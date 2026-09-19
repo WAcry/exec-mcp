@@ -2,12 +2,10 @@ import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
-import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
 import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
   EXPORT_FILE_SCHEMA,
-  REVOKE_FILE_SCHEMA,
 } from "./files/contracts.js";
 
 const ms = (maximum: number, description: string) =>
@@ -18,7 +16,7 @@ const tokenBudget = z
   .min(0)
   .max(Number.MAX_SAFE_INTEGER)
   .describe(
-    "本次文本输出的近似 token 预算（约 4 个 UTF-8 字节/token）；省略不限量，0 省略文本。保留首尾并标记截断，不影响嵌套结果、存储和媒体；状态/提示不计入。",
+    "本次文本的近似 token 预算；省略不限量，0 省略文本。超限保留首尾并标记；媒体和状态保留，工具结果及 store 不变。",
   )
   .optional();
 export const EXEC_SCHEMA = z
@@ -28,18 +26,18 @@ export const EXEC_SCHEMA = z
       .array(HOST_FILE_SCHEMA)
       .optional()
       .describe(
-        "可选的 ChatGPT 原生文件引用数组；按原顺序原样传入，不填文件名、路径、URL 或内容。宿主绑定为文件对象；JS 用 import_file 的零基 index 选择，不直接访问下载凭据。",
+        "ChatGPT 原生文件引用数组，按原顺序原样传入；宿主绑定文件对象，脚本通过 import_file 的零基 index 选择。",
       ),
     source: z
       .string()
       .min(1)
-      .describe("JavaScript 源码，不要加 Markdown 围栏；不是 Shell 命令。"),
+      .describe(
+        "JavaScript 异步模块源码字符串；Shell 命令通过 tools.exec_command({cmd:...}) 执行。",
+      ),
     workdir: z
       .string()
       .min(1)
-      .describe(
-        "本次本机工具的默认目录；省略或相对路径均基于服务用户主目录。Shell cd 不改变此值。",
-      )
+      .describe("本次本机工具的默认目录；省略或相对路径均基于服务用户主目录。")
       .optional(),
     yield_time_ms: ms(
       30_000,
@@ -56,7 +54,7 @@ export const WAIT_SCHEMA = z
       .describe("exec 返回的运行中 cell_id，不是终端 session_id。"),
     yield_time_ms: ms(
       110_000,
-      "最长等待毫秒数；默认、推荐和上限均为 110000；有完成或主动 yield 时提前返回。",
+      "最长等待毫秒数，默认 110000；完成或主动 yield 时提前返回。",
     ),
     terminate: z
       .boolean()
@@ -136,7 +134,9 @@ export const IMAGE_SCHEMA = z
     path: z
       .string()
       .min(1)
-      .describe("已有 PNG/JPEG/WebP/GIF 图片；相对路径基于 exec.workdir。"),
+      .describe(
+        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对 exec.workdir，支持 ~/。",
+      ),
     detail: z
       .enum(["high", "original"])
       .describe("默认 high；original 请求原始细节。")
@@ -145,10 +145,7 @@ export const IMAGE_SCHEMA = z
   .strict();
 export const SEARCH_SCHEMA = z
   .object({
-    query: z
-      .string()
-      .min(1)
-      .describe("工具用途、名称或服务名；支持标识符与中文词项的 BM25。"),
+    query: z.string().min(1).describe("所需工具的用途、名称或服务名。"),
     limit: z
       .number()
       .int()
@@ -177,6 +174,8 @@ const TERMINAL_OUTPUT = {
     wall_time_seconds: { type: "number" },
     session_id: { type: "string" },
     exit_code: { type: "integer" },
+    truncated: { type: "boolean", const: true },
+    omitted_bytes: { type: "integer", minimum: 0 },
   },
   required: ["output", "wall_time_seconds"],
   additionalProperties: false,
@@ -208,32 +207,27 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
-    description: `实时返回 Skill 目录文本，用 text(result) 一次输出。始终扫描 ~/.agents/skills、~/.codex/skills；有 workdir 时加上从该目录到最近 Git 根的 .agents/skills，无 Git 根时只检查该目录。跟随软链接，按真实路径去重，同名不同文件都保留；不返回正文。按 [skills] max_chars 压缩，默认 ${DEFAULT_SKILL_MAX_CHARS} Unicode 字符（约 10000 tokens）；路径可无损展开，描述公平保留前缀，名称/路径/策略超出目标也不隐藏条目。仅显式 Skill 不展示触发描述；只在用户明确要求使用该项时读全文，“不要使用”或其他文档推荐不算授权。勿另设过小的 exec.max_output_tokens 截断目录。`,
+    description:
+      "返回可用 Skill 的名称、用途和 SKILL.md 真实路径，以 text(result) 输出目录。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。选定后读取完整 SKILL.md；标为“仅显式”的项只在用户明确要求使用时读取。",
   },
   {
     name: "import_file",
     schema: IMPORT_FILE_SCHEMA,
     description:
-      "将本次 exec.files[index] 流式保存到显式 destination，返回 {path,size,sha256}；不会自动下载未使用的文件。默认不覆盖，失败清理临时文件；成功后用返回路径处理文件，不保存或输出下载 URL。",
+      "将本次 exec.files[index] 保存到 destination，返回 {path,size,sha256}。默认保留已有目标；overwrite=true 时，下载校验成功后替换。后续操作使用返回的本机路径。",
   },
   {
     name: "export_file",
     schema: EXPORT_FILE_SCHEMA,
     description:
-      "显式交付文件快照，返回 {id,name,mime_type,size,sha256,expires_at,uri}。成功后 exec/wait 自动附带原生 resource_link，无需 text()，不受文本预算影响。默认 resource 至多 32 MiB，经本实例私有 MCP 入口 resources/read 获取；url 需配置独立 HTTPS 下载入口，任何持有链接者均可下载。过期失效，不承诺写入 ChatGPT sandbox。",
-  },
-  {
-    name: "revoke_file",
-    schema: REVOKE_FILE_SCHEMA,
-    description:
-      "撤销当前对话的文件导出，返回 {revoked:true}；拒绝新的资源读取和 URL 下载。已开始或已完成的下载不能收回。",
+      "向用户交付独立文件快照，返回 {id,name,mime_type,size,sha256,expires_at,uri}；exec/wait 自动附带原生 resource_link。默认 resource 至多 32 MiB，由宿主经 resources/read 获取；url 需已配置 HTTPS 下载入口，持有链接者均可下载。到期失效；宿主决定文件展示或挂载方式。",
   },
   {
     name: "exec_command",
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "运行或未读时返回 session_id，write_stdin 续取；exit_code 为 Shell 退出码。每次≤1 MiB；超限保留首尾，truncated/omitted_bytes 标明丢失。",
+      "运行中或输出未读时返回 session_id，write_stdin 续取；exit_code 为 Shell 退出码。每次≤1 MiB；缓冲超限保留首尾，truncated/omitted_bytes 标记省略。",
   },
   {
     name: "write_stdin",
@@ -256,13 +250,13 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       required: ["success", "exit_code", "output"],
       additionalProperties: false,
     },
-    description: `接收单个补丁字符串，不要传 {patch,workdir}。相对路径基于 exec.workdir；失败可能部分生效，请检查 success。补丁遵循以下 Lark grammar：\n${PATCH_GRAMMAR}`,
+    description: `新增、删除、更新或移动文本文件。接收完整补丁字符串，相对路径基于 exec.workdir；检查返回的 success，失败时可能已有部分变更。补丁遵循以下 Lark grammar：\n${PATCH_GRAMMAR}`,
   },
   {
     name: "view_image",
     schema: IMAGE_SCHEMA,
     description:
-      "读取本机已有图片，返回 MCP CallToolResult；用 image(result.content[0]) 显式交给模型，不能 text() 图片的 base64。",
+      "读取本机已有图片用于视觉检查，返回 MCP CallToolResult；用 image(result.content[0]) 输出其中的图片。",
   },
   {
     name: "tool_search",
@@ -317,20 +311,19 @@ export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `在隔离 V8 中执行 JavaScript 异步模块，通过 tools.* 组合、并发本机及下游 MCP 调用。无 Node、文件系统、网络、console 或 import；仅输入 JS。
-首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出完整目录；匹配任务后用 exec_command 读取其真实路径的完整 SKILL.md 再执行。目录仍在上下文中时无需重复列出；仅显式 Skill 必须由用户明确要求使用，不能按任务相似性或其他文档推荐自行读取。
-附件通过顶层 files 绑定，不要写入 source；import_file(index) 在机器端下载。export_file 显式交付文件并由 exec/wait 原生返回资源链接，不把完整文件 Base64 搬进模型。
-本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
-store(key,value)/load(key) 使用原生对话内存存储；key 为字符串，未命中返回 undefined；需宿主的 openai/session。空闲 ${idleHours} 小时、内存压力回收或服务/host 重启后数据可能丢失；同一对话可重新 exec，旧 cell_id 不迁移。新 cell 读启动快照，host 完成时合并写入；脚本报错也可能提交。load 返回副本，修改后需 store，并发同键非事务；长期数据用文件。
-用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
-ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
-返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。
-audio() 沿用 host 规则：可识别且短于 25 ms 的 WAV 会改为说明文本，不返回该音频片段。
-超过等待窗口返回 Script running 与 cell_id，只用 wait 续取；yield_control() 主动交回累计输出并继续执行；exit() 结束脚本。setTimeout/clearTimeout 可用，但计时器必须通过 Promise 等待。notify 不支持。
-source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。仅显式设置 max_output_tokens/wait.max_tokens 才按近似预算截断本次文本，不影响原始工具结果或 store；wait 预算不继承 exec，省略不截断。截断文本未必是有效 JSON，被省略内容不由后续 wait 补发。
-cell_id 不等于终端 session_id；已交回句柄的进程通过后续 exec 内 write_stdin 操作。取消不回滚副作用。仅显式输出必要结果；默认不截断，不自动落盘，超出真实传输边界会报错，操作可能已发生，不自动重试。
+  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。
+首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录，选定后读取完整 SKILL.md。目录仍在上下文中时可直接使用。
+用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
+ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
+本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
+通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。MCP 结果先检查 isError，优先取 structuredContent，再从 content 补充不同文本与媒体。
+文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。
+store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未命中为 undefined；key 为字符串，依赖宿主的对话标识 openai/session。每次 exec 读启动快照，结束时合并写入，脚本报错也可能提交；修改 load 的副本后需再次 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启后存储可能清空；同一对话可重新 exec，长期数据用文件。
+超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
+source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。max_output_tokens/wait.max_tokens 仅限制本次交回的文本，省略不限量；wait 单独设置，媒体和资源链接保留。文本截断可能使 JSON 不完整，被省略部分不在后续 wait 补发。
+cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。取消或调用失败时，副作用可能已发生；重试前先检查实际状态。
 
 本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的运行中 cell_id 的新增输出，或终止该 cell。默认、推荐和最长等待均为 110 秒；完成、主动 yield 或终止时提前返回。可用 max_tokens 限制本次近似文本预算，省略不限量且不继承 exec；媒体与状态保留。终端 session_id 由 exec 内的 write_stdin 操作。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 仅控制本次文本，省略不限量且不继承 exec；媒体与状态保留。终端 session_id 用 exec 内的 write_stdin 续取。";

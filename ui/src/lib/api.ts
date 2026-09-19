@@ -23,8 +23,12 @@ export async function apiFetch<T>(
   if (!response.ok) {
     let message = `请求失败：HTTP ${response.status}`;
     try {
-      const body = (await response.json()) as { message?: unknown };
+      const body = (await response.json()) as {
+        message?: unknown;
+        error?: unknown;
+      };
       if (typeof body.message === "string") message = body.message;
+      else if (typeof body.error === "string") message = body.error;
     } catch {
       /* Keep the status-only message. */
     }

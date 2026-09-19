@@ -1,6 +1,11 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
+import {
+  ACK_INPUT_SCHEMA,
+  GET_INPUT_SCHEMA,
+  REQUEST_INPUT_SCHEMA,
+} from "./user-input/contracts.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import {
   HOST_FILE_SCHEMA,
@@ -16,11 +21,12 @@ const tokenBudget = z
   .min(0)
   .max(Number.MAX_SAFE_INTEGER)
   .describe(
-    "本次文本的近似 token 预算；省略不限量，0 省略文本。超限保留首尾并标记；媒体和状态保留，工具结果及 store 不变。",
+    "本次文本的近似 token 预算，0 省略文本；最终响应仍限 36,000 UTF-8 字节。超限保留首尾；媒体和状态保留，嵌套结果及 store 不变。",
   )
   .optional();
 export const EXEC_SCHEMA = z
   .object({
+    ack_user_input: ACK_INPUT_SCHEMA,
     max_output_tokens: tokenBudget,
     files: z
       .array(HOST_FILE_SCHEMA)
@@ -47,6 +53,7 @@ export const EXEC_SCHEMA = z
   .strict();
 export const WAIT_SCHEMA = z
   .object({
+    ack_user_input: ACK_INPUT_SCHEMA,
     max_tokens: tokenBudget,
     cell_id: z
       .string()
@@ -178,6 +185,12 @@ const TERMINAL_OUTPUT = {
     exit_code: { type: "integer" },
     truncated: { type: "boolean", const: true },
     omitted_bytes: { type: "integer", minimum: 0 },
+    stderr_bytes: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "普通管道累计收到的 stderr 字节数（含已截断部分）；不等同于执行失败。PTY 不区分流。",
+    },
   },
   required: ["output", "wall_time_seconds"],
   additionalProperties: false,
@@ -228,7 +241,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "运行中或输出未读时返回 session_id，write_stdin 续取；exit_code 为 Shell 退出码。每次≤1 MiB；缓冲超限保留首尾，truncated/omitted_bytes 标记省略。",
+      "运行或输出待取时返回 session_id，用 write_stdin 续取。exit_code 为 Shell 退出码；每次≤4 MiB，缓冲溢出由 truncated/omitted_bytes 标记。",
   },
   {
     name: "write_stdin",
@@ -297,8 +310,26 @@ export function bindNative(
 }
 export function nativeContracts(
   shell: CommandShell,
+  userInput = false,
 ): readonly NativeContract[] {
-  return NATIVE_CONTRACTS.map((contract) =>
+  const contracts: readonly NativeContract[] = userInput
+    ? [
+        ...NATIVE_CONTRACTS,
+        {
+          name: "request_user_input_async",
+          schema: REQUEST_INPUT_SCHEMA,
+          description:
+            "将问题保存到本机 Web UI，立即返回 {accepted,request_id,status,question_ids}，不等待用户。需要 ChatGPT 对话标识和已运行的 Web UI。可继续独立工作；依赖答复的操作先让模型读到答复再决定。",
+        },
+        {
+          name: "get_user_input",
+          schema: GET_INPUT_SCHEMA,
+          description:
+            "读取当前 ChatGPT 对话中该请求的问题、答复版本和投递状态；立即返回，不等待用户。",
+        },
+      ]
+    : NATIVE_CONTRACTS;
+  return contracts.map((contract) =>
     contract.name === "exec_command"
       ? {
           ...contract,
@@ -312,7 +343,7 @@ export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。
+  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行，与 ChatGPT 容器的路径和文件不互通。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
@@ -320,11 +351,13 @@ ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读�
 通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
 文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。
 store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未命中为 undefined；key 为字符串，依赖宿主的对话标识 openai/session。每次 exec 读启动快照，结束时合并写入，脚本报错也可能提交；修改 load 的副本后需再次 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启后存储可能清空；同一对话可重新 exec，长期数据用文件。
+Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_code 与输出，stderr_bytes 表示管道收到过错误流（不等同于失败）。
 超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
-source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。max_output_tokens/wait.max_tokens 仅限制本次交回的文本，省略不限量；wait 单独设置，媒体和资源链接保留。文本截断可能使 JSON 不完整，被省略部分不在后续 wait 补发。
-cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。取消或调用失败时，副作用可能已发生；重试前先检查实际状态。
+source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。最终文本合计最多 36,000 UTF-8 字节，超出保留首尾。先在 JS 内筛选/汇总大结果，跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。
+cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试，构造复杂度过高的脚本可拆成独立步骤。
 
+${contracts.some((contract) => contract.name === "request_user_input_async") ? "用户在 Web 提交的答复随后续 exec/wait 的独立内容块返回；按 event_id 去重，读到后在下一次调用的 ack_user_input 确认。答复先返回模型，再执行依赖该决定的步骤；工具调用停止时不会主动唤醒 ChatGPT。\n" : ""}
 本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 仅控制本次文本，省略不限量且不继承 exec；媒体与状态保留。终端 session_id 用 exec 内的 write_stdin 续取。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 exec 内的 write_stdin 续取。";

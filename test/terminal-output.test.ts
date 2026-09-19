@@ -189,10 +189,10 @@ describe("real rolling terminal output, not output files", () => {
     ).toBeDefined();
   });
   it("refreshes finished output retention when it is actually read", async () => {
-    const value = terminal(2 * 1024 * 1024, 1000);
+    const value = terminal(8 * 1024 * 1024, 1000);
     const first = await value.execCommand(
       {
-        cmd: nodeCommand('process.stdout.write("x".repeat(1500000));'),
+        cmd: nodeCommand('process.stdout.write("x".repeat(5500000));'),
         yield_time_ms: 0,
       },
       tmpdir(),
@@ -242,7 +242,7 @@ describe.each([false, true])(
       const final = await connection.client.callTool({
         name: "exec",
         arguments: {
-          source: `text(await tools.write_stdin({session_id:${JSON.stringify(initial.session_id)},yield_time_ms:0}));`,
+          source: `const r=await tools.write_stdin({session_id:${JSON.stringify(initial.session_id)},yield_time_ms:0});text({...r,output:r.output.slice(0,1000)+r.output.slice(-1000),raw_bytes:r.output.length});`,
         },
       });
       expect(final.isError).not.toBe(true);

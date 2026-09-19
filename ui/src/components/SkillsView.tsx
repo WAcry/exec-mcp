@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { SkillsResponse } from "../types";
 import { apiFetch } from "../lib/api";
+import { useManagement } from "../context/ManagementContext";
+import { ConfigToggle } from "./ConfigToggle";
 import {
   FileCode2,
   AlertCircle,
@@ -10,23 +12,31 @@ import {
 } from "lucide-react";
 
 export function SkillsView() {
+  const management = useManagement();
   const [data, setData] = useState<SkillsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [workdir, setWorkdir] = useState("");
+  const [appliedWorkdir, setAppliedWorkdir] = useState("");
+  const [error, setError] = useState("");
 
-  const fetchSkills = async () => {
+  const fetchSkills = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
-      const res = await apiFetch<SkillsResponse>("/api/skills");
+      const res = await apiFetch<SkillsResponse>(
+        `/api/skills${appliedWorkdir ? `?workdir=${encodeURIComponent(appliedWorkdir)}` : ""}`,
+      );
       setData(res);
-    } catch {
-      /* ignore */
+    } catch (caught) {
+      setError(String(caught));
     } finally {
       setLoading(false);
     }
-  };
+  }, [appliedWorkdir]);
 
   useEffect(() => {
     fetchSkills();
-  }, []);
+  }, [fetchSkills, management.data?.revision, management.data?.generation]);
 
   const totalChars = data?.totalChars ?? 0;
   const maxChars = data?.maxChars ?? 40000;
@@ -38,11 +48,11 @@ export function SkillsView() {
         <div>
           <h2 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
             <FileCode2 className="w-3.5 h-3.5 text-zinc-400" />
-            用户级 Skills 目录 (tools.list_skills)
+            Skills 目录
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            此页扫描 ~/.agents/skills 与 ~/.codex/skills；项目级 Skills 由
-            ChatGPT 在具体 workdir 下发现。完整正文仍按需读取。
+            显示已发现的 Skill，包括已停用项；开关保存到配置，重启后对 Agent
+            生效。
           </p>
         </div>
 
@@ -71,6 +81,34 @@ export function SkillsView() {
         </div>
       </div>
 
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          setAppliedWorkdir(workdir.trim());
+        }}
+        className="flex gap-2"
+      >
+        <input
+          aria-label="Skill 项目目录"
+          value={workdir}
+          onChange={(event) => setWorkdir(event.target.value)}
+          placeholder="可选：项目工作目录；留空扫描用户级 Skills"
+          className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+        />
+        <button
+          type="submit"
+          disabled={loading}
+          className="rounded-lg border border-zinc-200 px-3 text-xs dark:border-zinc-700"
+        >
+          查看目录
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="text-xs text-rose-600">
+          {error}
+        </p>
+      )}
+
       {data?.warnings && data.warnings.length > 0 && (
         <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300 space-y-1">
           <div className="font-semibold flex items-center gap-1.5">
@@ -88,7 +126,7 @@ export function SkillsView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {!data || data.skills.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
-            未在 ~/.agents/skills 或 ~/.codex/skills 中发现启用的 Skill。
+            未在所选范围发现 Skill。
           </div>
         ) : (
           data.skills.map((skill) => (
@@ -115,6 +153,25 @@ export function SkillsView() {
                   {skill.description ||
                     "仅在用户明确指定时读取；触发描述未向模型公开。"}
                 </p>
+                {management.data?.available && (
+                  <div className="mt-3">
+                    <ConfigToggle
+                      label={`启用 Skill ${skill.name}`}
+                      checked={skill.enabled !== false}
+                      disabled={management.busy}
+                      onChange={(enabled) =>
+                        void management.toggle({
+                          kind: "skill",
+                          path: skill.path,
+                          enabled,
+                          ...(appliedWorkdir
+                            ? { workdir: appliedWorkdir }
+                            : {}),
+                        })
+                      }
+                    />
+                  </div>
+                )}
               </div>
 
               {skill.path && (

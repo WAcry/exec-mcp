@@ -22,6 +22,13 @@ import { MEMORY_DEFAULTS } from "../memory.js";
 import { effectiveWebConfig, webIsExposed, type WebConfig } from "./config.js";
 import { configView, mcpServerView } from "./config-view.js";
 import {
+  UserInputError,
+  ANSWER_INPUT_SCHEMA,
+} from "../user-input/contracts.js";
+import type { ServiceController } from "../service-controller.js";
+import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
+import { resolveUserPath } from "../util.js";
+import {
   WEB_ACTION_HEADER,
   WEB_COOKIE,
   applyCorsForAllowedOrigin,
@@ -55,6 +62,7 @@ export interface WebServerOptions {
   publicDir?: string | undefined;
   configPath?: string | undefined;
   mcpUrl?: string | undefined;
+  controller?: ServiceController;
 }
 
 class HttpError extends Error {
@@ -101,7 +109,13 @@ export async function startWebServer(
   const mcpUrl = options.mcpUrl ? new URL(options.mcpUrl) : undefined;
   const exposed = webIsExposed(web);
   const sse = new SseBroker();
-  const unsubscribeActivity = runtime.activity.subscribe((event) => {
+  // The durable store is owned by the CLI and survives runtime replacement.
+  const unsubscribeInput = runtime.userInput?.subscribe((event) =>
+    sse.broadcast(event),
+  );
+  let detachInput: (() => void) | undefined;
+  let observedActivity = runtime.activity;
+  let unsubscribeActivity = observedActivity.subscribe((event) => {
     sse.broadcast(event);
   });
 
@@ -228,19 +242,29 @@ export async function startWebServer(
 
     if (pathname.startsWith("/api/")) {
       try {
+        const current = options.controller?.current;
+        const activeRuntime = current?.server.runtime ?? runtime;
+        if (activeRuntime.activity !== observedActivity) {
+          unsubscribeActivity();
+          observedActivity = activeRuntime.activity;
+          unsubscribeActivity = observedActivity.subscribe((event) =>
+            sse.broadcast(event),
+          );
+        }
         await handleApiRoute({
           pathname,
           reqUrl,
           req,
           res,
-          runtime,
-          config,
+          runtime: activeRuntime,
+          config: current?.config ?? config,
           web: { ...web, port: actualPort },
           isLocal,
           sse,
           configPath,
           loopbackUrl: loopbackUrlFor(web.host, actualPort),
-          mcpUrl,
+          mcpUrl: current ? new URL(current.server.url) : mcpUrl,
+          ...(options.controller ? { controller: options.controller } : {}),
           lanUrls: () => lanUrlsFor(token),
           regenerateToken: () => {
             token = randomBytes(32).toString("base64url");
@@ -248,6 +272,14 @@ export async function startWebServer(
           },
         });
       } catch (error) {
+        if (error instanceof UserInputError && !res.headersSent) {
+          jsonResponse(res, error.status, { error: error.message });
+          return;
+        }
+        if (error instanceof ConfigEditError && !res.headersSent) {
+          jsonResponse(res, error.status, { error: error.message });
+          return;
+        }
         if (!res.headersSent) respondError(res, error);
         else res.destroy();
       }
@@ -270,7 +302,9 @@ export async function startWebServer(
 
   try {
     actualPort = await listen(server, web.port, web.host);
+    detachInput = runtime.userInput?.attachWeb();
   } catch (error) {
+    unsubscribeInput?.();
     unsubscribeActivity();
     sse.close();
     server.closeAllConnections();
@@ -292,6 +326,8 @@ export async function startWebServer(
     },
     async close() {
       closePromise ??= (async () => {
+        detachInput?.();
+        unsubscribeInput?.();
         unsubscribeActivity();
         sse.close();
         await new Promise<void>((resolve, reject) => {
@@ -347,6 +383,7 @@ interface RouteContext {
   mcpUrl?: URL | undefined;
   lanUrls(): string[];
   regenerateToken(): string;
+  controller?: ServiceController;
 }
 
 async function handleApiRoute(context: RouteContext): Promise<void> {
@@ -367,7 +404,13 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   if (pathname === "/api/status" && req.method === "GET") {
     const lanUrls = isLocal ? context.lanUrls() : [];
     jsonResponse(res, 200, {
-      status: "ready",
+      status:
+        context.controller?.state ?? (runtime.ready ? "ready" : "stopped"),
+      generation: context.controller?.generation ?? 1,
+      userInput: {
+        enabled: !!runtime.userInput?.webAvailable,
+        pending: runtime.userInput?.list({ status: "pending" }).pending ?? 0,
+      },
       version: VERSION,
       uptime: process.uptime(),
       isLoopback: isLocal,
@@ -392,6 +435,53 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
         nodeVersion: process.version,
       },
     });
+    return;
+  }
+
+  if (pathname === "/api/user-input" && req.method === "GET") {
+    if (!runtime.userInput) {
+      jsonResponse(res, 200, {
+        enabled: false,
+        items: [],
+        total: 0,
+        pending: 0,
+        page: 1,
+        pageSize: 20,
+      });
+      return;
+    }
+    const status = reqUrl.searchParams.get("status");
+    const scope = reqUrl.searchParams.get("sessionId") || undefined;
+    jsonResponse(res, 200, {
+      enabled: runtime.userInput.webAvailable,
+      ...runtime.userInput.list({
+        page: positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
+        ...(scope ? { scope } : {}),
+        ...(status === "pending" || status === "answered" ? { status } : {}),
+      }),
+    });
+    return;
+  }
+  if (
+    pathname.startsWith("/api/user-input/") &&
+    (req.method === "GET" || req.method === "POST")
+  ) {
+    if (!runtime.userInput)
+      throw new HttpError(
+        409,
+        "此实例未启用持久问答，请从 CLI 启动并启用 Web UI。",
+      );
+    const id = decodeURIComponent(pathname.slice("/api/user-input/".length));
+    if (req.method === "GET") jsonResponse(res, 200, runtime.userInput.get(id));
+    else {
+      const parsed = ANSWER_INPUT_SCHEMA.safeParse(await readJsonBody(req));
+      if (!parsed.success)
+        throw new HttpError(
+          400,
+          "答复无效；请选择选项或填写自定义内容，并保持补充说明在 6000 字节内。",
+        );
+      jsonResponse(res, 200, runtime.userInput.answer(id, parsed.data));
+    }
     return;
   }
 
@@ -481,8 +571,22 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   }
 
   if (pathname === "/api/skills" && req.method === "GET") {
-    const catalog = await discoverSkills({ config: runtime.skillConfig });
-    const rendered = renderSkills(catalog, runtime.skillMaxChars);
+    const saved = context.controller
+      ? await context.controller.editor.read()
+      : undefined;
+    const workdir = reqUrl.searchParams.get("workdir");
+    const catalog = await discoverSkills({
+      includeDisabled: true,
+      config: saved?.config.skills?.config ?? runtime.skillConfig,
+      ...(workdir ? { workdir: resolveUserPath(workdir) } : {}),
+    });
+    const rendered = renderSkills(
+      {
+        ...catalog,
+        skills: catalog.skills.filter((skill) => skill.enabled !== false),
+      },
+      runtime.skillMaxChars,
+    );
     jsonResponse(res, 200, {
       skills: catalog.skills,
       warnings: catalog.warnings,
@@ -494,15 +598,83 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   }
 
   if (pathname === "/api/mcp-servers" && req.method === "GET") {
-    const servers = config.mcpServers.map((server) =>
-      mcpServerView(server, isLocal),
+    let servers: ReturnType<typeof mcpServerView>[] = config.mcpServers.map(
+      (server) => mcpServerView(server, isLocal),
     );
+    if (context.controller) {
+      const document = await context.controller.editor.read();
+      const raw = (document.raw.mcp_servers ?? {}) as Record<
+        string,
+        { url?: string; enabled?: boolean }
+      >;
+      servers = Object.entries(raw).map(([name, settings]) => ({
+        ...(servers.find((server) => server.name === name) ?? {
+          name,
+          transport: settings.url ? "streamable-http" : "stdio",
+        }),
+        enabled: settings.enabled !== false,
+        active: config.mcpServers.some((server) => server.name === name),
+      })) as typeof servers;
+    }
     const tools = runtime.discovery.snapshot().map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
     }));
     jsonResponse(res, 200, { servers, tools });
+    return;
+  }
+
+  if (pathname === "/api/management" && req.method === "GET") {
+    if (!context.controller) {
+      jsonResponse(res, 200, { available: false });
+      return;
+    }
+    jsonResponse(res, 200, await managementState(context.controller));
+    return;
+  }
+  if (pathname === "/api/config/toggle" && req.method === "POST") {
+    if (!context.controller)
+      throw new HttpError(409, "当前嵌入式实例未提供配置管理。");
+    if (context.controller.state === "restarting")
+      throw new HttpError(409, "正在重启，完成后可继续修改配置。");
+    const body = (await readJsonBody(req)) as Record<string, unknown>;
+    if (typeof body.enabled !== "boolean" || typeof body.revision !== "string")
+      throw new HttpError(400, "缺少开关值或配置版本。");
+    let change: ConfigToggle;
+    if (body.kind === "mcp" && typeof body.name === "string")
+      change = { kind: "mcp", name: body.name, enabled: body.enabled };
+    else if (
+      body.kind === "skill" &&
+      typeof body.path === "string" &&
+      (body.workdir === undefined || typeof body.workdir === "string")
+    )
+      change = {
+        kind: "skill",
+        path: body.path,
+        enabled: body.enabled,
+        ...(body.workdir ? { workdir: body.workdir as string } : {}),
+      };
+    else if (
+      body.kind === "setting" &&
+      (body.name === "execution.login" || body.name === "web.enabled")
+    )
+      change = { kind: "setting", name: body.name, enabled: body.enabled };
+    else
+      throw new HttpError(
+        400,
+        "仅支持已有 MCP、已发现 Skill 和指定布尔配置的开关。",
+      );
+    await context.controller.editor.toggle(change, body.revision);
+    jsonResponse(res, 200, await managementState(context.controller));
+    return;
+  }
+  if (pathname === "/api/runtime/restart" && req.method === "POST") {
+    if (!context.controller)
+      throw new HttpError(409, "当前实例未提供重启入口。");
+    // Acknowledge before retiring any executing requests; repeated clicks coalesce.
+    jsonResponse(res, 202, { accepted: true });
+    void context.controller.restart().catch(() => undefined);
     return;
   }
 
@@ -583,6 +755,33 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   }
 
   throw new HttpError(404, "未知接口。");
+}
+
+async function managementState(controller: ServiceController) {
+  const document = await controller.editor.read();
+  const definitions = (document.raw.mcp_servers ?? {}) as Record<
+    string,
+    { enabled?: boolean }
+  >;
+  return {
+    available: true,
+    revision: document.revision,
+    pending: document.revision !== controller.current.revision,
+    state: controller.state,
+    generation: controller.generation,
+    ...(controller.error ? { error: controller.error } : {}),
+    servers: Object.entries(definitions).map(([name, value]) => ({
+      name,
+      enabled: value.enabled !== false,
+      active: controller.current.config.mcpServers.some(
+        (server) => server.name === name,
+      ),
+    })),
+    settings: {
+      login: document.config.execution?.login ?? false,
+      web: effectiveWebConfig(document.config.web).enabled,
+    },
+  };
 }
 
 async function revealConfig(configPath: string): Promise<void> {

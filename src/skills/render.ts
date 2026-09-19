@@ -91,6 +91,7 @@ function pathPlan(paths: readonly string[]): PathPlan {
 export function renderSkills(
   catalog: SkillCatalog,
   maxChars = DEFAULT_SKILL_MAX_CHARS,
+  maxBytes = Number.POSITIVE_INFINITY,
 ): string {
   if (!Number.isSafeInteger(maxChars) || maxChars <= 0)
     throw new Error("Skill 目录预算必须是正安全整数字符数。");
@@ -124,7 +125,8 @@ export function renderSkills(
     return lines.join("\n");
   };
   const full = rows(descriptions);
-  if (characterCount(full) <= maxChars) return full;
+  if (characterCount(full) <= maxChars && Buffer.byteLength(full) <= maxBytes)
+    return full;
 
   const units = descriptions.map((description) => [...description]);
   const allocated = units.map(() => 0);
@@ -138,13 +140,14 @@ export function renderSkills(
     });
   const minimum = rows(clipped(), SHORTENED);
   const minimumCost = characterCount(minimum);
-  if (minimumCost > maxChars) {
+  if (minimumCost > maxChars || Buffer.byteLength(minimum) > maxBytes) {
     return rows(
       clipped(),
-      `${SHORTENED}\n完整名称、路径、策略和警告已超过 ${maxChars} 字符目标；保留全部条目，不做分页或隐藏。`,
+      `${SHORTENED}\n完整名称、路径、策略和警告已超过 ${minimumCost > maxChars ? `${maxChars} 字符目标` : `${maxBytes} 字节目标`}；保留全部条目，不做分页或隐藏。`,
     );
   }
   let remaining = maxChars - minimumCost;
+  let bytesRemaining = maxBytes - Buffer.byteLength(minimum);
   let active = units
     .map((_, index) => index)
     .filter((index) => units[index]!.length);
@@ -160,9 +163,14 @@ export function renderSkills(
         characterCount(quote(characters[position]!)) -
         2 -
         (position + 1 === characters.length ? 1 : 0);
-      if (delta <= remaining) {
+      const byteDelta =
+        Buffer.byteLength(quote(characters[position]!)) -
+        2 -
+        (position + 1 === characters.length ? 3 : 0);
+      if (delta <= remaining && byteDelta <= bytesRemaining) {
         allocated[index] = position + 1;
         remaining -= delta;
+        bytesRemaining -= byteDelta;
         changed = true;
       }
       if (allocated[index]! < characters.length) next.push(index);

@@ -4,7 +4,7 @@ export const MiB = 1024 * 1024;
 export const MEMORY_DEFAULTS = {
   code_mode_high_water_mib: 4096,
   idle_retention_hours: 72,
-  terminal_buffer_mib: 1,
+  terminal_buffer_mib: 16,
 } as const;
 export const MEMORY_SCHEMA = z
   .object({

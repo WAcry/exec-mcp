@@ -3,6 +3,8 @@ import { apiFetch } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { ConfigResponse } from "../types";
 import { CodeBlock } from "./CodeBlock";
+import { useManagement } from "../context/ManagementContext";
+import { ConfigToggle } from "./ConfigToggle";
 import {
   Settings,
   Globe,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 
 export function ConfigView() {
+  const management = useManagement();
   const { systemStatus, refreshStatus } = useAuth();
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [copiedLoopback, setCopiedLoopback] = useState(false);
@@ -82,6 +85,54 @@ export function ConfigView() {
 
   return (
     <div className="space-y-4">
+      {management.data?.available && (
+        <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
+          <h3 className="text-xs font-bold">配置开关</h3>
+          <div className="flex items-center justify-between gap-4 text-xs">
+            <div>
+              <p>Shell 登录环境 / PowerShell profile</p>
+              <p className="mt-1 text-zinc-500">
+                修改默认 login；单次调用仍可覆盖。
+              </p>
+            </div>
+            <ConfigToggle
+              label="默认加载 Shell profile"
+              checked={management.data.settings?.login ?? false}
+              disabled={management.busy}
+              onChange={(enabled) =>
+                void management.toggle({
+                  kind: "setting",
+                  name: "execution.login",
+                  enabled,
+                })
+              }
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 text-xs">
+            <div>
+              <p>Web 管理控制台</p>
+              <p className="mt-1 text-zinc-500">
+                停用后执行服务继续运行；再次启用需从终端修改配置。
+              </p>
+            </div>
+            <ConfigToggle
+              label="启用 Web 管理控制台"
+              checked={management.data.settings?.web ?? true}
+              disabled={management.busy}
+              onChange={(enabled) =>
+                void management.toggle({
+                  kind: "setting",
+                  name: "web.enabled",
+                  enabled,
+                })
+              }
+            />
+          </div>
+          <p className="text-xs text-zinc-500">
+            开关仅保存 config.toml，点击“重启执行服务”后生效。
+          </p>
+        </section>
+      )}
       {/* Network & URLs Access Card */}
       <div className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs space-y-3">
         <div className="flex items-center gap-2">

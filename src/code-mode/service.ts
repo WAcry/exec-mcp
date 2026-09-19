@@ -19,6 +19,8 @@ import {
   type MemoryReader,
 } from "../host/process-memory.js";
 import { applyOutputBudget, validateOutputBudget } from "./output-budget.js";
+import { boundModelOutput } from "./model-output.js";
+import { syntaxDiagnostic } from "./diagnostics.js";
 import type {
   CodeModeExecRequest,
   CodeModeOutputItem,
@@ -199,13 +201,22 @@ export class CodeModeService {
         "Code Mode execution was aborted before it started",
       );
       lease.assertActive();
+      const requestId = request.requestId ?? randomHandle("exec");
       const hostOutcome = await session.execute({
         ...(request.signal === undefined ? {} : { signal: request.signal }),
         source: `${CODE_MODE_SOURCE_PRELUDE}${scope === undefined ? UNSCOPED_STORE_PRELUDE : ""}${parsed.code}`,
-        toolCallId: randomHandle("exec"),
+        toolCallId: requestId,
         tools: request.tools,
         yieldTimeMs,
       });
+      if (hostOutcome.state === "completed" && hostOutcome.errorText) {
+        const diagnostic = syntaxDiagnostic(
+          request.source,
+          hostOutcome.errorText,
+          requestId,
+        );
+        if (diagnostic) hostOutcome.errorText += `\n${diagnostic}`;
+      }
       const outcome = this.#trackOutcome(
         lease,
         scope,
@@ -573,8 +584,9 @@ export class CodeModeService {
         outcome.state === "completed" && outcome.errorText !== undefined,
       );
       result.content.push(...attachments);
-      encodePayload(result);
-      return result;
+      const delivered = boundModelOutput(result);
+      encodePayload(delivered);
+      return delivered;
     } catch (error) {
       this.#discardUnrepresentableCell(outcome);
       return {

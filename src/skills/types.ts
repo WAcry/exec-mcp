@@ -33,6 +33,8 @@ export interface SkillMetadata {
   /** Absent for explicit-only skills: their trigger text must never reach the model. */
   description?: string;
   implicit: boolean;
+  /** Only returned by management discovery, never added to the model's catalog. */
+  enabled?: boolean;
 }
 export interface SkillCatalog {
   skills: SkillMetadata[];

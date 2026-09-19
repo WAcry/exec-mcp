@@ -49,8 +49,9 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
 
 可选独立 Web 管理控制台已交付，见 [ADR-009](adr-009-web-console.md)；不提供 ChatGPT 内嵌 Widget 或下游登录交互。
-不实现 `request_user_input`、Skill 安装/执行管理，
+不实现同步 `request_user_input`、Skill 安装/执行管理，
 也不增加 Workspace、子 Agent、持久任务或调度框架。
+Web 异步问答作为 exec 内的能力，问答记录独立持久化而不恢复执行，见 [ADR-010](adr-010-async-user-input.md)。
 本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。
 原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
 文件传输也由 exec 编排，原生文件绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。

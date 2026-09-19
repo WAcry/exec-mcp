@@ -1,5 +1,6 @@
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
+import { useUserInput } from "../context/UserInputContext";
 import {
   Sun,
   Moon,
@@ -12,6 +13,7 @@ import {
   HardDrive,
   FileCode2,
   LogOut,
+  MessageSquare,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -23,9 +25,15 @@ interface HeaderProps {
 export function Header({ activeTab, setActiveTab, online }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { systemStatus, logout } = useAuth();
+  const { pending } = useUserInput();
 
   const navItems = [
     { id: "calls", label: "调用审计流", icon: Activity },
+    {
+      id: "questions",
+      label: pending ? `待答问题 (${pending})` : "异步问答",
+      icon: MessageSquare,
+    },
     { id: "sessions", label: "会话组", icon: Layers },
     { id: "terminals", label: "活动终端", icon: Terminal },
     { id: "mcp", label: "下游 MCP", icon: Wrench },
@@ -60,7 +68,13 @@ export function Header({ activeTab, setActiveTab, online }: HeaderProps) {
                     }`}
                   />
                   <span className="whitespace-nowrap">
-                    {online ? "就绪" : "已断开"}
+                    {!online
+                      ? "已断开"
+                      : systemStatus?.status === "restarting"
+                        ? "重启中"
+                        : systemStatus?.status === "error"
+                          ? "需检查"
+                          : "就绪"}
                   </span>
                 </span>
                 <span className="text-zinc-300 dark:text-zinc-700">•</span>

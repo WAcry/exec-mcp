@@ -13,12 +13,35 @@ import { AuthModal } from "./components/AuthModal";
 import { useAuth } from "./context/AuthContext";
 import { apiFetch } from "./lib/api";
 import type { CallSummary, PaginatedResult, SessionSummary } from "./types";
+import { ManagementProvider, useManagement } from "./context/ManagementContext";
+import { RuntimeControl } from "./components/RuntimeControl";
+import {
+  UserInputProvider,
+  USER_INPUT_OPEN,
+  USER_INPUT_REFRESH,
+} from "./context/UserInputContext";
+import { UserInputView } from "./components/UserInputView";
 
 export function App() {
+  return (
+    <ManagementProvider>
+      <UserInputProvider>
+        <ConsoleApp />
+      </UserInputProvider>
+    </ManagementProvider>
+  );
+}
+function ConsoleApp() {
+  const management = useManagement();
   const { isAuthenticated, isVerifying, systemStatus, refreshStatus } =
     useAuth();
   const [activeTab, setActiveTab] = useState("calls");
   const [online, setOnline] = useState(false);
+  useEffect(() => {
+    const open = () => setActiveTab("questions");
+    window.addEventListener(USER_INPUT_OPEN, open);
+    return () => window.removeEventListener(USER_INPUT_OPEN, open);
+  }, []);
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -132,6 +155,8 @@ export function App() {
         eventSource.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
+            if (data.type === "user-input:changed" || data.type === "connected")
+              window.dispatchEvent(new Event(USER_INPUT_REFRESH));
             if (data.type?.startsWith("call:")) scheduleRefresh();
           } catch {
             /* ignore ping */
@@ -195,6 +220,7 @@ export function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
+        <RuntimeControl />
         <MemoryWatermark memory={systemStatus?.memory} />
 
         {systemStatus?.stats && <StatsOverview stats={systemStatus.stats} />}
@@ -226,14 +252,19 @@ export function App() {
         )}
 
         {activeTab === "terminals" && <TerminalsView />}
+        {activeTab === "questions" && <UserInputView />}
 
-        {activeTab === "mcp" && <McpView />}
+        {activeTab === "mcp" && <McpView key={management.data?.generation} />}
 
-        {activeTab === "skills" && <SkillsView />}
+        {activeTab === "skills" && (
+          <SkillsView key={management.data?.generation} />
+        )}
 
         {activeTab === "artifacts" && <ArtifactsView />}
 
-        {activeTab === "config" && <ConfigView />}
+        {activeTab === "config" && (
+          <ConfigView key={management.data?.generation} />
+        )}
       </main>
 
       <footer className="border-t border-zinc-200/80 dark:border-zinc-800/80 py-5 text-center text-xs text-zinc-400 dark:text-zinc-500">

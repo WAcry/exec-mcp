@@ -40,6 +40,8 @@ export type CodeModeOutputItem =
 
 export interface CodeModeExecRequest {
   source: string;
+  /** Correlate diagnostics with the Web call record; not supplied by the model. */
+  requestId?: string;
   /** 服务端原生附件出口，不是 V8 全局或模型提供的回调。 */
   takeAttachments?: () => CallToolResult["content"];
   tools: readonly CodeModeToolDefinition[];

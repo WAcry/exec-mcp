@@ -11,6 +11,9 @@ import { VERSION } from "./version.js";
 import { runTunnel } from "./tunnel.js";
 import { effectiveWebConfig } from "./web/config.js";
 import { ActivityStore } from "./web/activity.js";
+import { ConfigEditor } from "./web/config-edit.js";
+import { ServiceController } from "./service-controller.js";
+import { UserInputStore, userInputDatabasePath } from "./user-input/store.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -84,9 +87,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (command !== "serve") throw new Error(`未知子命令：${command}`);
-  const config = await loadConfig(filename);
+  const editor = new ConfigEditor(filename);
+  const initial = await editor.read();
+  const config = initial.config;
   const web = effectiveWebConfig(config.web);
   const activity = new ActivityStore({ enabled: web.enabled });
+  const userInput = web.enabled
+    ? new UserInputStore(userInputDatabasePath(initial.filename))
+    : undefined;
   const startup = new AbortController();
   const cancelStartup = () => startup.abort(new Error("启动已取消。"));
   process.once("SIGINT", cancelStartup);
@@ -95,6 +103,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     server = await startServer(config, {
       activity,
+      ...(userInput ? { userInput } : {}),
       signal: startup.signal,
       onDownstreamProgress: (event) =>
         console.error(
@@ -105,18 +114,71 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               : event.message,
         ),
     });
+  } catch (error) {
+    userInput?.close();
+    throw error;
   } finally {
     process.removeListener("SIGINT", cancelStartup);
     process.removeListener("SIGTERM", cancelStartup);
   }
 
   let webServer: Awaited<ReturnType<typeof startWebServer>> | undefined;
+  let displayedWeb = web;
+  const controller = new ServiceController(
+    editor,
+    { server, config, revision: initial.revision },
+    {
+      onReady: async () => {
+        const next = controller.current;
+        const nextWeb = effectiveWebConfig(next.config.web);
+        // Preserve the current tab/token for unchanged listeners; rebind only explicit changes.
+        if (
+          JSON.stringify(nextWeb) !== JSON.stringify(displayedWeb) ||
+          (nextWeb.enabled && !webServer)
+        ) {
+          await webServer?.close();
+          webServer = undefined;
+          displayedWeb = nextWeb;
+          if (nextWeb.enabled) {
+            try {
+              webServer = await startWebServer(
+                next.server.runtime,
+                next.config,
+                {
+                  host: nextWeb.host,
+                  port: nextWeb.port,
+                  configPath: filename,
+                  mcpUrl: next.server.url,
+                  controller,
+                },
+              );
+            } catch {
+              next.server.runtime.activity.disable();
+              console.error(
+                "执行服务已重启；Web 监听失败，请检查 [web] 配置。",
+              );
+            }
+          }
+        }
+        console.log(
+          `执行服务已重启：${next.server.url}${webServer ? `\nWeb UI：${webServer.loopbackUrl}` : ""}`,
+        );
+      },
+      onProgress: (event) => {
+        if (event.status === "error") console.error(event.message);
+      },
+    },
+  );
   let stopping = false;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
-    const tasks = [server.close(), ...(webServer ? [webServer.close()] : [])];
+    const tasks = [
+      controller.close(),
+      ...(webServer ? [webServer.close()] : []),
+    ];
     void Promise.allSettled(tasks).then((results) => {
+      userInput?.close();
       if (results.some((result) => result.status === "rejected")) {
         console.error("服务关闭时发生清理错误。");
         process.exitCode = 1;
@@ -132,6 +194,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         host: web.host,
         configPath: filename,
         mcpUrl: server.url,
+        controller,
       });
     } catch (error) {
       server.runtime.activity.disable();

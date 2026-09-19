@@ -122,6 +122,9 @@ s.setRequestHandler('tools/call',async()=>({content:[{type:'text',text:'PACKAGED
 host = "127.0.0.1"
 port = 0
 
+[memory]
+terminal_buffer_mib = 1
+
 [mcp_servers.packaged]
 command = ${JSON.stringify(process.execPath)}
 args = ${JSON.stringify([downstream])}
@@ -283,6 +286,50 @@ enabled = true
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
+  // The published package must contain a usable native SQLite binding, not just types.
+  const question = await scopedCall(
+    'text(await tools.request_user_input_async({request_key:"package-question",questions:[{title:"Storage?",options:["SQLite","Memory"]}]}));',
+  );
+  assert.ok(!question.isError, JSON.stringify(question));
+  const savedQuestion = JSON.parse(
+    question.content.find(
+      (block) => block.type === "text" && block.text.startsWith("{"),
+    ).text,
+  );
+  const reply = await fetch(
+    new URL(`/api/user-input/${savedQuestion.request_id}`, started.web),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-exec-web": "1" },
+      body: JSON.stringify({
+        question_id: "q1",
+        expected_revision: 0,
+        selected_option_id: "o1",
+        notes: "Only implement the interface.",
+      }),
+    },
+  );
+  assert.equal(reply.status, 200);
+  const carried = await scopedCall('text("work continues");', {
+    max_output_tokens: 0,
+  });
+  const answerText = carried.content.find(
+    (block) => block.type === "text" && block.text.startsWith("用户答复（"),
+  );
+  assert.ok(answerText, JSON.stringify(carried));
+  const event = JSON.parse(
+    answerText.text.slice(answerText.text.indexOf("\n") + 1),
+  );
+  assert.equal(event.answer_from_user.notes, "Only implement the interface.");
+  const ack = await scopedCall('text("acknowledged");', {
+    ack_user_input: [event.event_id],
+  });
+  assert.ok(!ack.isError, JSON.stringify(ack));
+  assert.ok(
+    !ack.content.some(
+      (block) => block.type === "text" && block.text.startsWith("用户答复（"),
+    ),
+  );
   // Verify native PTY after a clean tarball installation, not only in the checkout.
   const processFixture = path.join(project, "process fixture.cjs");
   await writeFile(
@@ -357,7 +404,7 @@ enabled = true
   );
   const noisyCommand = `${process.platform === "win32" ? "& " : ""}${quote(process.execPath)} ${quote(noisyFixture)}${process.platform === "win32" ? "; exit $LASTEXITCODE" : ""}`;
   const noisy = await terminalCall(
-    `text(await tools.exec_command({cmd:${JSON.stringify(noisyCommand)},yield_time_ms:30000}));`,
+    `const r=await tools.exec_command({cmd:${JSON.stringify(noisyCommand)},yield_time_ms:30000});text({...r,output:r.output.slice(0,500)+r.output.slice(-500)});`,
   );
   assert.equal(noisy.exit_code, 0);
   assert.equal(noisy.truncated, true);

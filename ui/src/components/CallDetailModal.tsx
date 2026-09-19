@@ -232,7 +232,9 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                               : "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800"
                           }`}
                         >
-                          {sub.status === "success" ? "成功" : "异常"}
+                          {sub.status === "success"
+                            ? "已返回"
+                            : "报错 / 非零退出"}
                         </span>
                       </div>
                       <span className="text-xs font-mono text-zinc-400">
@@ -344,7 +346,7 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
         <CheckCircle2 className="w-3 h-3" />
-        已完成
+        脚本完成
       </span>
     );
   }

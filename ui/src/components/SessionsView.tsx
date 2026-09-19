@@ -8,7 +8,6 @@ import { apiFetch } from "../lib/api";
 import {
   Layers,
   Search,
-  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   ArrowRight,
@@ -98,16 +97,11 @@ export function SessionsView({
                       {session.id}
                     </h3>
                   </div>
-                  {session.errorCount > 0 ? (
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 px-1.5 py-0.2 rounded shrink-0">
-                      <AlertTriangle className="w-3 h-3" />
-                      {session.errorCount} 错
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 px-1.5 py-0.2 rounded shrink-0">
-                      正常
-                    </span>
-                  )}
+                  <span className="text-[10px] text-zinc-500 whitespace-nowrap">
+                    {(nativeMap[session.id]?.activeCellCount ?? 0) > 0
+                      ? "有执行待收尾"
+                      : "可继续使用"}
+                  </span>
                 </div>
 
                 {nativeMap[session.id] && !nativeMap[session.id]!.retired && (

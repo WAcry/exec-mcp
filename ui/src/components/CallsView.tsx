@@ -122,7 +122,7 @@ export function CallsView({
             className="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">所有状态</option>
-            <option value="completed">已完成</option>
+            <option value="completed">脚本完成</option>
             <option value="running">运行中</option>
             <option value="yielding">已交回 cell</option>
             <option value="terminated">已终止</option>

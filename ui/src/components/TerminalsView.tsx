@@ -87,7 +87,7 @@ export function TerminalsView() {
           </div>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
             {viewMode === "terminals"
-              ? "由 tools.exec_command 启动的命令进程；独立 1 MiB 滚动日志缓冲，已退出进程超期自动释放。"
+              ? "由 tools.exec_command 启动的命令进程；每个进程独立保留有界滚动日志，已退出进程超期自动释放。"
               : "Code Mode 共享宿主内的原生执行会话与 store；按 FIFO 管理内存压力与 72 小时空闲回收。"}
           </p>
         </div>

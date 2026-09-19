@@ -57,14 +57,17 @@ describe("explicit output budgets", () => {
       truncated: true,
     });
   });
-  it("does not inherit a hidden 10,000-token default from the host", async () => {
+  it("keeps nested budgets optional while guarding the final model response", async () => {
     const value = service();
     const result = await value.exec({
       source: 'text("x".repeat(80000));',
       tools: [],
     });
-    expect(texts(result).at(-1)).toHaveLength(80000);
-    expect(texts(result)[0]).not.toContain("截断");
+    expect(texts(result).at(-1)!.length).toBeLessThan(36000);
+    expect(Buffer.byteLength(texts(result).join("\n\n"))).toBeLessThanOrEqual(
+      36000,
+    );
+    expect(texts(result)[0]).toContain("保留首尾");
   });
   it("rejects invalid budgets before invoking any tool", async () => {
     const value = service();

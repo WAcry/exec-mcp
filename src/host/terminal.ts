@@ -44,6 +44,8 @@ export interface TerminalResult {
   exit_code?: number;
   truncated?: true;
   omitted_bytes?: number;
+  /** Cumulative stderr bytes observed for pipe sessions, including rolled-off output. */
+  stderr_bytes?: number;
 }
 type Backend =
   | { kind: "pipe"; process: ChildProcessWithoutNullStreams }
@@ -60,8 +62,9 @@ interface Session {
   outputReady?: () => void;
   exitCode?: number;
   terminating?: Promise<void>;
+  stderrBytes: number;
 }
-const READ_BYTES = 1024 * 1024;
+export const TERMINAL_READ_BYTES = 4 * 1024 * 1024;
 export class TerminalManager {
   readonly shell: CommandShell;
   private readonly bufferBytes: number;
@@ -162,6 +165,7 @@ export class TerminalManager {
       mutex: new AsyncMutex(),
       done,
       finish,
+      stderrBytes: 0,
     };
     this.sessions.set(session.id, session);
     const ended = (code: number): void => {
@@ -176,7 +180,13 @@ export class TerminalManager {
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (text: string) => this.append(session, text));
-      child.stderr.on("data", (text: string) => this.append(session, text));
+      child.stderr.on("data", (text: string) => {
+        session.stderrBytes = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          session.stderrBytes + Buffer.byteLength(text),
+        );
+        this.append(session, text);
+      });
       child.stdin.on("error", () => {
         /* Write callbacks report EPIPE; never crash on a closed pipe. */
       });
@@ -292,8 +302,9 @@ export class TerminalManager {
   private collect(session: Session, started: number): TerminalResult {
     session.touched = Date.now();
     const result: TerminalResult = {
-      ...session.buffer.read(READ_BYTES),
+      ...session.buffer.read(TERMINAL_READ_BYTES),
       wall_time_seconds: (performance.now() - started) / 1000,
+      ...(session.stderrBytes ? { stderr_bytes: session.stderrBytes } : {}),
     };
     if (session.exitCode === undefined || session.buffer.pending)
       result.session_id = session.id;

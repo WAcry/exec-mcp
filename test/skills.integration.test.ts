@@ -237,7 +237,9 @@ enabled = true
       });
       const text = directoryText(result);
       expect(characterCount(text)).toBeLessThanOrEqual(40000);
-      expect(characterCount(text)).toBeGreaterThan(39990);
+      expect(characterCount(text)).toBeGreaterThan(10000);
+      expect(Buffer.byteLength(text)).toBeLessThanOrEqual(34000);
+      expect(JSON.stringify(result)).not.toContain("返回文本已达");
       for (let i = 0; i < 180; i++) expect(text).toContain(`"large-${i}"`);
       expect(text).not.toContain("BODY_ONLY_READ_WHEN_SELECTED");
     });

@@ -3,8 +3,11 @@ import type { McpServersResponse } from "../types";
 import { apiFetch } from "../lib/api";
 import { CodeBlock } from "./CodeBlock";
 import { Wrench, Server, Search, ChevronRight } from "lucide-react";
+import { useManagement } from "../context/ManagementContext";
+import { ConfigToggle } from "./ConfigToggle";
 
 export function McpView() {
+  const management = useManagement();
   const [data, setData] = useState<McpServersResponse | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResult, setSearchResult] = useState<unknown | null>(null);
@@ -15,7 +18,7 @@ export function McpView() {
     apiFetch<McpServersResponse>("/api/mcp-servers")
       .then(setData)
       .catch(console.error);
-  }, []);
+  }, [management.data?.revision, management.data?.generation]);
 
   const handleTestSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,19 +77,33 @@ export function McpView() {
                   <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
                     {s.transport}
                   </span>
+                  {management.data?.available && (
+                    <ConfigToggle
+                      label={`启用 MCP ${s.name}`}
+                      checked={s.enabled !== false}
+                      disabled={management.busy}
+                      onChange={(enabled) =>
+                        void management.toggle({
+                          kind: "mcp",
+                          name: s.name,
+                          enabled,
+                        })
+                      }
+                    />
+                  )}
                 </div>
 
                 <div className="text-xs font-mono text-zinc-600 dark:text-zinc-400 break-all space-y-1">
                   {s.transport === "stdio" ? (
                     <div>
                       <span className="text-zinc-400 font-sans">命令: </span>
-                      {s.command}
+                      {s.command ?? "当前未加载"}
                       {s.argsCount ? `（${s.argsCount} 个参数，值已隐藏）` : ""}
                     </div>
                   ) : (
                     <div>
                       <span className="text-zinc-400 font-sans">URL: </span>
-                      {s.url}
+                      {s.url ?? "当前未加载"}
                     </div>
                   )}
                   {s.cwd && (
@@ -117,9 +134,7 @@ export function McpView() {
 
                 {s.enabledTools && (
                   <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-zinc-400">
-                      白名单工具:
-                    </span>
+                    <span className="text-[10px] text-zinc-400">指定工具:</span>
                     {s.enabledTools.map((t) => (
                       <span
                         key={t}

@@ -12,6 +12,8 @@ export interface DiscoverSkillsOptions {
   workdir?: string;
   signal?: AbortSignal;
   config?: readonly SkillSetting[];
+  /** Management-only discovery. Model-facing calls keep disabled metadata hidden. */
+  includeDisabled?: boolean;
 }
 
 /** Metadata only: no shell, configuration imports, installation or persistent scan cache. */
@@ -85,12 +87,17 @@ export async function discoverSkills(
         }
         if (files.has(target)) continue;
         files.add(target);
-        if (!enabled(target)) continue;
+        if (!options.includeDisabled && !enabled(target)) continue;
         try {
           const metadata = mapping(
             parseYaml(await readMetadata(target, true, signal)),
           );
+          const selected = enabled(
+            target,
+            typeof metadata.name === "string" ? metadata.name.trim() : "",
+          );
           if (
+            !options.includeDisabled &&
             !enabled(
               target,
               typeof metadata.name === "string" ? metadata.name.trim() : "",
@@ -153,6 +160,7 @@ export async function discoverSkills(
             implicit,
           };
           if (implicit) skill.description = metadata.description.trim();
+          if (options.includeDisabled) skill.enabled = selected;
           catalog.skills.push(skill);
         } catch {
           signal?.throwIfAborted();

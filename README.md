@@ -244,6 +244,9 @@ tunnel-client init --profile exec-mcp --tunnel-id YOUR_TUNNEL_ID --mcp-server-ur
 ```
 
 按官方说明为该终端设置 `CONTROL_PLANE_API_KEY`，不要把实际密钥写进命令参数或仓库。
+希望使用本机 key 文件时，可以用 `exec-mcp with-token CONTROL_PLANE_API_KEY ./secrets/openai-token.txt -- tunnel-client run --profile exec-mcp`，
+首次读取自动轻量加密，以后直接使用原路径；无需把明文加入命令历史。源码安装时将 `exec-mcp` 替换为 `node dist/src/cli.js`。
+Bearer／Cloudflare 的 token_file 同样自动处理；保护范围及凭据轮换见 [token 文件的轻量保护](docs/connections.md#token-文件的轻量保护)。
 然后运行：
 
 ```sh

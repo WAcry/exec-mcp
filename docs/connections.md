@@ -95,13 +95,37 @@ token_env = "EXEC_MCP_ACCESS_TOKEN"
 
 两项都写会报配置错误，不猜优先级；都省略时保留旧行为，从 `EXEC_MCP_ACCESS_TOKEN` 读取。
 显式选择文件后，不会因文件缺失、不可读或无效而回退到环境变量。
-文件只放 token 原文（不是 JSON、TOML，也不带 `Bearer `），允许 UTF-8 BOM 和末尾换行。
+初次只需粘贴 token 原文（不是 JSON、TOML，也不带 `Bearer `），允许 UTF-8 BOM 和末尾换行。
+首次启动自动转换为带 `exec-mcp:token:v1:` 前缀的轻量加密内容；以后启动自动解密，客户端仍使用原 token。
 路径支持 `~/` 和软链接，相对配置文件目录解析；启动时读取一次，更新后重启才生效，不做 watcher。
 
 使用至少 32 字符的高熵随机 token；可用 Node 的 `crypto.randomBytes(32).toString('base64url')` 生成，
 保存到不纳入 Git 的私人凭据目录，客户端通过 `Authorization: Bearer ...` 发送。
 不要把 token 放进 URL 或共享日志。同一实例不会同时接受文件和环境中的两个 token。
 **ChatGPT 使用上面的 OAuth/Auth0 方案**，不要假定其连接界面支持客户自带的静态请求头。
+
+## token 文件的轻量保护
+
+**这是防普通明文扫描的保护，不是抵抗同账户程序或定向入侵的保险库。** 加密使用内置固定密钥；了解代码的程序可以解密。
+选中的明文文件首次使用时会被替换为密文，无需额外命令或密码；换 key 时直接用新明文覆盖同一文件，再重启。
+文件和所在目录需可写；迁移失败会报错而不是假装已加密。格式损坏时保留原文件，使用兼容版本或重新粘贴 key。
+已有密文可只读挂载。Linux/macOS 新密文权限为 0600；Windows 使用本账户的私人目录及其 ACL。
+加密不擦除已有备份/快照，不扫描其他文件，不改变普通环境变量的继承，也不保护运行时内存里的明文。
+
+对于单独启动的 OpenAI `tunnel-client`，先按 README 创建原有 profile，把 Runtime API key 放进自己的文件，然后改用：
+
+```sh
+exec-mcp with-token CONTROL_PLANE_API_KEY ./secrets/openai-token.txt -- tunnel-client doctor --profile exec-mcp
+exec-mcp with-token CONTROL_PLANE_API_KEY ./secrets/openai-token.txt -- tunnel-client run --profile exec-mcp
+```
+
+`with-token` 只给这次启动的程序注入指定环境变量，真实 key 不进入命令参数或本程序日志；其余环境与参数原样继承。
+文件相对当前终端目录解析，支持 `~/`；Windows 路径带空格时正常加引号。支持原生可执行文件，不通过 CMD 或额外 Shell 包装。
+需要依然由官方客户端完成登录/授权；已有 profile 不改写、已有 Tunnel 不接管，Ctrl+C 只停止本次子进程。
+这个入口也可用于其他支持环境变量凭据的客户端。OpenAI 官方环境变量方式见 [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)。
+
+仅让 exec-mcp 管理这些文件；旧版 exec-mcp 或直接读取原文的第三方程序不识别新格式。
+共享给其他程序的原文件不要同时作为自动加密目标；可以给它们也使用 with-token，或继续沿用环境凭据。
 
 ## Cloudflare Named Tunnel
 
@@ -135,12 +159,13 @@ token_file = "./secrets/cloudflare-token.txt"
 ```
 
 **显式 token_file 始终优先**，即使环境中另有 TUNNEL_TOKEN 或 TUNNEL_TOKEN_FILE。
-父进程和 cloudflared 子进程都继续继承原环境；启动参数使用空 `--token=` 配合 `--token-file`，
-覆盖的只是本次 cloudflared 的选项选择，不是删除或改写环境变量。
+文件首次读取自动加密，之后在内存解密；只为本次 cloudflared 子进程设置解密后的 `TUNNEL_TOKEN`。
+父进程的原变量及子进程的其他变量（包括代理）不变，不要求删除已有凭据，也不创建明文临时文件。
 文件缺失或无效时不回退到另一个 Tunnel，token 内容不进入进程参数。
 
 相对文件路径基于 config.toml，支持 `~/`；`executable` 省略时从 PATH 查找。
-文件模式需要支持 `--token-file` 的 cloudflared（2025.4.0+），见 [官方运行参数](https://developers.cloudflare.com/tunnel/reference/run-parameters/)。
+使用官方客户端的 `TUNNEL_TOKEN` 环境入口，见 [官方运行参数](https://developers.cloudflare.com/tunnel/reference/run-parameters/)。
+加密后的文件供 `exec-mcp tunnel` 读取，不能再直接交给 cloudflared 的 `--token-file`。
 
 在两个终端使用同一份配置：
 

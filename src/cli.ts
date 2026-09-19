@@ -14,8 +14,26 @@ import { ActivityStore } from "./web/activity.js";
 import { ConfigEditor } from "./web/config-edit.js";
 import { ServiceController } from "./service-controller.js";
 import { UserInputStore, userInputDatabasePath } from "./user-input/store.js";
+import { runWithToken, WITH_TOKEN_USAGE } from "./with-token.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+  if (argv[0] === "with-token") {
+    if (argv.length === 2 && (argv[1] === "--help" || argv[1] === "-h")) {
+      console.log(WITH_TOKEN_USAGE);
+      return;
+    }
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    process.once("SIGINT", abort);
+    process.once("SIGTERM", abort);
+    try {
+      process.exitCode = await runWithToken(argv.slice(1), controller.signal);
+    } finally {
+      process.removeListener("SIGINT", abort);
+      process.removeListener("SIGTERM", abort);
+    }
+    return;
+  }
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -33,7 +51,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = positionals[0];
   if (values.help || command === undefined) {
     console.log(
-      "exec-mcp：通过 exec 组合本机与 MCP 工具\n\n用法：exec-mcp init|serve|doctor|tunnel [--config 文件]\ninit   新建配置，不覆盖已有文件\nserve  在回环地址启动 MCP，按配置验证公网请求\ndoctor 检查配置、固定 Codex 组件并实际运行 V8 探针\ntunnel 为已启动的受保护服务运行 Cloudflare/Tailscale 前台客户端\n",
+      `exec-mcp：通过 exec 组合本机与 MCP 工具\n\n用法：exec-mcp init|serve|doctor|tunnel [--config 文件]\ninit   新建配置，不覆盖已有文件\nserve  在回环地址启动 MCP，按配置验证公网请求\ndoctor 检查配置、固定 Codex 组件并实际运行 V8 探针\ntunnel 为已启动的受保护服务运行 Cloudflare/Tailscale 前台客户端\nwith-token 将受保护 token 文件注入子进程环境后启动程序\n${WITH_TOKEN_USAGE}\n`,
     );
     return;
   }

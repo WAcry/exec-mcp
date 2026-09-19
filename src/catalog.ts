@@ -343,7 +343,7 @@ export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行，与 ChatGPT 容器的路径和文件不互通。
+  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。本机任务使用这里的工具；ChatGPT 容器不共享本机的文件和网络环境。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
@@ -354,7 +354,7 @@ store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未�
 Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_code 与输出，stderr_bytes 表示管道收到过错误流（不等同于失败）。
 超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
 source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。最终文本合计最多 36,000 UTF-8 字节，超出保留首尾。先在 JS 内筛选/汇总大结果，跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。
-cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试，构造复杂度过高的脚本可拆成独立步骤。
+cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。通常组合独立调用以节省每轮工具次数。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。
 
 ${contracts.some((contract) => contract.name === "request_user_input_async") ? "用户在 Web 提交的答复随后续 exec/wait 的独立内容块返回；按 event_id 去重，读到后在下一次调用的 ack_user_input 确认。答复先返回模型，再执行依赖该决定的步骤；工具调用停止时不会主动唤醒 ChatGPT。\n" : ""}
 本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;

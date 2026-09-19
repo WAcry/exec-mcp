@@ -64,6 +64,13 @@ describe("self-contained model-visible contracts", () => {
     expect(description).toContain(
       "文件与网络等外部操作由 tools.* 在实际机器执行",
     );
+    expect(description).toContain("本机任务使用这里的工具");
+    expect(description).toContain("ChatGPT 容器不共享本机的文件和网络环境");
+    expect(description).toContain("通常组合独立调用以节省每轮工具次数");
+    expect(description).toContain("仅在确认未执行后重试");
+    expect(description).toContain(
+      "若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本",
+    );
     expect(description).toContain("tools.import_file({index,destination})");
     expect(description).toContain("已知工具可直接 tools[name](args)");
     expect(description).not.toMatch(

@@ -10,7 +10,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readTokenFile } from "../src/credentials.js";
+import { readTokenFile, TOKEN_FILE_PREFIX } from "../src/credentials.js";
 import { CONFIG_TEMPLATE, parseConfig } from "../src/config.js";
 import { startServer } from "../src/server.js";
 import {
@@ -83,7 +83,11 @@ describe("explicit bearer credential sources", () => {
     const file = path.join(root, "token.txt");
     await writeFile(file, `\uFEFF${token}\r\n`);
     expect(readTokenFile(file, "auth.token_file")).toBe(token);
-    expect(await readFile(file, "utf8")).toBe(`\uFEFF${token}\r\n`);
+    const protectedText = await readFile(file, "utf8");
+    expect(protectedText.startsWith(TOKEN_FILE_PREFIX)).toBe(true);
+    expect(protectedText).not.toContain(token);
+    expect(readTokenFile(file, "auth.token_file")).toBe(token);
+    expect(await readFile(file, "utf8")).toBe(protectedText);
   });
   it("rejects unreadable, empty, whitespace-only, directory and oversized sources without exposing contents", async () => {
     const root = await directory();
@@ -167,6 +171,10 @@ describe.each([false, true])(
       );
       const server = await startServer(selected);
       cleanups.push(() => server.close());
+      expect((await readFile(file, "utf8")).startsWith(TOKEN_FILE_PREFIX)).toBe(
+        true,
+      );
+      expect(await readFile(file, "utf8")).not.toContain(token);
       expect((await fetch(server.url)).status).toBe(401);
       const client = new Client(
         { name: "file-credential-test", version: "1" },
@@ -201,6 +209,8 @@ describe.each([false, true])(
       await server.close();
       const restarted = await startServer(selected);
       cleanups.push(() => restarted.close());
+      expect(readTokenFile(file, "auth.token_file")).toBe(newer);
+      expect(await readFile(file, "utf8")).not.toContain(newer);
       expect(
         (
           await fetch(restarted.url, {

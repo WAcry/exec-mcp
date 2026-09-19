@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,8 @@ const fixture = vi.hoisted(() => ({
     args: string[];
     inheritedProbe: string;
     cloudflareEnvUnchanged: boolean;
+    selectedFileToken: boolean;
+    tokenFileEnvUnchanged: boolean;
   }[],
   status: {} as Record<string, unknown>,
   serving: {} as Record<string, unknown>,
@@ -66,6 +68,10 @@ vi.mock("node:child_process", async (original) => {
         cloudflareEnvUnchanged:
           options.env?.TUNNEL_TOKEN === process.env.TUNNEL_TOKEN &&
           options.env?.TUNNEL_TOKEN_FILE === process.env.TUNNEL_TOKEN_FILE,
+        selectedFileToken:
+          options.env?.TUNNEL_TOKEN === "synthetic-cloudflare-token",
+        tokenFileEnvUnchanged:
+          options.env?.TUNNEL_TOKEN_FILE === process.env.TUNNEL_TOKEN_FILE,
       });
       const source = fixture.longRunning
         ? "setInterval(()=>{},1000)"
@@ -78,6 +84,7 @@ vi.mock("node:child_process", async (original) => {
   };
 });
 import { prepareTunnel, runTunnel } from "../src/tunnel.js";
+import { TOKEN_FILE_PREFIX } from "../src/credentials.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 const envName = "EXEC_MCP_TEST_TUNNEL_TOKEN";
@@ -145,19 +152,16 @@ describe("foreground provider plans", () => {
       file: process.execPath,
       provider: "cloudflare",
       publicUrl: "https://node.tailnet.ts.net/mcp",
-      args: [
-        "tunnel",
-        "--no-autoupdate",
-        "run",
-        "--token=",
-        "--token-file",
-        tokenFile,
-      ],
+      args: ["tunnel", "--no-autoupdate", "run"],
+      tokenFile,
     });
     expect(JSON.stringify(plan)).not.toContain("synthetic-cloudflare-token");
     expect(plan.args).not.toContain("--url");
     expect(plan.args).not.toContain("service");
     expect(fixture.commands).toHaveLength(0);
+    expect(
+      (await readFile(tokenFile, "utf8")).startsWith(TOKEN_FILE_PREFIX),
+    ).toBe(true);
   });
   it("checks tailscale identity and existing configuration before starting a non-persistent Funnel", async () => {
     const { config } = await configured();
@@ -282,11 +286,12 @@ describe("owned Tunnel process lifecycle", () => {
       "tunnel",
       "--no-autoupdate",
       "run",
-      "--token=",
-      "--token-file",
-      tokenFile,
     ]);
-    expect(fixture.started[0]!.cloudflareEnvUnchanged).toBe(true);
+    expect(fixture.started[0]!.selectedFileToken).toBe(true);
+    expect(fixture.started[0]!.tokenFileEnvUnchanged).toBe(true);
+    expect(await readFile(tokenFile, "utf8")).not.toContain(
+      "synthetic-cloudflare-token",
+    );
     expect(process.env.TUNNEL_TOKEN).toBe(
       "synthetic-existing-other-tunnel-token",
     );
@@ -321,16 +326,11 @@ describe("owned Tunnel process lifecycle", () => {
     config.tunnel = { provider: "cloudflare", executable: process.execPath };
     process.env.TUNNEL_TOKEN_FILE = tokenFile;
     const plan = await prepareTunnel(config);
-    expect(plan.args).toEqual([
-      "tunnel",
-      "--no-autoupdate",
-      "run",
-      "--token=",
-      "--token-file",
-      tokenFile,
-    ]);
+    expect(plan.args).toEqual(["tunnel", "--no-autoupdate", "run"]);
+    expect(plan.tokenFile).toBe(tokenFile);
     await runTunnel(config);
-    expect(fixture.started[0]!.cloudflareEnvUnchanged).toBe(true);
+    expect(fixture.started[0]!.selectedFileToken).toBe(true);
+    expect(fixture.started[0]!.tokenFileEnvUnchanged).toBe(true);
     delete process.env.TUNNEL_TOKEN_FILE;
     await expect(prepareTunnel(config)).rejects.toThrow(
       "需要 tunnel.token_file",

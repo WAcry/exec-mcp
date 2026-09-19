@@ -1,10 +1,10 @@
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { get } from "node:http";
 import type { Config } from "./config.js";
 import { validatePublicAccess } from "./http/access-config.js";
 import { RESOURCE_METADATA_PATH } from "./http/access.js";
 import { findShellExecutable } from "./host/shell.js";
-import { terminateProcessTree } from "./host/platform.js";
+import { runForeground } from "./host/foreground.js";
 import { inheritedEnvironment } from "./environment.js";
 import { readTokenFile } from "./credentials.js";
 
@@ -13,6 +13,8 @@ export interface TunnelPlan {
   args: string[];
   publicUrl: string;
   provider: "cloudflare" | "tailscale";
+  /** Only a path is public; plaintext credentials never enter the printable launch plan. */
+  tokenFile?: string;
 }
 
 /** Build one foreground provider command. Never install a service or persist a Funnel. */
@@ -60,9 +62,6 @@ export async function prepareTunnel(
     const args = ["tunnel", "--no-autoupdate", "run"];
     if (tokenFile !== undefined) {
       readTokenFile(tokenFile, "Cloudflare token_file");
-      // An explicit empty --token takes precedence over inherited TUNNEL_TOKEN,
-      // letting cloudflared read --token-file without mutating any environment.
-      args.push("--token=", "--token-file", tokenFile);
     } else if (!process.env.TUNNEL_TOKEN) {
       throw new Error(
         "Cloudflare 需要 tunnel.token_file 或环境 TUNNEL_TOKEN/TUNNEL_TOKEN_FILE；不会使用其他凭据启动。",
@@ -73,6 +72,7 @@ export async function prepareTunnel(
       provider,
       publicUrl: publicOrigin + "/mcp",
       args,
+      ...(tokenFile === undefined ? {} : { tokenFile }),
     };
   }
 
@@ -249,66 +249,22 @@ export async function runTunnel(
 ): Promise<void> {
   const plan = await prepareTunnel(config, options.signal);
   options.signal?.throwIfAborted();
-  const child = spawn(plan.file, plan.args, {
-    env: inheritedEnvironment(),
-    // Funnel may ask the operator to enable the feature. Never answer on their behalf.
-    stdio: "inherit",
-    windowsHide: true,
-    detached: process.platform !== "win32",
+  // Provider clients cannot decode our file format. Decrypt only into this child's
+  // selected variable; other inherited credentials/proxies and the parent stay unchanged.
+  const env = inheritedEnvironment(
+    process.env,
+    plan.tokenFile === undefined
+      ? {}
+      : {
+          TUNNEL_TOKEN: readTokenFile(plan.tokenFile, "Cloudflare token_file"),
+        },
+  );
+  const result = await runForeground(plan.file, plan.args, env, {
+    ...(options.signal ? { signal: options.signal } : {}),
+    onStarted: () => options.onStarted?.(plan),
   });
-  let closed = false;
-  const exited = new Promise<void>((resolve) => {
-    const done = () => {
-      closed = true;
-      resolve();
-    };
-    child.once("close", done);
-    child.once("error", done);
-  });
-  let stop: Promise<void> | undefined;
-  const abort = () => {
-    if (!child.pid || closed || stop) return;
-    const pid = child.pid;
-    stop = (async () => {
-      await terminateProcessTree(pid);
-      let timer: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          exited,
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, 3000);
-          }),
-        ]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-      if (!closed) await terminateProcessTree(pid, true);
-    })();
-    void stop.catch(() => undefined);
-  };
-  options.signal?.addEventListener("abort", abort, { once: true });
-  if (options.signal?.aborted) abort();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      child.once("spawn", () => {
-        if (options.signal?.aborted) abort();
-        else options.onStarted?.(plan);
-      });
-      child.once("error", () =>
-        reject(new Error("Tunnel 客户端启动失败；请检查可执行文件和权限。")),
-      );
-      child.once("close", (code, signal) => {
-        if (options.signal?.aborted || code === 0) resolve();
-        else
-          reject(
-            new Error(
-              `Tunnel 客户端已退出（${code ?? signal ?? "unknown"}）；请使用供应商客户端检查连接和授权，MCP 服务未重启。`,
-            ),
-          );
-      });
-    });
-  } finally {
-    options.signal?.removeEventListener("abort", abort);
-    await stop;
-  }
+  if (!options.signal?.aborted && result.code !== 0)
+    throw new Error(
+      `Tunnel 客户端已退出（${result.code ?? result.signal ?? "unknown"}）；请使用供应商客户端检查连接和授权，MCP 服务未重启。`,
+    );
 }

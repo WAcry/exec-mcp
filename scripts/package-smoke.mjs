@@ -101,6 +101,26 @@ try {
     timeout: 30_000,
   });
   assert.match(aliasHelp.stdout, /init\|serve\|doctor/);
+  const wrapperTokenFile = path.join(temporary, "external runtime token.txt");
+  const wrapperToken = "synthetic-packaged-runtime-token-0123456789";
+  await writeFile(wrapperTokenFile, wrapperToken + "\n", { mode: 0o600 });
+  const tokenProbe = `if(process.env.CONTROL_PLANE_API_KEY?.length!==${wrapperToken.length})process.exitCode=1;else console.log('PACKAGED_TOKEN_OK');`;
+  // The external client receives a selected environment value, never a secret argv or plaintext temp file.
+  const probeArgs = [
+    "with-token",
+    "CONTROL_PLANE_API_KEY",
+    wrapperTokenFile,
+    "--",
+    process.execPath,
+    "-e",
+    tokenProbe,
+  ];
+  assert.match(await executeCli(probeArgs), /PACKAGED_TOKEN_OK/);
+  const encodedToken = await readFile(wrapperTokenFile, "utf8");
+  assert.ok(encodedToken.startsWith("exec-mcp:token:v1:"));
+  assert.ok(!encodedToken.includes(wrapperToken));
+  assert.match(await executeCli(probeArgs), /PACKAGED_TOKEN_OK/);
+  assert.equal(await readFile(wrapperTokenFile, "utf8"), encodedToken);
   await executeCli(["init", "--config", config]);
   const originalConfig = await readFile(config, "utf8");
   const downstream = path.join(isolated, "packaged downstream.mjs");
@@ -524,7 +544,7 @@ enabled = true
       "--eval",
       `
     import assert from 'node:assert/strict';
-    import {writeFile} from 'node:fs/promises';
+    import {writeFile,readFile} from 'node:fs/promises';
     import {startServer} from ${JSON.stringify(installedServer)};
     import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
     process.env.EXEC_MCP_PACKAGE_TOKEN='package-fixture-token-012345678901234567890123';
@@ -540,6 +560,9 @@ enabled = true
         assert.ok(!result.isError&&result.content.some(x=>x.type==='text'&&x.text==='42'));
       }finally{await client.close();await server.close();}
     }
+    const protectedToken=await readFile(tokenFile,'utf8');
+    assert.ok(protectedToken.startsWith('exec-mcp:token:v1:'));
+    assert.ok(!protectedToken.includes(process.env.EXEC_MCP_PACKAGE_TOKEN));
     console.log('PUBLIC_AUTH_OK');
   `,
     ],

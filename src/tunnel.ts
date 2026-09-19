@@ -1,5 +1,4 @@
 import { spawn, execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
 import { get } from "node:http";
 import type { Config } from "./config.js";
 import { validatePublicAccess } from "./http/access-config.js";
@@ -7,6 +6,7 @@ import { RESOURCE_METADATA_PATH } from "./http/access.js";
 import { findShellExecutable } from "./host/shell.js";
 import { terminateProcessTree } from "./host/platform.js";
 import { inheritedEnvironment } from "./environment.js";
+import { readTokenFile } from "./credentials.js";
 
 export interface TunnelPlan {
   file: string;
@@ -48,22 +48,31 @@ export async function prepareTunnel(
   await verifyProtectedServer(target, config, signal);
 
   if (provider === "cloudflare") {
+    // Explicit configuration wins. Without it, preserve cloudflared's native
+    // environment precedence: TUNNEL_TOKEN, then TUNNEL_TOKEN_FILE.
     const tokenFile =
-      config.tunnel.provider === "cloudflare" ? config.tunnel.token_file : "";
-    const token = await stat(tokenFile).catch(() => undefined);
-    if (!token?.isFile() || !token.size || token.size > 64 * 1024)
+      (config.tunnel.provider === "cloudflare"
+        ? config.tunnel.token_file
+        : undefined) ??
+      (process.env.TUNNEL_TOKEN
+        ? undefined
+        : process.env.TUNNEL_TOKEN_FILE || undefined);
+    const args = ["tunnel", "--no-autoupdate", "run"];
+    if (tokenFile !== undefined) {
+      readTokenFile(tokenFile, "Cloudflare token_file");
+      // An explicit empty --token takes precedence over inherited TUNNEL_TOKEN,
+      // letting cloudflared read --token-file without mutating any environment.
+      args.push("--token=", "--token-file", tokenFile);
+    } else if (!process.env.TUNNEL_TOKEN) {
       throw new Error(
-        "Cloudflare token_file 必须是已有的非空 token 文件；不在参数或日志中传递 token 内容。",
+        "Cloudflare 需要 tunnel.token_file 或环境 TUNNEL_TOKEN/TUNNEL_TOKEN_FILE；不会使用其他凭据启动。",
       );
-    if (process.env.TUNNEL_TOKEN)
-      throw new Error(
-        "TUNNEL_TOKEN 会覆盖 token_file；请先移除冲突的环境配置，再启动此 Tunnel。",
-      );
+    }
     return {
       file,
       provider,
       publicUrl: publicOrigin + "/mcp",
-      args: ["tunnel", "--no-autoupdate", "run", "--token-file", tokenFile],
+      args,
     };
   }
 

@@ -172,7 +172,7 @@ policy:
 ## 连接 ChatGPT
 
 支持 **OpenAI Secure MCP Tunnel、Cloudflare Named Tunnel、Tailscale Funnel**；后两者必须启用应用认证。
-完整配置、OAuth 身份提供方要求和前台启动步骤见 [连接方式](docs/connections.md)。下面保留原有 OpenAI 私有接入流程。
+推荐使用 Auth0 连接 ChatGPT；Auth0 设置、凭据来源和前台启动步骤见 [连接方式](docs/connections.md)，选择依据见 [ADR-004](docs/adr-004-connectivity-trust.md)。下面保留原有 OpenAI 私有接入流程。
 按照 [OpenAI 官方说明](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 安装 `tunnel-client`，创建属于自己的 Tunnel，并取得相应的 Runtime API key。
 

@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRemoteJWKSet, customFetch, jwtVerify } from "jose";
 import type { AuthConfig } from "./access-config.js";
 import { EnvironmentHttpClient } from "../network/http.js";
+import { readTokenFile } from "../credentials.js";
 
 export const RESOURCE_METADATA_PATH =
   "/.well-known/oauth-protected-resource/mcp";
@@ -24,10 +25,17 @@ export class PublicAccess {
   ) {
     this.resource = `${origin}/mcp`;
     if (config.type === "bearer") {
-      const token = process.env[config.token_env];
+      const field =
+        config.token_file === undefined
+          ? `认证环境变量 ${config.token_env ?? "EXEC_MCP_ACCESS_TOKEN"}`
+          : "auth.token_file";
+      const token =
+        config.token_file === undefined
+          ? process.env[config.token_env ?? "EXEC_MCP_ACCESS_TOKEN"]
+          : readTokenFile(config.token_file, "auth.token_file");
       if (!token || !/^[A-Za-z0-9._~-]{32,}$/.test(token))
         throw new Error(
-          `认证环境变量 ${config.token_env} 必须是至少 32 个字符的随机令牌；未启动公网入口。`,
+          `${field} 必须是至少 32 个字符的随机令牌；未启动公网入口。`,
         );
       this.expected = createHash("sha256").update(token).digest();
       this.challenge = 'Bearer realm="exec-mcp"';

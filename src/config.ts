@@ -124,7 +124,9 @@ export function parseConfig(text: string, filename: string): Config {
     ...(auth ? { auth } : {}),
     ...(tunnel ? { tunnel } : {}),
   });
-  if (tunnel?.provider === "cloudflare")
+  if (auth?.type === "bearer" && auth.token_file !== undefined)
+    auth.token_file = resolveUserPath(auth.token_file, path.dirname(filename));
+  if (tunnel?.provider === "cloudflare" && tunnel.token_file !== undefined)
     tunnel.token_file = resolveUserPath(
       tunnel.token_file,
       path.dirname(filename),

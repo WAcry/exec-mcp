@@ -1,5 +1,7 @@
 # 连接方式
 
+本文供操作者配置与连接；身份提供方选择、凭据来源和优先级的生效决定见 [ADR-004](adr-004-connectivity-trust.md)。
+
 所有方式都使用同一套 exec/wait、终端、文件资源和 Skills。`serve` 只启动本机 MCP；
 `tunnel` 另开一个前台供应商客户端，不安装系统服务、不替你登录或接管已有 Tunnel。
 下面用 `exec-mcp` 表示 CLI；按 README 从源码安装时，在仓库目录将它替换为 `node dist/src/cli.js`。
@@ -16,11 +18,12 @@
 **Cloudflare Tunnel 和 Funnel 都可能被互联网上的任何人访问。** 不能转发原来的无认证
 `openai-tunnel` 配置，不能把 URL 难猜、最后一跳是 localhost 或供应商身份头当作用户认证。
 
-### ChatGPT：使用 OAuth
+### ChatGPT：推荐 Auth0，兼容其他 OAuth 提供方
 
-使用支持 OAuth authorization-code + PKCE S256、资源参数和 JWT access token 的授权服务器。
-exec-mcp 只做资源服务器，不另建账号系统、登录页或 OAuth token 签发器；
-登录、授权码、刷新 token 和 OAuth client 的管理交给已有身份提供方。
+推荐使用 **Auth0** 承担登录和 OAuth 授权；exec-mcp 只验证访问令牌，不自建账号、登录页或签发器。
+Auth0 是文档中的推荐方案，不是代码绑定；其他满足相同 OAuth/JWT 契约的提供方仍可使用。
+下面的 Auth0 租户 `your-tenant.us.auth0.com` 和 MCP 域名 `exec.example.com` 都必须替换为你的实际地址。
+Auth0 域名是签发方，不是 MCP 域名。
 
 ```toml
 [server]
@@ -31,35 +34,58 @@ public_url = "https://exec.example.com"
 
 [auth]
 type = "oauth"
-issuer = "https://identity.example.com/"
-jwks_url = "https://identity.example.com/.well-known/jwks.json"
-subject = "YOUR_STABLE_USER_SUBJECT"
+issuer = "https://your-tenant.us.auth0.com/"
+jwks_url = "https://your-tenant.us.auth0.com/.well-known/jwks.json"
+subject = "auth0|YOUR_USER_ID"
 scopes = ["exec"]
 ```
 
-`public_url` 只填写 HTTPS origin，不附 `/mcp`。在身份提供方创建代表此服务的 API，
-它的 resource/audience 必须是 **`https://exec.example.com/mcp`**，并授予所需 scope。
-`issuer` 必须与 token 中的 `iss` 完全一致；`subject` 是你自己的稳定 `sub`，不是随意填写的邮箱。
-这里只授权这个用户，不能仅因同一身份提供方签发了 token 就允许其他账户执行机器命令。
+#### 在 Auth0 中准备
 
-在 ChatGPT 中选择 OAuth，并按身份提供方支持的方式使用预注册 OAuth client、DCR 或 CIMD。
-将 ChatGPT 配置界面给出的**完整回调 URI**加入身份提供方允许列表；不要猜测或放宽成任意回调。
-身份提供方必须发布正确的 OAuth/OIDC 发现信息，并将收到的 `resource` 参数绑定到 access token 的 audience。
-参考 [OpenAI OAuth 接入说明](https://developers.openai.com/plugins/build/auth)。
+1. 创建或选择租户。在 **Applications → APIs** 创建此 MCP 对应的 API：名称可为 `Exec MCP`，
+   **Identifier 必须是 `https://exec.example.com/mcp`**，Signing Algorithm 使用 **RS256**，
+   添加 `exec` permission/scope。这是 API audience，不是 Application Client ID、Management API 或 Auth0 `/userinfo` 地址。
+   Tailscale 使用本节点公开地址加 `/mcp`，指定端口时也必须一致。参见 [Auth0 API 配置](https://auth0.com/docs/quickstart/backend/rails)。
+2. 按 [Auth0 MCP 授权指南](https://auth0.com/ai/docs/mcp/get-started/authorization-for-your-mcp-server)，
+   在 **Settings → Advanced** 启用 **Resource Parameter Compatibility Profile** 和 **Include Issuer in Authorization Responses**。
+   前者让 MCP 的 `resource` 参数绑定 API audience，后者用于授权回调签发方核对；只填 issuer 不足以完成配置。
+3. 配置 ChatGPT 的 OAuth 客户端接入：优先使用租户支持的 CIMD，也可按其能力采用 DCR 或预注册 client。
+   以 ChatGPT 管理界面实际给出的 client metadata 和完整 callback URI 为准，不硬编码旧回调，也不开放任意 callback。
+   使用第三方客户端时，按 Auth0 指南启用合适的 domain-level connection、用户授权和 API access policy；
+   需要长期连接时配置刷新令牌。不要用 Machine-to-Machine/client-credentials 流程代替用户登录。
+   参见 [OpenAI OAuth 接入与客户端要求](https://developers.openai.com/plugins/build/auth)。
+4. 在 Auth0 用户详情取自己的 User ID，填写为 `subject`。数据库用户通常是 `auth0|...`，
+   社交登录可能是 `google-oauth2|...`，必须以实际用户的 `sub` 为准，不能填邮箱。
+   授予该用户和客户端访问 `exec` 的权限；启用 RBAC 时还需配置对应角色/权限。
+   本服务检查 access token 的 **`scope` 包含 `exec`**，不会把只有 `permissions` 的 token 当成满足 scope。
+   参见 [Auth0 API scopes](https://auth0.com/docs/get-started/apis/scopes/api-scopes)。
+5. 启动服务和 Tunnel，在 ChatGPT 中使用公开 `/mcp` 地址连接并登录自己的账户。
+   `issuer` 必须与发现文档和 token 的 `iss` 完全一致，包括末尾 `/`；
+   使用 Auth0 自定义域名时，依据该域名的 OIDC discovery 核对 `issuer` 和 `jwks_uri`，不要混用租户域名。
+   Auth0 按实际签发域名设置 issuer，见 [Access Tokens](https://auth0.com/docs/secure/tokens/access-tokens/get-access-tokens)。
 
-例如使用 Auth0 时，需创建对应 API/scope，确保自己的 access token 包含正确 `scope`，
-并启用 [Resource Parameter Compatibility Profile](https://support.auth0.com/center/s/article/mcp-audience-error-with-auth0)。
-默认租户设置并不一定满足这些条件，不能只复制 issuer 就假定已完成集成。
-本服务接受 RS256/ES256/EdDSA JWT，不接受把 opaque token、ID token 或任意网站会话 cookie 当作 access token。
+配置和服务端测试不等于真实 Auth0 租户与 ChatGPT 回调已验收。
+常见 audience 错误参见 [Auth0 MCP 排查说明](https://support.auth0.com/center/s/article/mcp-audience-error-with-auth0)。
+本服务接受 RS256/ES256/EdDSA JWT **access token**，不接受 opaque token、ID token 或浏览器 cookie 代替它。
 
+`public_url` 只填写 HTTPS origin，不带 `/mcp`；MCP resource/audience 则带 `/mcp`。
+这里只授权 `subject` 指定的用户，不是该 Auth0 租户的所有账户。
 服务在 `/.well-known/oauth-protected-resource/mcp`（兼容根路径版本）提供资源发现；
 未认证的 `/mcp` 返回标准 Bearer challenge。每次请求验证签名、issuer、audience、过期时间、scope 和指定用户，
 包括工具目录、调用、wait、资源读取和旧版 MCP session 请求；旧 `session_id` 不能代替认证。
-JWT 的有效期和吊销策略由身份提供方管理；已经被接受并开始执行的命令不会因 token 到期自动回滚或终止。
+本服务本地校验 JWT，不实时查询提供方吊销状态；已开始执行的命令不会因 token 到期自动回滚或终止。
 
 ### 支持自定义请求头的客户端：可选静态 Bearer
 
-不需要 OAuth 的自用 API 客户端可以改用：
+推荐把高熵随机 token 放在单独的受权限保护文件中：
+
+```toml
+[auth]
+type = "bearer"
+token_file = "./secrets/access-token.txt"
+```
+
+已有环境变量部署可以继续使用，**与 token_file 二选一**：
 
 ```toml
 [auth]
@@ -67,31 +93,54 @@ type = "bearer"
 token_env = "EXEC_MCP_ACCESS_TOKEN"
 ```
 
-在启动服务的环境里提供高熵随机 token（至少 32 字符），客户端用 `Authorization: Bearer ...` 发送。
-可用 Node 的 `crypto.randomBytes(32).toString('base64url')` 生成后存入自己的安全环境配置。
-不要把 token 放在 URL、Git 或共享日志中。静态 token 在启动时读取，轮换后需要重启服务。
-**不假定 ChatGPT 的连接界面支持任意 Authorization 请求头**；连接 ChatGPT 时使用上面的 OAuth 方式。
+两项都写会报配置错误，不猜优先级；都省略时保留旧行为，从 `EXEC_MCP_ACCESS_TOKEN` 读取。
+显式选择文件后，不会因文件缺失、不可读或无效而回退到环境变量。
+文件只放 token 原文（不是 JSON、TOML，也不带 `Bearer `），允许 UTF-8 BOM 和末尾换行。
+路径支持 `~/` 和软链接，相对配置文件目录解析；启动时读取一次，更新后重启才生效，不做 watcher。
+
+使用至少 32 字符的高熵随机 token；可用 Node 的 `crypto.randomBytes(32).toString('base64url')` 生成，
+保存到不纳入 Git 的私人凭据目录，客户端通过 `Authorization: Bearer ...` 发送。
+不要把 token 放进 URL 或共享日志。同一实例不会同时接受文件和环境中的两个 token。
+**ChatGPT 使用上面的 OAuth/Auth0 方案**，不要假定其连接界面支持客户自带的静态请求头。
 
 ## Cloudflare Named Tunnel
 
-先按 [Cloudflare 官方步骤](https://developers.cloudflare.com/tunnel/get-started/) 安装 `cloudflared`，
+先按 [Cloudflare 官方步骤](https://developers.cloudflare.com/tunnel/setup/) 安装 `cloudflared`，
 创建一个专用于 exec-mcp 的 remotely-managed Named Tunnel，并配置固定公开域名。
 将**整个域名**的 HTTP 服务指向 `http://127.0.0.1:8891`，保留路径和 Authorization 头，
 使 `/mcp` 及 `/.well-known/...` 都能到达；不要为这些路径配置缓存、交互式挑战或额外浏览器登录墙。
-Tunnel token 只保存在本地受权限保护的文件中（该文件的持有者能运行 Tunnel）。
+以下凭据用于连接 Cloudflare，**不是前面的 MCP Bearer access token**，不要混用。
 
-在同一份 config.toml 中加入：
+### 已有 TUNNEL_TOKEN：直接复用
+
+在启动 `exec-mcp tunnel` 的环境中已有 `TUNNEL_TOKEN` 时，只需要：
 
 ```toml
 [tunnel]
 provider = "cloudflare"
-token_file = "./cloudflare-token.txt"
 # executable = "/absolute/path/to/cloudflared"
 ```
 
-需要支持 `tunnel run --token-file` 的官方客户端版本。相对文件路径以 config.toml 所在目录为基准；
-`executable` 省略时从服务 PATH 查找。不要同时设置 `TUNNEL_TOKEN`，它在供应商客户端中会覆盖 token_file；
-遇到这一冲突，exec-mcp 会报错而不是删改你的环境。
+不需要把 token 再复制到文件，也不会把它放进命令行参数。
+未配置 token_file 时沿用供应商环境优先级：先 `TUNNEL_TOKEN`，再 `TUNNEL_TOKEN_FILE`。
+两者都没有会报错，不尝试其他账户凭据。环境文件路径沿用进程当前目录语义；要以配置文件为基准，使用下面的显式配置。
+
+### 使用独立 token 文件：不用删除环境中的 TUNNEL_TOKEN
+
+```toml
+[tunnel]
+provider = "cloudflare"
+token_file = "./secrets/cloudflare-token.txt"
+# executable = "/absolute/path/to/cloudflared"
+```
+
+**显式 token_file 始终优先**，即使环境中另有 TUNNEL_TOKEN 或 TUNNEL_TOKEN_FILE。
+父进程和 cloudflared 子进程都继续继承原环境；启动参数使用空 `--token=` 配合 `--token-file`，
+覆盖的只是本次 cloudflared 的选项选择，不是删除或改写环境变量。
+文件缺失或无效时不回退到另一个 Tunnel，token 内容不进入进程参数。
+
+相对文件路径基于 config.toml，支持 `~/`；`executable` 省略时从 PATH 查找。
+文件模式需要支持 `--token-file` 的 cloudflared（2025.4.0+），见 [官方运行参数](https://developers.cloudflare.com/tunnel/reference/run-parameters/)。
 
 在两个终端使用同一份配置：
 

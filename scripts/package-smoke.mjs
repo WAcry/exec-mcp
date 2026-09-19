@@ -372,18 +372,23 @@ enabled = true
       "--eval",
       `
     import assert from 'node:assert/strict';
+    import {writeFile} from 'node:fs/promises';
     import {startServer} from ${JSON.stringify(installedServer)};
     import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
     process.env.EXEC_MCP_PACKAGE_TOKEN='package-fixture-token-012345678901234567890123';
-    const server=await startServer({host:'127.0.0.1',port:0,access:'public',public_url:'https://package.example.test',auth:{type:'bearer',token_env:'EXEC_MCP_PACKAGE_TOKEN'},mcpServers:[]});
-    const client=new Client({name:'packaged-public',version:'1'});
-    try{
-      assert.equal((await fetch(server.url)).status,401);
-      await client.connect(new StreamableHTTPClientTransport(new URL(server.url),{requestInit:{headers:{Authorization:'Bearer '+process.env.EXEC_MCP_PACKAGE_TOKEN}}}));
-      const result=await client.callTool({name:'exec',arguments:{source:'text(42);'}});
-      assert.ok(!result.isError&&result.content.some(x=>x.type==='text'&&x.text==='42'));
-      console.log('PUBLIC_AUTH_OK');
-    }finally{await client.close();await server.close();}
+    const tokenFile=${JSON.stringify(path.join(temporary, "packaged access token.txt"))};
+    await writeFile(tokenFile,process.env.EXEC_MCP_PACKAGE_TOKEN+String.fromCharCode(13,10),{mode:0o600});
+    for(const auth of [{type:'bearer',token_env:'EXEC_MCP_PACKAGE_TOKEN'},{type:'bearer',token_file:tokenFile}]){
+      const server=await startServer({host:'127.0.0.1',port:0,access:'public',public_url:'https://package.example.test',auth,mcpServers:[]});
+      const client=new Client({name:'packaged-public',version:'1'});
+      try{
+        assert.equal((await fetch(server.url)).status,401);
+        await client.connect(new StreamableHTTPClientTransport(new URL(server.url),{requestInit:{headers:{Authorization:'Bearer '+process.env.EXEC_MCP_PACKAGE_TOKEN}}}));
+        const result=await client.callTool({name:'exec',arguments:{source:'text(42);'}});
+        assert.ok(!result.isError&&result.content.some(x=>x.type==='text'&&x.text==='42'));
+      }finally{await client.close();await server.close();}
+    }
+    console.log('PUBLIC_AUTH_OK');
   `,
     ],
     { cwd: isolated, timeout: 30_000 },

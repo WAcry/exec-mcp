@@ -22,26 +22,46 @@ export const PUBLIC_URL_SCHEMA = httpsUrl
   )
   .transform((value) => new URL(value).origin);
 const scope = z.string().regex(/^[\x21\x23-\x5b\x5d-\x7e]+$/);
-export const AUTH_SCHEMA = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.literal("oauth"),
-      issuer: httpsUrl,
-      jwks_url: httpsUrl,
-      subject: z.string().min(1),
-      scopes: z.array(scope).min(1).default(["exec"]),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("bearer"),
-      token_env: z
-        .string()
-        .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/)
-        .default("EXEC_MCP_ACCESS_TOKEN"),
-    })
-    .strict(),
-]);
+export const AUTH_SCHEMA = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        type: z.literal("oauth"),
+        issuer: httpsUrl,
+        jwks_url: httpsUrl,
+        subject: z.string().min(1),
+        scopes: z.array(scope).min(1).default(["exec"]),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal("bearer"),
+        token_env: z
+          .string()
+          .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/)
+          .optional(),
+        token_file: z
+          .string()
+          .min(1)
+          .refine((value) => !value.includes("\0"))
+          .optional(),
+      })
+      .strict()
+      .superRefine((value, ctx) => {
+        if (value.token_env !== undefined && value.token_file !== undefined)
+          ctx.addIssue({
+            code: "custom",
+            message: "token_env 和 token_file 必须二选一，不能同时配置",
+          });
+      }),
+  ])
+  .transform((value) =>
+    value.type === "bearer" &&
+    value.token_file === undefined &&
+    value.token_env === undefined
+      ? { ...value, token_env: "EXEC_MCP_ACCESS_TOKEN" }
+      : value,
+  );
 export type AuthConfig = z.infer<typeof AUTH_SCHEMA>;
 
 export const TUNNEL_SCHEMA = z.discriminatedUnion("provider", [
@@ -49,7 +69,11 @@ export const TUNNEL_SCHEMA = z.discriminatedUnion("provider", [
     .object({
       provider: z.literal("cloudflare"),
       executable: z.string().min(1).optional(),
-      token_file: z.string().min(1),
+      token_file: z
+        .string()
+        .min(1)
+        .refine((value) => !value.includes("\0"))
+        .optional(),
     })
     .strict(),
   z

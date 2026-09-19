@@ -28,20 +28,12 @@ import { viewImage } from "./host/image.js";
 import { toolError } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
-import { encodePayload } from "./limits.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
 import { resolveShell } from "./host/shell.js";
 import { MEMORY_SCHEMA, MiB } from "./memory.js";
-import {
-  boundModelOutput,
-  MODEL_TEXT_BYTES,
-} from "./code-mode/model-output.js";
-import type { CallToolResult } from "@modelcontextprotocol/client";
-import type { UserInputStore } from "./user-input/store.js";
-import type { InputRequest } from "./user-input/contracts.js";
-import { effectiveWebConfig } from "./web/config.js";
+import { boundModelOutput } from "./code-mode/model-output.js";
 import { ActivityStore } from "./web/activity.js";
 import type { CallRecord } from "./web/types.js";
 
@@ -68,8 +60,6 @@ export class ExecRuntime {
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
   readonly activity: ActivityStore;
-  readonly userInput: UserInputStore | undefined;
-  private readonly userInputConfigured: boolean;
   private initialization: Promise<void> | undefined;
   private initialized = false;
   private closing: Promise<void> | undefined;
@@ -84,11 +74,7 @@ export class ExecRuntime {
     config: Config,
     artifacts?: ArtifactStore,
     activity?: ActivityStore,
-    userInput?: UserInputStore,
   ) {
-    this.userInput = userInput;
-    this.userInputConfigured =
-      !!userInput && effectiveWebConfig(config.web).enabled;
     this.securitySchemes =
       config.access === "openai-tunnel"
         ? [{ type: "noauth" }]
@@ -105,7 +91,7 @@ export class ExecRuntime {
       bufferBytes: memory.terminal_buffer_mib * MiB,
       idleMs,
     });
-    this.native = nativeContracts(shell, this.userInputConfigured);
+    this.native = nativeContracts(shell);
     this.codeMode = new CodeModeService({
       sessionIdleMs: idleMs,
       memoryHighWaterBytes: memory.code_mode_high_water_mib * MiB,
@@ -195,7 +181,6 @@ export class ExecRuntime {
         };
         try {
           if (!this.ready) throw new Error("服务正在关闭。");
-          this.acknowledgeUserInput(scope, args.ack_user_input);
           const signal = context.mcpReq.signal;
           throwIfAborted(signal);
           const cwd = await realpath(
@@ -209,26 +194,6 @@ export class ExecRuntime {
               try {
                 let subcallResult: unknown;
                 switch (contract.name) {
-                  case "request_user_input_async":
-                    if (
-                      !this.userInputConfigured ||
-                      !this.userInput?.webAvailable ||
-                      !this.ready
-                    )
-                      throw new Error(
-                        "异步提问需要本机 Web UI 已运行；请启用并启动 Web UI。",
-                      );
-                    subcallResult = this.userInput.create(
-                      sessionScopeKey(scope),
-                      input as InputRequest,
-                    );
-                    break;
-                  case "get_user_input":
-                    subcallResult = this.userInput!.getForScope(
-                      sessionScopeKey(scope),
-                      (input as { request_id: string }).request_id,
-                    );
-                    break;
                   case "list_skills": {
                     const requested = (input as { workdir?: string }).workdir;
                     const workdir =
@@ -423,7 +388,7 @@ export class ExecRuntime {
                   : "completed",
             output: execResult,
           });
-          return this.withUserInput(execResult, scope);
+          return boundModelOutput(execResult);
         } catch (error) {
           const result = toolError(error);
           result.content.push(...takeAttachments());
@@ -432,7 +397,7 @@ export class ExecRuntime {
             error: error instanceof Error ? error.message : String(error),
             output: result,
           });
-          return this.withUserInput(result, scope);
+          return boundModelOutput(result);
         }
       },
     );
@@ -467,7 +432,6 @@ export class ExecRuntime {
           args: waitArgs,
         });
         try {
-          this.acknowledgeUserInput(scope, args.ack_user_input);
           let codeModeState: "yielded" | "completed" | "terminated" | undefined;
           const waitResult = await this.codeMode.wait({
             cellId: args.cell_id,
@@ -496,7 +460,7 @@ export class ExecRuntime {
                   : "completed",
             output: waitResult,
           });
-          return this.withUserInput(waitResult, scope);
+          return boundModelOutput(waitResult);
         } catch (error) {
           const result = toolError(error);
           callTracker.finish({
@@ -504,7 +468,7 @@ export class ExecRuntime {
             error: error instanceof Error ? error.message : String(error),
             output: result,
           });
-          return this.withUserInput(result, scope);
+          return boundModelOutput(result);
         }
       },
     );
@@ -525,43 +489,6 @@ export class ExecRuntime {
         ),
     );
     return server;
-  }
-  private acknowledgeUserInput(
-    scope: string | undefined,
-    ids?: readonly string[],
-  ): void {
-    if (!ids?.length) return;
-    if (!this.userInput) throw new Error("此实例未启用异步问答记录。");
-    this.userInput.acknowledge(sessionScopeKey(scope), ids);
-  }
-  private withUserInput(
-    result: CallToolResult,
-    scope: string | undefined,
-  ): CallToolResult {
-    if (!this.userInput) return boundModelOutput(result);
-    try {
-      const answers = this.userInput.delivery(sessionScopeKey(scope));
-      const normal = boundModelOutput(result, MODEL_TEXT_BYTES - answers.bytes);
-      const delivered = {
-        ...normal,
-        content: [...normal.content, ...answers.content],
-      };
-      encodePayload(delivered);
-      return delivered;
-    } catch {
-      // Never convert an already executed command into a retryable failure because delivery failed.
-      const normal = boundModelOutput(result, MODEL_TEXT_BYTES - 512);
-      return {
-        ...normal,
-        content: [
-          ...normal.content,
-          {
-            type: "text",
-            text: "用户答复暂未附加，记录仍保留；后续 exec/wait 将重试投递。",
-          },
-        ],
-      };
-    }
   }
   close(): Promise<void> {
     this.closing ??= (async () => {

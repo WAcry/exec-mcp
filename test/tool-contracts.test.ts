@@ -7,6 +7,8 @@ import {
   describeContract,
   execDescription,
   nativeContracts,
+  EXEC_SCHEMA,
+  WAIT_SCHEMA,
 } from "../src/catalog.js";
 import { resolveShell } from "../src/host/shell.js";
 import { TerminalManager } from "../src/host/terminal.js";
@@ -35,6 +37,21 @@ afterEach(async () => {
 });
 
 describe("self-contained model-visible contracts", () => {
+  it("omits retired user-input fields rather than accepting hidden acknowledgments", () => {
+    expect(EXEC_SCHEMA.safeParse({ source: "text(42)" }).success).toBe(true);
+    expect(WAIT_SCHEMA.safeParse({ cell_id: "existing-cell" }).success).toBe(
+      true,
+    );
+    for (const ack_user_input of [[], ["old-answer-event"]]) {
+      expect(
+        EXEC_SCHEMA.safeParse({ source: "text(42)", ack_user_input }).success,
+      ).toBe(false);
+      expect(
+        WAIT_SCHEMA.safeParse({ cell_id: "existing-cell", ack_user_input })
+          .success,
+      ).toBe(false);
+    }
+  });
   it("states skill selection in both entry points and scopes result handling to downstream MCP", () => {
     const contracts = nativeContracts(resolveShell());
     const description = execDescription(contracts);
@@ -137,6 +154,31 @@ describe("self-contained model-visible contracts", () => {
 });
 
 describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
+  it("has no asynchronous question tools or response hooks, even with Web enabled", async () => {
+    const connection = await connect(
+      { web: { enabled: true, host: "127.0.0.1", port: 0 } },
+      legacy,
+    );
+    connections.push(connection);
+    const listed = (await connection.client.listTools()).tools;
+    expect(JSON.stringify(listed)).not.toMatch(
+      /request_user_input_async|get_user_input|ack_user_input|用户答复/,
+    );
+    const result = await connection.client.callTool({
+      name: "exec",
+      arguments: {
+        source:
+          "text({create:typeof tools.request_user_input_async,read:typeof tools.get_user_input,names:ALL_TOOLS.map(t=>t.name)});",
+      },
+      _meta: { "openai/session": "same-conversation-without-inbox" },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(jsonOutput(result)).toEqual({
+      create: "undefined",
+      read: "undefined",
+      names: nativeContracts(resolveShell()).map((tool) => tool.name),
+    });
+  });
   it("exposes the revised contracts and executes a literal string patch on the first exec", async () => {
     const connection = await connect({}, legacy);
     connections.push(connection);

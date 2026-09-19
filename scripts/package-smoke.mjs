@@ -6,6 +6,7 @@ import {
   readFile,
   writeFile,
   mkdir,
+  readdir,
   rm,
   symlink,
 } from "node:fs/promises";
@@ -27,6 +28,13 @@ let child;
 let client;
 let exited;
 try {
+  // Simulate an in-place source upgrade: a full build must drop removed compiled modules.
+  const stale = path.join(root, "dist", "src", "user-input");
+  await mkdir(stale, { recursive: true });
+  await writeFile(
+    path.join(stale, "removed-feature.js"),
+    "throw new Error('obsolete module');\n",
+  );
   const packed = await run(
     process.execPath,
     [npmCli, "pack", "--silent", "--pack-destination", temporary],
@@ -72,6 +80,23 @@ try {
     "dist",
     "src",
     "cli.js",
+  );
+  const installed = path.resolve(cli, "../../..");
+  const manifest = JSON.parse(
+    await readFile(path.join(installed, "package.json"), "utf8"),
+  );
+  assert.ok(!manifest.dependencies["better-sqlite3"]);
+  assert.ok(!manifest.devDependencies["@types/better-sqlite3"]);
+  assert.ok(!(await readdir(path.dirname(cli))).includes("user-input"));
+  assert.ok(
+    !(await readdir(path.join(installed, "docs"))).includes(
+      "adr-010-async-user-input.md",
+    ),
+  );
+  assert.ok(
+    !(await readdir(path.join(isolated, "node_modules"))).includes(
+      "better-sqlite3",
+    ),
   );
   const config = path.join(temporary, "config.toml");
   const executeCli = async (args) =>
@@ -306,49 +331,23 @@ enabled = true
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
-  // The published package must contain a usable native SQLite binding, not just types.
-  const question = await scopedCall(
-    'text(await tools.request_user_input_async({request_key:"package-question",questions:[{title:"Storage?",options:["SQLite","Memory"]}]}));',
+  const toolSurface = await scopedCall(
+    "text({create:typeof tools.request_user_input_async,read:typeof tools.get_user_input});",
   );
-  assert.ok(!question.isError, JSON.stringify(question));
-  const savedQuestion = JSON.parse(
-    question.content.find(
-      (block) => block.type === "text" && block.text.startsWith("{"),
-    ).text,
-  );
-  const reply = await fetch(
-    new URL(`/api/user-input/${savedQuestion.request_id}`, started.web),
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-exec-web": "1" },
-      body: JSON.stringify({
-        question_id: "q1",
-        expected_revision: 0,
-        selected_option_id: "o1",
-        notes: "Only implement the interface.",
-      }),
-    },
-  );
-  assert.equal(reply.status, 200);
-  const carried = await scopedCall('text("work continues");', {
-    max_output_tokens: 0,
-  });
-  const answerText = carried.content.find(
-    (block) => block.type === "text" && block.text.startsWith("用户答复（"),
-  );
-  assert.ok(answerText, JSON.stringify(carried));
-  const event = JSON.parse(
-    answerText.text.slice(answerText.text.indexOf("\n") + 1),
-  );
-  assert.equal(event.answer_from_user.notes, "Only implement the interface.");
-  const ack = await scopedCall('text("acknowledged");', {
-    ack_user_input: [event.event_id],
-  });
-  assert.ok(!ack.isError, JSON.stringify(ack));
-  assert.ok(
-    !ack.content.some(
-      (block) => block.type === "text" && block.text.startsWith("用户答复（"),
+  assert.ok(!toolSurface.isError, JSON.stringify(toolSurface));
+  assert.deepEqual(
+    JSON.parse(
+      toolSurface.content.find(
+        (block) => block.type === "text" && block.text.startsWith("{"),
+      ).text,
     ),
+    { create: "undefined", read: "undefined" },
+  );
+  for (const route of ["/api/user-input", "/api/user-input/old-request"])
+    assert.equal((await fetch(new URL(route, started.web))).status, 404);
+  assert.ok(
+    !(await readdir(temporary)).includes(".exec-mcp"),
+    "CLI must not create a question database",
   );
   // Verify native PTY after a clean tarball installation, not only in the checkout.
   const processFixture = path.join(project, "process fixture.cjs");

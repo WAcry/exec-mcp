@@ -15,19 +15,11 @@ import { apiFetch } from "./lib/api";
 import type { CallSummary, PaginatedResult, SessionSummary } from "./types";
 import { ManagementProvider, useManagement } from "./context/ManagementContext";
 import { RuntimeControl } from "./components/RuntimeControl";
-import {
-  UserInputProvider,
-  USER_INPUT_OPEN,
-  USER_INPUT_REFRESH,
-} from "./context/UserInputContext";
-import { UserInputView } from "./components/UserInputView";
 
 export function App() {
   return (
     <ManagementProvider>
-      <UserInputProvider>
-        <ConsoleApp />
-      </UserInputProvider>
+      <ConsoleApp />
     </ManagementProvider>
   );
 }
@@ -37,11 +29,6 @@ function ConsoleApp() {
     useAuth();
   const [activeTab, setActiveTab] = useState("calls");
   const [online, setOnline] = useState(false);
-  useEffect(() => {
-    const open = () => setActiveTab("questions");
-    window.addEventListener(USER_INPUT_OPEN, open);
-    return () => window.removeEventListener(USER_INPUT_OPEN, open);
-  }, []);
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -155,8 +142,6 @@ function ConsoleApp() {
         eventSource.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
-            if (data.type === "user-input:changed" || data.type === "connected")
-              window.dispatchEvent(new Event(USER_INPUT_REFRESH));
             if (data.type?.startsWith("call:")) scheduleRefresh();
           } catch {
             /* ignore ping */
@@ -252,8 +237,6 @@ function ConsoleApp() {
         )}
 
         {activeTab === "terminals" && <TerminalsView />}
-        {activeTab === "questions" && <UserInputView />}
-
         {activeTab === "mcp" && <McpView key={management.data?.generation} />}
 
         {activeTab === "skills" && (

@@ -150,6 +150,32 @@ function actionHeaders(extra: Record<string, string> = {}) {
   return { "x-exec-web": "1", ...extra };
 }
 
+it("keeps Web management available while retired question endpoints return 404", async () => {
+  const { web } = await startWeb();
+  const status = await request(web, "/api/status");
+  expect(status.status).toBe(200);
+  expect(status.json()).not.toHaveProperty("userInput");
+  for (const route of ["/api/user-input", "/api/user-input/old-request"]) {
+    expect((await request(web, route)).status).toBe(404);
+    expect(
+      (
+        await request(web, route, {
+          method: "POST",
+          headers: actionHeaders(),
+          body: {},
+        })
+      ).status,
+    ).toBe(404);
+  }
+  for (const route of [
+    "/api/config",
+    "/api/skills",
+    "/api/mcp-servers",
+    "/api/calls",
+  ])
+    expect((await request(web, route)).status).toBe(200);
+});
+
 function openEventStream(
   web: WebServerInstance,
   options: { host: string; cookie?: string; origin?: string },

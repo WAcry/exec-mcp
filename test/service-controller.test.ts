@@ -10,8 +10,6 @@ import { startServer } from "../src/server.js";
 import { ServiceController } from "../src/service-controller.js";
 import { ConfigEditor } from "../src/web/config-edit.js";
 import { startWebServer } from "../src/web/server.js";
-import { UserInputStore } from "../src/user-input/store.js";
-import { sessionScopeKey } from "../src/code-mode/service.js";
 import { jsonOutput } from "./helpers.js";
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -27,9 +25,7 @@ async function setup() {
   );
   const editor = new ConfigEditor(file);
   const first = await editor.read();
-  const input = new UserInputStore(path.join(dir, "questions.sqlite3"));
-  cleanups.push(() => input.close());
-  const server = await startServer(first.config, { userInput: input });
+  const server = await startServer(first.config);
   const controller = new ServiceController(editor, {
     server,
     config: first.config,
@@ -49,29 +45,23 @@ async function setup() {
     cleanups.push(() => client.close());
     return client;
   };
-  return { dir, file, editor, input, controller, web, connect };
+  return { dir, file, editor, controller, web, connect };
 }
 
 describe("managed runtime replacement", () => {
-  it("restarts with fresh native store and same conversation while retaining durable decisions and the Web listener", async () => {
+  it("restarts with fresh native store and the same conversation while retaining the Web listener", async () => {
     const s = await setup();
     const client = await s.connect();
     const meta = { "openai/session": "stable-chat" };
-    await client.callTool({
+    const saved = await client.callTool({
       name: "exec",
       arguments: {
-        source:
-          'store("old",42);text(await tools.request_user_input_async({request_key:"r",questions:[{title:"Question?"}]}));',
+        source: 'store("old",42);text(load("old"));',
       },
       _meta: meta,
     });
-    const request = s.input.list().items[0]!;
-    s.input.answer(request.id, {
-      question_id: "q1",
-      expected_revision: 0,
-      selected_option_id: null,
-      notes: "preserved answer",
-    });
+    expect(saved.isError).not.toBe(true);
+    expect(jsonOutput(saved)).toBe(42);
     const a = s.controller.restart(),
       b = s.controller.restart();
     expect(a).toBe(b);
@@ -86,15 +76,9 @@ describe("managed runtime replacement", () => {
     });
     expect(result.isError).not.toBe(true);
     expect(jsonOutput(result)).toEqual({ empty: true });
-    expect(JSON.stringify(result)).toContain("preserved answer");
-    const read = (await (
-      await fetch(new URL("api/user-input", s.web.loopbackUrl))
-    ).json()) as { items: { id: string }[] };
-    expect(read.items[0]!.id).toBe(request.id);
-    expect(
-      s.input.getForScope(sessionScopeKey("stable-chat"), request.id)
-        .questions[0]!.answer!.notes,
-    ).toBe("preserved answer");
+    const status = await fetch(new URL("api/status", s.web.loopbackUrl));
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ status: "ready" });
   });
   it("keeps management recoverable after startup failure, allowing a configured MCP to be switched off and retried", async () => {
     const s = await setup();

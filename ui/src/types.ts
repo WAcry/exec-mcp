@@ -103,7 +103,6 @@ export interface NativeSessionItem {
 }
 
 export interface SystemStatus {
-  userInput?: { enabled: boolean; pending: number };
   status: string;
   version: string;
   uptime: number;
@@ -128,38 +127,6 @@ export interface SystemStatus {
     arch: string;
     nodeVersion: string;
   };
-}
-
-export interface UserInputQuestion {
-  id: string;
-  title: string;
-  options: { id: string; label: string }[];
-  answer: null | {
-    kind: "option" | "text";
-    selected_option_id: string | null;
-    selected_option_label: string | null;
-    notes: string;
-    revision: number;
-    answered_at: string;
-    event_id: string;
-    delivery: "saved" | "attempted" | "acknowledged";
-  };
-}
-export interface UserInputRequest {
-  id: string;
-  session_id: string;
-  request_key: string;
-  created_at: string;
-  status: "pending" | "answered";
-  questions: UserInputQuestion[];
-}
-export interface UserInputList {
-  enabled: boolean;
-  items: UserInputRequest[];
-  total: number;
-  page: number;
-  pageSize: number;
-  pending: number;
 }
 
 export interface SkillItem {

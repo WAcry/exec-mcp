@@ -57,9 +57,6 @@ export class ServiceController {
     const server = await startServer(next.config, {
       activity,
       signal: this.abort.signal,
-      ...(this.current.server.runtime.userInput
-        ? { userInput: this.current.server.runtime.userInput }
-        : {}),
       ...(this.options.onProgress
         ? { onDownstreamProgress: this.options.onProgress }
         : {}),

@@ -1,11 +1,6 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
-import {
-  ACK_INPUT_SCHEMA,
-  GET_INPUT_SCHEMA,
-  REQUEST_INPUT_SCHEMA,
-} from "./user-input/contracts.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import {
   HOST_FILE_SCHEMA,
@@ -26,7 +21,6 @@ const tokenBudget = z
   .optional();
 export const EXEC_SCHEMA = z
   .object({
-    ack_user_input: ACK_INPUT_SCHEMA,
     max_output_tokens: tokenBudget,
     files: z
       .array(HOST_FILE_SCHEMA)
@@ -53,7 +47,6 @@ export const EXEC_SCHEMA = z
   .strict();
 export const WAIT_SCHEMA = z
   .object({
-    ack_user_input: ACK_INPUT_SCHEMA,
     max_tokens: tokenBudget,
     cell_id: z
       .string()
@@ -310,26 +303,8 @@ export function bindNative(
 }
 export function nativeContracts(
   shell: CommandShell,
-  userInput = false,
 ): readonly NativeContract[] {
-  const contracts: readonly NativeContract[] = userInput
-    ? [
-        ...NATIVE_CONTRACTS,
-        {
-          name: "request_user_input_async",
-          schema: REQUEST_INPUT_SCHEMA,
-          description:
-            "将问题保存到本机 Web UI，立即返回 {accepted,request_id,status,question_ids}，不等待用户。需要 ChatGPT 对话标识和已运行的 Web UI。可继续独立工作；依赖答复的操作先让模型读到答复再决定。",
-        },
-        {
-          name: "get_user_input",
-          schema: GET_INPUT_SCHEMA,
-          description:
-            "读取当前 ChatGPT 对话中该请求的问题、答复版本和投递状态；立即返回，不等待用户。",
-        },
-      ]
-    : NATIVE_CONTRACTS;
-  return contracts.map((contract) =>
+  return NATIVE_CONTRACTS.map((contract) =>
     contract.name === "exec_command"
       ? {
           ...contract,
@@ -356,7 +331,6 @@ Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_cod
 source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。最终文本合计最多 36,000 UTF-8 字节，超出保留首尾。先在 JS 内筛选/汇总大结果，跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。
 cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。通常组合独立调用以节省每轮工具次数。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。
 
-${contracts.some((contract) => contract.name === "request_user_input_async") ? "用户在 Web 提交的答复随后续 exec/wait 的独立内容块返回；按 event_id 去重，读到后在下一次调用的 ack_user_input 确认。答复先返回模型，再执行依赖该决定的步骤；工具调用停止时不会主动唤醒 ChatGPT。\n" : ""}
 本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
 export const WAIT_DESCRIPTION =

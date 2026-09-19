@@ -13,7 +13,6 @@ import { effectiveWebConfig } from "./web/config.js";
 import { ActivityStore } from "./web/activity.js";
 import { ConfigEditor } from "./web/config-edit.js";
 import { ServiceController } from "./service-controller.js";
-import { UserInputStore, userInputDatabasePath } from "./user-input/store.js";
 import { runWithToken, WITH_TOKEN_USAGE } from "./with-token.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -110,9 +109,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const config = initial.config;
   const web = effectiveWebConfig(config.web);
   const activity = new ActivityStore({ enabled: web.enabled });
-  const userInput = web.enabled
-    ? new UserInputStore(userInputDatabasePath(initial.filename))
-    : undefined;
   const startup = new AbortController();
   const cancelStartup = () => startup.abort(new Error("启动已取消。"));
   process.once("SIGINT", cancelStartup);
@@ -121,7 +117,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     server = await startServer(config, {
       activity,
-      ...(userInput ? { userInput } : {}),
       signal: startup.signal,
       onDownstreamProgress: (event) =>
         console.error(
@@ -132,9 +127,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
               : event.message,
         ),
     });
-  } catch (error) {
-    userInput?.close();
-    throw error;
   } finally {
     process.removeListener("SIGINT", cancelStartup);
     process.removeListener("SIGTERM", cancelStartup);
@@ -196,7 +188,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       ...(webServer ? [webServer.close()] : []),
     ];
     void Promise.allSettled(tasks).then((results) => {
-      userInput?.close();
       if (results.some((result) => result.status === "rejected")) {
         console.error("服务关闭时发生清理错误。");
         process.exitCode = 1;

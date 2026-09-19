@@ -21,10 +21,6 @@ import { characterCount, renderSkills } from "../skills/render.js";
 import { MEMORY_DEFAULTS } from "../memory.js";
 import { effectiveWebConfig, webIsExposed, type WebConfig } from "./config.js";
 import { configView, mcpServerView } from "./config-view.js";
-import {
-  UserInputError,
-  ANSWER_INPUT_SCHEMA,
-} from "../user-input/contracts.js";
 import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
@@ -109,11 +105,6 @@ export async function startWebServer(
   const mcpUrl = options.mcpUrl ? new URL(options.mcpUrl) : undefined;
   const exposed = webIsExposed(web);
   const sse = new SseBroker();
-  // The durable store is owned by the CLI and survives runtime replacement.
-  const unsubscribeInput = runtime.userInput?.subscribe((event) =>
-    sse.broadcast(event),
-  );
-  let detachInput: (() => void) | undefined;
   let observedActivity = runtime.activity;
   let unsubscribeActivity = observedActivity.subscribe((event) => {
     sse.broadcast(event);
@@ -272,10 +263,6 @@ export async function startWebServer(
           },
         });
       } catch (error) {
-        if (error instanceof UserInputError && !res.headersSent) {
-          jsonResponse(res, error.status, { error: error.message });
-          return;
-        }
         if (error instanceof ConfigEditError && !res.headersSent) {
           jsonResponse(res, error.status, { error: error.message });
           return;
@@ -302,9 +289,7 @@ export async function startWebServer(
 
   try {
     actualPort = await listen(server, web.port, web.host);
-    detachInput = runtime.userInput?.attachWeb();
   } catch (error) {
-    unsubscribeInput?.();
     unsubscribeActivity();
     sse.close();
     server.closeAllConnections();
@@ -326,8 +311,6 @@ export async function startWebServer(
     },
     async close() {
       closePromise ??= (async () => {
-        detachInput?.();
-        unsubscribeInput?.();
         unsubscribeActivity();
         sse.close();
         await new Promise<void>((resolve, reject) => {
@@ -407,10 +390,6 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       status:
         context.controller?.state ?? (runtime.ready ? "ready" : "stopped"),
       generation: context.controller?.generation ?? 1,
-      userInput: {
-        enabled: !!runtime.userInput?.webAvailable,
-        pending: runtime.userInput?.list({ status: "pending" }).pending ?? 0,
-      },
       version: VERSION,
       uptime: process.uptime(),
       isLoopback: isLocal,
@@ -435,53 +414,6 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
         nodeVersion: process.version,
       },
     });
-    return;
-  }
-
-  if (pathname === "/api/user-input" && req.method === "GET") {
-    if (!runtime.userInput) {
-      jsonResponse(res, 200, {
-        enabled: false,
-        items: [],
-        total: 0,
-        pending: 0,
-        page: 1,
-        pageSize: 20,
-      });
-      return;
-    }
-    const status = reqUrl.searchParams.get("status");
-    const scope = reqUrl.searchParams.get("sessionId") || undefined;
-    jsonResponse(res, 200, {
-      enabled: runtime.userInput.webAvailable,
-      ...runtime.userInput.list({
-        page: positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
-        ...(scope ? { scope } : {}),
-        ...(status === "pending" || status === "answered" ? { status } : {}),
-      }),
-    });
-    return;
-  }
-  if (
-    pathname.startsWith("/api/user-input/") &&
-    (req.method === "GET" || req.method === "POST")
-  ) {
-    if (!runtime.userInput)
-      throw new HttpError(
-        409,
-        "此实例未启用持久问答，请从 CLI 启动并启用 Web UI。",
-      );
-    const id = decodeURIComponent(pathname.slice("/api/user-input/".length));
-    if (req.method === "GET") jsonResponse(res, 200, runtime.userInput.get(id));
-    else {
-      const parsed = ANSWER_INPUT_SCHEMA.safeParse(await readJsonBody(req));
-      if (!parsed.success)
-        throw new HttpError(
-          400,
-          "答复无效；请选择选项或填写自定义内容，并保持补充说明在 6000 字节内。",
-        );
-      jsonResponse(res, 200, runtime.userInput.answer(id, parsed.data));
-    }
     return;
   }
 

@@ -14,7 +14,7 @@
     "postinstall": "node scripts/fix-node-pty.mjs",
     "build:ui": "vite build",
     "build:server": "tsc -p tsconfig.build.json",
-    "build": "npm run build:ui && npm run build:server",
+    "build": "npm run clean && npm run build:ui && npm run build:server",
     "typecheck:server": "tsc -p tsconfig.json --noEmit",
     "typecheck:ui": "tsc -p ui/tsconfig.json --noEmit",
     "typecheck": "npm run typecheck:server && npm run typecheck:ui",
@@ -25,7 +25,8 @@
     "prepack": "npm run build",
     "test:package": "node scripts/package-smoke.mjs",
     "format": "prettier --write src test scripts *.ts *.json .github/workflows/*.yml ui/src/**/*.{ts,tsx,css}",
-    "format:check": "prettier --check src test scripts *.ts *.json .github/workflows/*.yml ui/src/**/*.{ts,tsx,css}"
+    "format:check": "prettier --check src test scripts *.ts *.json .github/workflows/*.yml ui/src/**/*.{ts,tsx,css}",
+    "clean": "node -e \"require('node:fs').rmSync('dist', {recursive:true,force:true})\""
   },
   "dependencies": {
     "@grpc/grpc-js": "1.14.4",
@@ -39,7 +40,6 @@
     "acorn": "8.18.0",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "better-sqlite3": "12.9.0",
     "file-type": "21.3.4",
     "jose": "6.2.12",
     "minisearch": "7.2.0",
@@ -51,7 +51,6 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.3",
-    "@types/better-sqlite3": "9.6.0",
     "@types/node": "20.19.43",
     "@types/prismjs": "1.26.6",
     "@types/react": "19.3.0",

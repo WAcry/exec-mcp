@@ -91,6 +91,30 @@ export class TerminalManager {
     this.timer.unref();
   }
 
+  getActiveSessions(): {
+    id: string;
+    exitCode?: number | undefined;
+    touched: number;
+    observers: number;
+    kind: "pipe" | "pty";
+    pid?: number | undefined;
+    bufferBytes: number;
+    bufferCapacityBytes: number;
+    omittedBytes: number;
+  }[] {
+    return [...this.sessions.values()].map((s) => ({
+      id: s.id,
+      exitCode: s.exitCode,
+      touched: s.touched,
+      observers: s.observers,
+      kind: s.backend.kind,
+      pid: s.backend.process.pid,
+      bufferBytes: s.buffer.bytes,
+      bufferCapacityBytes: s.buffer.capacity,
+      omittedBytes: s.buffer.omittedBytes,
+    }));
+  }
+
   async execCommand(
     input: ExecCommandInput,
     base: string,

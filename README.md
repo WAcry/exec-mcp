@@ -37,6 +37,19 @@ node dist/src/cli.js serve
 默认端点为 `http://127.0.0.1:8891/mcp`；本机就绪检查是同一地址的 `/readyz`。
 端口被占用时修改自己的配置，不要停止或接管其他程序。
 
+### Web UI 控制台
+
+`exec-mcp serve` 启动时，会自动就绪现代化的 Web UI 控制台：
+- **本机回环访问（免密）**：`http://localhost:8892/`
+- **局域网访问（0.0.0.0）**：`http://<局域网IP>:8892/?token=<随机高熵动态密钥>`
+- 支持 **Light Mode 与 Dark Mode** 实时无缝切换
+- 实时监听 ChatGPT 调用流（`exec`、`wait`、源代码展开、耗时分析）
+- 按 OpenAI 对话 Session（`_meta["openai/session"]`）自动分组与分页检索
+- 内部子调用链路（`tools.exec_command`、`tools.apply_patch`、下游 MCP）逐级追踪
+- 下游 MCP 服务配置与 BM25 `tool_search` 探针模拟器
+- 本机与项目 Skills 目录列表及字符预算监控
+- 交互式活动终端进程监控、产物文件附件生命周期管理与安全配置脱敏查看
+
 ## 配置
 
 默认配置位置：

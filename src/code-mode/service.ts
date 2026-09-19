@@ -291,6 +291,62 @@ export class CodeModeService {
     return this.#closePromise;
   }
 
+  getNativeSessions() {
+    return this.#pool.getNativeSessions();
+  }
+
+  async getMemoryStatus(): Promise<{
+    highWaterBytes: number;
+    highWaterMib: number;
+    rssBytes?: number | undefined;
+    sampledAt?: string | undefined;
+    status: "normal" | "elevated" | "exceeded" | "unsampled";
+    hostPid?: number | undefined;
+    idleRetentionHours: number;
+  }> {
+    const host = this.#host.identity;
+    const highWaterBytes = this.#memoryHighWater;
+    const highWaterMib = Math.round(highWaterBytes / (1024 * 1024));
+    const idleRetentionHours = Math.round(
+      this.#pool.retentionIdleMs / 3_600_000,
+    );
+    if (!host) {
+      return {
+        highWaterBytes,
+        highWaterMib,
+        status: "unsampled",
+        idleRetentionHours,
+      };
+    }
+    try {
+      const bytes = await this.#readMemory(host);
+      const lowWater = highWaterBytes * 0.75;
+      let status: "normal" | "elevated" | "exceeded" = "normal";
+      if (bytes > highWaterBytes) {
+        status = "exceeded";
+      } else if (bytes > lowWater) {
+        status = "elevated";
+      }
+      return {
+        highWaterBytes,
+        highWaterMib,
+        rssBytes: bytes,
+        sampledAt: new Date().toISOString(),
+        status,
+        hostPid: host.pid,
+        idleRetentionHours,
+      };
+    } catch {
+      return {
+        highWaterBytes,
+        highWaterMib,
+        status: "unsampled",
+        hostPid: host.pid,
+        idleRetentionHours,
+      };
+    }
+  }
+
   /** Also callable by tests/embedding code; this is maintenance, not a model tool. */
   checkMemory(): Promise<void> {
     if (this.#stopping) return Promise.resolve();

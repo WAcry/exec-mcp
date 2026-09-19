@@ -6,7 +6,7 @@
 
 ## 1. 公共 npm 安装与启动后的 Web UI
 
-状态：计划中，尚未公开发布 npm 包，也未实现产品 Web UI。
+状态：已完成 Web UI 本地控制台开发（支持 Light/Dark 模式、0.0.0.0 动态随机密钥授权、127.0.0.1 免密访问、ChatGPT 实时调用流与 Session 分组分页、子调用耗时与详情、下游 MCP/Skills/终端监控）；待公开发布 npm 包。
 
 计划发布到公共 npm registry，让用户通过 **npm install 安装、命令行启动**。
 Windows、macOS、Linux 都沿用这一方式，不要求额外的桌面安装器。

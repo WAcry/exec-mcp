@@ -63,6 +63,48 @@ export class SessionPool {
   get size(): number {
     return [...this.#entries].filter((entry) => !entry.retired).length;
   }
+  get retentionIdleMs(): number {
+    return this.idleMs;
+  }
+
+  getNativeSessions(): Array<{
+    id: string;
+    scope?: string | undefined;
+    users: number;
+    idleSince: number;
+    lastUsed: number;
+    generation: number;
+    activeCellCount: number;
+    activeCellIds: string[];
+    retired?: RetirementReason | undefined;
+    isOldestIdle: boolean;
+    isOldestActive: boolean;
+  }> {
+    const activeEntries = [...this.#entries].filter((e) => !e.retired);
+    const idleEntries = activeEntries
+      .filter((e) => e.users === 0)
+      .sort((a, b) => a.idleSince - b.idleSince);
+    const busyEntries = activeEntries
+      .filter((e) => e.users > 0)
+      .sort((a, b) => a.lastUsed - b.lastUsed);
+
+    const oldestIdle = idleEntries[0];
+    const oldestBusy = busyEntries[0];
+
+    return [...this.#entries].map((entry) => ({
+      id: entry.session?.id ?? `session-gen-${entry.generation}`,
+      scope: entry.scope,
+      users: entry.users,
+      idleSince: entry.idleSince,
+      lastUsed: entry.lastUsed,
+      generation: entry.generation,
+      activeCellCount: entry.session?.activeCellCount ?? 0,
+      activeCellIds: entry.session?.activeCellIds ?? [],
+      retired: entry.retired,
+      isOldestIdle: entry === oldestIdle,
+      isOldestActive: entry === oldestBusy,
+    }));
+  }
 
   async acquire(scope: string | undefined): Promise<SessionLease> {
     if (this.#closed) throw new Error("Code Mode session 池已关闭。");

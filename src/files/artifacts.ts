@@ -71,6 +71,10 @@ export class ArtifactStore {
     this.#timer.unref();
   }
 
+  getActiveArtifacts(): ExportInfo[] {
+    return [...this.#records.values()].map((r) => ({ ...r.info }));
+  }
+
   importFile(
     file: HostFile,
     destination: string,

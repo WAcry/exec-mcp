@@ -33,6 +33,8 @@ import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
 import { resolveShell } from "./host/shell.js";
 import { MEMORY_SCHEMA, MiB } from "./memory.js";
+import { ActivityStore } from "./web/activity.js";
+import type { CallRecord } from "./web/types.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -46,15 +48,20 @@ export class ExecRuntime {
   readonly downstream: DownstreamMcpRegistry;
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
+  readonly activity: ActivityStore;
   private closing: Promise<void> | undefined;
-  private readonly skillMaxChars: number;
-  private readonly idleHours: number;
-  private readonly skillConfig: readonly SkillSetting[];
+  readonly skillMaxChars: number;
+  readonly idleHours: number;
+  readonly skillConfig: readonly SkillSetting[];
   private readonly native: ReturnType<typeof nativeContracts>;
   private readonly securitySchemes:
     | { type: string; scopes?: string[] }[]
     | undefined;
-  constructor(config: Config, artifacts?: ArtifactStore) {
+  constructor(
+    config: Config,
+    artifacts?: ArtifactStore,
+    activity?: ActivityStore,
+  ) {
     this.securitySchemes =
       config.access === "openai-tunnel"
         ? [{ type: "noauth" }]
@@ -81,6 +88,7 @@ export class ExecRuntime {
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
     this.discovery = new ToolDiscovery(this.downstream);
+    this.activity = activity ?? new ActivityStore();
   }
   get ready(): boolean {
     return this.closing === undefined;
@@ -115,6 +123,30 @@ export class ExecRuntime {
       },
       async (args, context) => {
         const scope = sessionScope(context);
+        const callArgs: CallRecord["args"] = {
+          ...(args.source !== undefined ? { source: args.source } : {}),
+          ...(args.workdir !== undefined ? { workdir: args.workdir } : {}),
+          ...(args.yield_time_ms !== undefined
+            ? { yield_time_ms: args.yield_time_ms }
+            : {}),
+          ...(args.max_output_tokens !== undefined
+            ? { max_output_tokens: args.max_output_tokens }
+            : {}),
+          ...(args.files !== undefined
+            ? {
+                files: args.files.map((f) => ({
+                  ...(typeof f.name === "string" ? { name: f.name } : {}),
+                  ...(typeof f.size === "number" ? { size: f.size } : {}),
+                  ...(typeof f.type === "string" ? { type: f.type } : {}),
+                })),
+              }
+            : {}),
+        };
+        const callTracker = this.activity.startCall({
+          tool: "exec",
+          sessionId: scope ?? "default",
+          args: callArgs,
+        });
         let pending: { id: string; content: ResourceLink }[] = [];
         let pendingBytes = 0;
         const takeAttachments = () => {
@@ -136,114 +168,152 @@ export class ExecRuntime {
             throw new Error("workdir 必须是目录。");
           const tools = this.native.map((contract) =>
             bindNative(contract, async (input, nested) => {
-              switch (contract.name) {
-                case "list_skills": {
-                  const requested = (input as { workdir?: string }).workdir;
-                  const workdir =
-                    requested === undefined
-                      ? args.workdir === undefined
-                        ? undefined
-                        : cwd
-                      : resolveUserPath(requested, cwd);
-                  return listSkills({
-                    ...(workdir === undefined ? {} : { workdir }),
-                    maxChars: this.skillMaxChars,
-                    config: this.skillConfig,
-                    signal: nested.signal,
-                  });
-                }
-                case "import_file": {
-                  const inputFile = input as {
-                    index: number;
-                    destination: string;
-                    overwrite?: boolean;
-                  };
-                  const file = args.files?.[inputFile.index];
-                  if (!file)
-                    throw new Error(
-                      "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
-                    );
-                  return this.artifacts.importFile(
-                    file,
-                    inputFile.destination,
-                    cwd,
-                    inputFile.overwrite,
-                    nested.signal,
-                  );
-                }
-                case "export_file": {
-                  if (pendingBytes + 4096 > 1024 * 1024)
-                    throw new Error(
-                      "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
-                    );
-                  const file = input as {
-                    path: string;
-                    name?: string;
-                    delivery?: "resource" | "url";
-                  };
-                  const exported = await this.artifacts.exportFile(
-                    file.path,
-                    cwd,
-                    scope,
-                    file.delivery,
-                    file.name,
-                    nested.signal,
-                  );
-                  const bytes = Buffer.byteLength(
-                    JSON.stringify(exported.content),
-                  );
-                  if (pendingBytes + bytes > 1024 * 1024) {
-                    await this.artifacts.revoke(exported.info.id, scope);
-                    throw new Error(
-                      "文件链接元数据超出单次响应预算；本次导出已撤销。",
-                    );
+              const subcallStart = Date.now();
+              try {
+                let subcallResult: unknown;
+                switch (contract.name) {
+                  case "list_skills": {
+                    const requested = (input as { workdir?: string }).workdir;
+                    const workdir =
+                      requested === undefined
+                        ? args.workdir === undefined
+                          ? undefined
+                          : cwd
+                        : resolveUserPath(requested, cwd);
+                    subcallResult = await listSkills({
+                      ...(workdir === undefined ? {} : { workdir }),
+                      maxChars: this.skillMaxChars,
+                      config: this.skillConfig,
+                      signal: nested.signal,
+                    });
+                    break;
                   }
-                  pending.push({
-                    id: exported.info.id,
-                    content: exported.content,
-                  });
-                  pendingBytes += bytes;
-                  return exported.info;
+                  case "import_file": {
+                    const inputFile = input as {
+                      index: number;
+                      destination: string;
+                      overwrite?: boolean;
+                    };
+                    const file = args.files?.[inputFile.index];
+                    if (!file)
+                      throw new Error(
+                        "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
+                      );
+                    subcallResult = await this.artifacts.importFile(
+                      file,
+                      inputFile.destination,
+                      cwd,
+                      inputFile.overwrite,
+                      nested.signal,
+                    );
+                    break;
+                  }
+                  case "export_file": {
+                    if (pendingBytes + 4096 > 1024 * 1024)
+                      throw new Error(
+                        "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
+                      );
+                    const file = input as {
+                      path: string;
+                      name?: string;
+                      delivery?: "resource" | "url";
+                    };
+                    const exported = await this.artifacts.exportFile(
+                      file.path,
+                      cwd,
+                      scope,
+                      file.delivery,
+                      file.name,
+                      nested.signal,
+                    );
+                    const bytes = Buffer.byteLength(
+                      JSON.stringify(exported.content),
+                    );
+                    if (pendingBytes + bytes > 1024 * 1024) {
+                      await this.artifacts.revoke(exported.info.id, scope);
+                      throw new Error(
+                        "文件链接元数据超出单次响应预算；本次导出已撤销。",
+                      );
+                    }
+                    pending.push({
+                      id: exported.info.id,
+                      content: exported.content,
+                    });
+                    pendingBytes += bytes;
+                    subcallResult = exported.info;
+                    break;
+                  }
+                  case "revoke_file":
+                    subcallResult = await this.artifacts.revoke(
+                      (input as { id: string }).id,
+                      scope,
+                    );
+                    break;
+                  case "exec_command":
+                    subcallResult = await this.terminal.execCommand(
+                      input as ExecCommandInput,
+                      cwd,
+                      nested.signal,
+                    );
+                    break;
+                  case "write_stdin":
+                    subcallResult = await this.terminal.writeStdin(
+                      input as WriteStdinInput,
+                      nested.signal,
+                    );
+                    break;
+                  case "apply_patch":
+                    subcallResult = await this.patch.apply(
+                      input as string,
+                      cwd,
+                      nested.signal,
+                    );
+                    break;
+                  case "view_image": {
+                    const imgArgs = input as { path: string; detail?: string };
+                    subcallResult = await viewImage(
+                      resolveUserPath(imgArgs.path, cwd),
+                      imgArgs.detail,
+                    );
+                    break;
+                  }
+                  case "tool_search": {
+                    const searchArgs = input as {
+                      query: string;
+                      limit?: number;
+                    };
+                    subcallResult = await this.discovery.search(
+                      searchArgs.query,
+                      searchArgs.limit ?? 8,
+                      nested.signal,
+                    );
+                    break;
+                  }
+                  default:
+                    throw new Error("未知本机工具。");
                 }
-                case "revoke_file":
-                  return this.artifacts.revoke(
-                    (input as { id: string }).id,
-                    scope,
-                  );
-                case "exec_command":
-                  return this.terminal.execCommand(
-                    input as ExecCommandInput,
-                    cwd,
-                    nested.signal,
-                  );
-                case "write_stdin":
-                  return this.terminal.writeStdin(
-                    input as WriteStdinInput,
-                    nested.signal,
-                  );
-                case "apply_patch":
-                  return this.patch.apply(input as string, cwd, nested.signal);
-                case "view_image": {
-                  const args = input as { path: string; detail?: string };
-                  return viewImage(
-                    resolveUserPath(args.path, cwd),
-                    args.detail,
-                  );
-                }
-                case "tool_search": {
-                  const args = input as { query: string; limit?: number };
-                  return this.discovery.search(
-                    args.query,
-                    args.limit ?? 8,
-                    nested.signal,
-                  );
-                }
-                default:
-                  throw new Error("未知本机工具。");
+                callTracker.recordSubcall({
+                  name: contract.name,
+                  durationMs: Date.now() - subcallStart,
+                  input,
+                  output: subcallResult,
+                  status: "success",
+                });
+                return subcallResult;
+              } catch (subErr) {
+                callTracker.recordSubcall({
+                  name: contract.name,
+                  durationMs: Date.now() - subcallStart,
+                  input,
+                  error:
+                    subErr instanceof Error ? subErr.message : String(subErr),
+                  status: "error",
+                });
+                throw subErr;
               }
             }),
           );
-          return await this.codeMode.exec({
+          const execResult = await this.codeMode.exec({
             source: args.source,
             takeAttachments,
             ...(args.max_output_tokens === undefined
@@ -256,9 +326,19 @@ export class ExecRuntime {
             ...(scope === undefined ? {} : { sessionScope: scope }),
             signal,
           });
+          callTracker.finish({
+            status: execResult.isError ? "error" : "completed",
+            output: execResult,
+          });
+          return execResult;
         } catch (error) {
           const result = toolError(error);
           result.content.push(...takeAttachments());
+          callTracker.finish({
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+            output: result,
+          });
           return result;
         }
       },
@@ -275,9 +355,26 @@ export class ExecRuntime {
           : {},
       },
       async (args, context) => {
+        const scope = sessionScope(context);
+        const waitArgs: CallRecord["args"] = {
+          cell_id: args.cell_id,
+          ...(args.yield_time_ms !== undefined
+            ? { yield_time_ms: args.yield_time_ms }
+            : {}),
+          ...(args.max_tokens !== undefined
+            ? { max_output_tokens: args.max_tokens }
+            : {}),
+          ...(args.terminate !== undefined
+            ? { terminate: args.terminate }
+            : {}),
+        };
+        const callTracker = this.activity.startCall({
+          tool: "wait",
+          sessionId: scope ?? "default",
+          args: waitArgs,
+        });
         try {
-          const scope = sessionScope(context);
-          return await this.codeMode.wait({
+          const waitResult = await this.codeMode.wait({
             cellId: args.cell_id,
             ...(args.max_tokens === undefined
               ? {}
@@ -291,8 +388,19 @@ export class ExecRuntime {
             ...(scope === undefined ? {} : { sessionScope: scope }),
             signal: context.mcpReq.signal,
           });
+          callTracker.finish({
+            status: waitResult.isError ? "error" : "completed",
+            output: waitResult,
+          });
+          return waitResult;
         } catch (error) {
-          return toolError(error);
+          const result = toolError(error);
+          callTracker.finish({
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+            output: result,
+          });
+          return result;
         }
       },
     );

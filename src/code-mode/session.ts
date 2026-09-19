@@ -100,6 +100,14 @@ export class CodeModeSession {
     return !this.#closed && this.#failure === undefined;
   }
 
+  get activeCellCount(): number {
+    return this.#cells.size;
+  }
+
+  get activeCellIds(): string[] {
+    return [...this.#cells.keys()];
+  }
+
   static async open(options: {
     admission?: WeightedAdmissionQueue;
     client: CodeModeHostClient;

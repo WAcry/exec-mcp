@@ -84,9 +84,13 @@ describe("trusted subprocess environment inheritance", () => {
         const expected = createHash("sha256")
           .update(JSON.stringify({ direct: fixture, child: fixture }))
           .digest("hex");
-        expect(stripVTControlCharacters(result.output).trim()).toBe(
-          `ENV_SHA256:${expected}`,
-        );
+        // Windows can also emit an OSC window title around the command output;
+        // environment integrity does not require an otherwise empty terminal stream.
+        expect(
+          stripVTControlCharacters(result.output).match(
+            /ENV_SHA256:[a-f0-9]{64}/g,
+          ),
+        ).toEqual([`ENV_SHA256:${expected}`]);
       } finally {
         for (const [key, value] of saved) {
           if (value === undefined) delete process.env[key];

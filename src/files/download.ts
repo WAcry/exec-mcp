@@ -1,7 +1,8 @@
 import { lookup } from "node:dns/promises";
-import { request } from "node:https";
-import { BlockList, isIP } from "node:net";
-import type { IncomingMessage } from "node:http";
+import { BlockList, isIP, type LookupFunction } from "node:net";
+import type { IncomingHttpHeaders } from "node:http";
+import type { Readable } from "node:stream";
+import { EnvironmentHttpClient } from "../network/http.js";
 
 const blocked4 = new BlockList();
 for (const [ip, prefix] of [
@@ -55,69 +56,79 @@ export function downloadUrl(value: string): URL {
     throw new Error("宿主文件地址必须是无凭据、无片段的 HTTPS 443 地址。");
   return url;
 }
+export type DownloadResponse = Readable & { headers: IncomingHttpHeaders };
 export type OpenDownload = (
   url: string,
   signal: AbortSignal,
-) => Promise<IncomingMessage>;
+) => Promise<DownloadResponse>;
 
-/** 只下载宿主绑定的 HTTPS 文件；固定已检查的 DNS 地址，不跟随重定向或系统代理。 */
+/** Direct connections resolve once and return only verified public addresses.
+ * Explicit proxies resolve destination hostnames themselves; their routing is trusted.
+ */
+export const publicLookup: LookupFunction = (hostname, options, callback) => {
+  let completed = false;
+  const timer = setTimeout(() => finish(new Error("文件地址解析超时。")), 5000);
+  timer.unref();
+  function finish(
+    error: Error | null,
+    addresses: { address: string; family: number }[] = [],
+  ) {
+    if (completed) return;
+    completed = true;
+    clearTimeout(timer);
+    if (error) callback(error, "", 0);
+    else if (options.all) callback(null, addresses);
+    else callback(null, addresses[0]!.address, addresses[0]!.family);
+  }
+  void lookup(hostname, { all: true, verbatim: true }).then(
+    (addresses) => {
+      if (
+        !addresses.length ||
+        addresses.some((item) => !isPublicAddress(item.address))
+      )
+        finish(new Error("宿主文件地址不得指向本机、私网或保留地址。"));
+      else finish(null, addresses);
+    },
+    () => finish(new Error("无法解析宿主文件地址。")),
+  );
+};
+
+/** Stream through the user's proxy settings on Node 20/22/24, never redirect or silently retry direct. */
 export const openDownload: OpenDownload = async (value, signal) => {
+  signal.throwIfAborted();
   const url = downloadUrl(value);
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const dnsSignal = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
-  const addresses = await new Promise<{ address: string; family: number }[]>(
-    (resolve, reject) => {
-      const abort = () => reject(new Error("文件地址解析被取消或超时。"));
-      if (dnsSignal.aborted) {
-        abort();
-        return;
-      }
-      dnsSignal.addEventListener("abort", abort, { once: true });
-      const task = isIP(host)
-        ? Promise.resolve([{ address: host, family: isIP(host) }])
-        : lookup(host, { all: true, verbatim: true });
-      void task
-        .then(resolve, () => reject(new Error("无法解析宿主文件地址。")))
-        .finally(() => dnsSignal.removeEventListener("abort", abort));
-    },
-  );
-  signal.throwIfAborted();
-  if (
-    !addresses.length ||
-    addresses.some((item) => !isPublicAddress(item.address))
-  )
+  if (isIP(host) && !isPublicAddress(host))
     throw new Error("宿主文件地址不得指向本机、私网或保留地址。");
-  return new Promise((resolve, reject) => {
-    const req = request(
-      url,
-      {
-        method: "GET",
-        signal,
-        agent: false,
-        headers: { "Accept-Encoding": "identity" },
-        lookup: (_hostname, options, callback) => {
-          if (options.all) callback(null, addresses);
-          else callback(null, addresses[0]!.address, addresses[0]!.family);
-        },
-      },
-      (response) => {
-        if (
-          response.statusCode !== 200 ||
-          (response.headers["content-encoding"] &&
-            response.headers["content-encoding"] !== "identity")
-        ) {
-          response.destroy();
-          reject(
-            new Error(
-              `文件下载被拒绝（HTTP ${response.statusCode ?? 0}）；不跟随重定向。`,
-            ),
-          );
-        } else resolve(response);
-      },
-    );
-    req.on("error", () =>
-      reject(new Error("文件下载连接失败或取消；下载凭据未回显。")),
-    );
-    req.end();
+  const client = new EnvironmentHttpClient(process.env, {
+    directLookup: publicLookup,
   });
+  let failure =
+    "文件下载失败或取消（检查代理、地址和响应）；下载及代理凭据未回显，不直接重试。";
+  try {
+    const response = await client.get(url, signal);
+    // Own abort/error events even when rejecting a response before a consumer attaches.
+    const cleanup = () => {
+      void client.close().catch(() => undefined);
+    };
+    response.body.once("end", cleanup);
+    response.body.once("close", cleanup);
+    response.body.once("error", cleanup);
+    if (
+      response.statusCode !== 200 ||
+      (response.headers["content-encoding"] &&
+        response.headers["content-encoding"] !== "identity")
+    ) {
+      response.body.destroy();
+      failure = `文件下载被拒绝（HTTP ${response.statusCode}）；不跟随重定向。`;
+      throw new Error(failure);
+    }
+    const body: DownloadResponse = Object.assign(response.body, {
+      headers: response.headers,
+    });
+    return body;
+  } catch {
+    await client.close().catch(() => undefined);
+    throw new Error(failure);
+  }
 };

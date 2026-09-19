@@ -10,6 +10,7 @@ import {
   waitUntil,
 } from "../util.js";
 import { terminateProcessTree } from "./platform.js";
+import { inheritedEnvironment } from "../environment.js";
 import {
   resolveCommandShell,
   resolveShell,
@@ -235,11 +236,7 @@ export class TerminalManager {
       throw new AggregateError(failures, "未能清理全部自有终端进程。");
   }
   private environment(): Record<string, string> {
-    return Object.fromEntries(
-      Object.entries({ ...process.env, EXEC_MCP_CHILD: "1" }).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    );
+    return inheritedEnvironment();
   }
   private append(session: Session, text: string): void {
     if (!this.sessions.has(session.id)) return;

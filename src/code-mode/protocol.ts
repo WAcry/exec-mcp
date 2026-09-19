@@ -79,6 +79,8 @@ export function createCodeModeHostClient(address: string): CodeModeHostClient {
   return new hostConstructor(address, grpc.credentials.createInsecure(), {
     "grpc.max_receive_message_length": HOST_GRPC_FRAME_BYTES,
     "grpc.max_send_message_length": HOST_GRPC_FRAME_BYTES,
+    // Private loopback IPC to our owned host, not an outbound HTTP request.
+    "grpc.enable_http_proxy": 0,
   });
 }
 

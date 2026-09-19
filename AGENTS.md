@@ -50,6 +50,7 @@ Backlog 不覆盖生效 ADR，也不授权自动开始实现；计划状态变�
 | 原生附件、文件导入导出、资源读取与下载 URL | [ADR-005：文件传输与交付边界](docs/adr-005-file-transfer.md) |
 | Skill 发现、软链接、显式调用策略与目录预算 | [ADR-006：一次发现的 Skill 目录](docs/adr-006-skill-catalog.md) |
 | Shell 默认值、单次覆盖及精简动态契约 | [ADR-007：默认命令 Shell 与单次覆盖](docs/adr-007-command-shell.md) |
+| 完整环境继承、出站代理与 Node 20 兼容 | [ADR-008：环境、代理与 Node 20](docs/adr-008-environment-and-proxy.md) |
 
 ## 实现与验证
 

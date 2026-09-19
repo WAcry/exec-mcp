@@ -7,15 +7,16 @@
 工具说明使用中文；支持 ChatGPT 文件导入和产物交付，当前没有控制面板、内建 Skills 管理或问题表单。
 
 > **当前是可从源码运行的首版，尚未发布 npm 包或正式安装器。**
-> Linux、Windows、macOS 的 Node 22/24 CI 已验证真实执行与独立打包安装（含管道和 PTY）。
-> 验证覆盖 CI 使用的系统与架构，不等于已经覆盖所有操作系统版本或 CPU 架构。
+> CI 包含 Linux、Windows、macOS 的 Node 20/22/24 真实执行与独立打包安装验证（含管道和 PTY）。
+> 平台状态以对应运行结果为准，不等于已经覆盖所有操作系统版本或 CPU 架构。
 > OpenAI Tunnel 的真实 ChatGPT 连接仍需使用者的 Tunnel 权限与密钥完成验证。
 
 已计划但尚未交付的方向见 [Backlog](docs/BACKLOG.md)，不代表当前已可用功能。
 
 ## 从源码启动
 
-需要 Node.js 22.19 以上、低于 27 的版本和 npm；优先使用 Node 22 或 24。
+支持 Node.js 20.19+，以及 22.19 以上、低于 27 的版本和 npm；新部署优先使用 Node 22 或 24。
+Node 20 已结束上游维护，这里保留兼容支持，不代表重新获得安全维护。
 Windows 使用 PowerShell 或 pwsh，不要求 WSL，也不支持仅有 cmd.exe 的命令环境。
 安装依赖需要联网，首次安装也会获取固定版本的本机执行组件。
 
@@ -72,6 +73,27 @@ port = 8891
 stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
 配置修改后重启 exec-mcp。配置可能含凭据，不要提交、分享或复制到对话中。
+
+## 环境变量与网络代理
+
+命令、PTY 和下游 MCP 子进程完整继承启动 exec-mcp 时的环境，包括 API key、代理和自定义变量，
+不做环境变量白名单或黑名单过滤。下游 `[mcp_servers.<name>.env]` 的显式值只覆盖同名变量。
+服务不会自动把全部环境打印出来，但通过命令读取这些值是允许的；只给可信客户端和下游服务使用。
+
+本服务的 HTTP MCP 请求与 ChatGPT 附件下载会自动使用 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`，
+也支持对应的小写名称（小写优先）。Node 20/22/24 行为一致，无需额外启用 `NODE_USE_ENV_PROXY`。
+HTTPS_PROXY 缺失时继承 HTTP_PROXY；支持 HTTP/HTTPS 代理地址，代理认证可包含在用户自己的代理 URL 中。
+NO_PROXY 支持主机名、域名后缀、端口及 `*`，例如 `localhost,127.0.0.1,[::1],.internal.example`。
+代理连接失败不会偷偷直连；需要私有证书时使用 `NODE_EXTRA_CA_CERTS`，不要关闭 TLS 校验。
+代理变量应在启动服务前设置，修改后重启；没有新增一套代理配置或管理工具。
+
+子进程会拿到全部代理变量，但它是否采用这些变量取决于程序本身；这不是强制代理任意网络流量的 VPN。
+特别是 Node 20 的普通用户脚本需要其网络库支持代理，本服务不会给它注入 NODE_OPTIONS 或修改它的代码。
+单独启动的 OpenAI tunnel-client 同样需要在所需代理环境中启动，并遵循它自己的协议与代理支持；
+exec-mcp 不接管或重启它。HTTP_PROXY 也不会把入站的文件下载响应改成另一条出站连接。
+
+默认 `login=false` 保持不变：继承已有环境不需要加载 profile；加载 profile 可能覆盖 PATH/代理或引入启动副作用。
+需要时通过下面的配置或单次参数启用。只有内部父子进程之间的 Code Mode 回环 IPC 固定直连，不经外部 HTTP 代理。
 
 ## 命令 Shell
 
@@ -221,7 +243,7 @@ npm run test:package
 ```
 
 第二个命令会在临时目录打包并安装一个独立副本，验证 CLI、MCP 和真实补丁操作；
-不会发布软件包或安装全局服务。CI 定义了 Linux、Windows、macOS 的 Node 22/24 检查矩阵，
+不会发布软件包或安装全局服务。CI 定义了 Linux、Windows、macOS 的 Node 20/22/24 检查矩阵，
 平台状态以实际运行结果为准。
 
 开发者先读 [架构边界](ARCHITECTURE.md)，编码 Agent 从 [AGENTS.md](AGENTS.md) 开始。

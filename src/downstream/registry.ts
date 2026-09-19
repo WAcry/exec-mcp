@@ -13,10 +13,9 @@ import {
   type Tool,
   type Transport,
 } from "@modelcontextprotocol/client";
-import {
-  DEFAULT_INHERITED_ENV_VARS,
-  StdioClientTransport,
-} from "@modelcontextprotocol/client/stdio";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { inheritedEnvironment } from "../environment.js";
+import { EnvironmentHttpClient } from "../network/http.js";
 
 import type { DownstreamTool, JsonObject } from "../types.js";
 import { VERSION } from "../version.js";
@@ -70,6 +69,7 @@ export class DownstreamMcpRegistry {
   private readonly connectTimeoutMs: number;
   private readonly toolTimeoutMs: number;
   private readonly env: Environment;
+  private http: EnvironmentHttpClient | undefined;
   private readonly clientInfo: Implementation;
   private readonly connecting = new Map<string, Promise<ServerState>>();
   private readonly ready = new Map<string, ServerState>();
@@ -241,6 +241,7 @@ export class DownstreamMcpRegistry {
     this.connecting.clear();
     this.ready.clear();
     this.allStates.clear();
+    await this.http?.close();
   }
 
   private async ensureServer(
@@ -299,7 +300,13 @@ export class DownstreamMcpRegistry {
         },
       },
     });
-    const transport = createTransport(config, this.env);
+    const transport = createTransport(
+      config,
+      this.env,
+      config.transport === "stdio"
+        ? undefined
+        : (this.http ??= new EnvironmentHttpClient(this.env)),
+    );
     state = {
       config,
       client,
@@ -506,17 +513,19 @@ export function createDownstreamCodeName(
 function createTransport(
   config: DownstreamMcpServerConfig,
   environment: Environment,
+  http?: EnvironmentHttpClient,
 ): Transport {
   if (config.transport === "stdio") {
     return new StdioClientTransport({
       command: config.command,
       args: [...config.args],
-      env: { ...safeInheritedEnvironment(environment), ...config.env },
+      env: inheritedEnvironment(environment, config.env),
       stderr: "ignore",
       ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     });
   }
   return new StreamableHTTPClientTransport(new URL(config.url), {
+    fetch: http!.fetch,
     ...(Object.keys(config.headers).length === 0
       ? {}
       : { requestInit: { headers: { ...config.headers } } }),
@@ -582,18 +591,6 @@ function sanitizeCodeName(value: string): string {
     .map((character) => (/[A-Za-z0-9_]/u.test(character) ? character : "_"))
     .join("");
   return sanitized.length === 0 ? "_" : sanitized;
-}
-
-function safeInheritedEnvironment(
-  environment: Environment,
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (environment.TZ) result.TZ = environment.TZ;
-  for (const name of DEFAULT_INHERITED_ENV_VARS) {
-    const value = environment[name];
-    if (value !== undefined && !value.startsWith("()")) result[name] = value;
-  }
-  return result;
 }
 
 function combinedSignal(

@@ -28,6 +28,7 @@ Skill 发现只把远端文档的元数据交给 Agent，不自动装载正文�
 复用 Codex 的 Code Mode host 和 patch engine，不引入完整 App Server、模型客户端，
 也不共享机器上 Codex 的配置或会话数据库。
 平台适配负责系统路径、可执行文件、Shell 和进程树；不能把 Linux 的实现假设泄漏成产品约束。
+子进程完整继承受信任操作者的环境；本服务的出站 HTTP 统一采用兼容 Node 20 的环境代理，不接管任意用户进程的网络栈，见 [ADR-008](docs/adr-008-environment-and-proxy.md)。
 默认 Shell 在实例启动时确定并用于执行器和精简工具描述；单次覆盖不改变实例默认值或已有进程，见 [ADR-007](docs/adr-007-command-shell.md)。
 这些取舍见 [ADR-001](docs/adr-001-exec-runtime.md)。
 

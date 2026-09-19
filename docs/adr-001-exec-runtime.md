@@ -48,7 +48,7 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 发布必须验证各目标平台的 host、补丁入口和进程清理，不能只检查平台包“存在”。
 具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
 
-当前不提供产品 UI；未来 Web UI 仅列入 [Backlog](BACKLOG.md)，不是当前实现要求。
+可选独立 Web 管理控制台已交付，见 [ADR-009](adr-009-web-console.md)；不提供 ChatGPT 内嵌 Widget 或下游登录交互。
 不实现 `request_user_input`、Skill 安装/执行管理，
 也不增加 Workspace、子 Agent、持久任务或调度框架。
 本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。

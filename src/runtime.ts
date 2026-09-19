@@ -49,6 +49,8 @@ export class ExecRuntime {
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
   readonly activity: ActivityStore;
+  private initialization: Promise<void> | undefined;
+  private initialized = false;
   private closing: Promise<void> | undefined;
   readonly skillMaxChars: number;
   readonly idleHours: number;
@@ -93,7 +95,14 @@ export class ExecRuntime {
     this.activity = activity ?? new ActivityStore({ enabled: false });
   }
   get ready(): boolean {
-    return this.closing === undefined;
+    return this.initialized && this.closing === undefined;
+  }
+  initialize(...args: Parameters<ToolDiscovery["initialize"]>): Promise<void> {
+    this.initialization ??= this.discovery.initialize(...args).then(() => {
+      if (this.closing) throw new Error("服务正在关闭。");
+      this.initialized = true;
+    });
+    return this.initialization;
   }
   server(): McpServer {
     const server = new McpServer(

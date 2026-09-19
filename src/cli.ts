@@ -87,9 +87,44 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const config = await loadConfig(filename);
   const web = effectiveWebConfig(config.web);
   const activity = new ActivityStore({ enabled: web.enabled });
-  const server = await startServer(config, { activity });
+  const startup = new AbortController();
+  const cancelStartup = () => startup.abort(new Error("启动已取消。"));
+  process.once("SIGINT", cancelStartup);
+  process.once("SIGTERM", cancelStartup);
+  let server: Awaited<ReturnType<typeof startServer>>;
+  try {
+    server = await startServer(config, {
+      activity,
+      signal: startup.signal,
+      onDownstreamProgress: (event) =>
+        console.error(
+          event.status === "connecting"
+            ? `下游 MCP ${JSON.stringify(event.server)}：正在连接并读取全部工具…`
+            : event.status === "ready"
+              ? `下游 MCP ${JSON.stringify(event.server)}：已加载 ${event.tools} 个工具。`
+              : event.message,
+        ),
+    });
+  } finally {
+    process.removeListener("SIGINT", cancelStartup);
+    process.removeListener("SIGTERM", cancelStartup);
+  }
 
   let webServer: Awaited<ReturnType<typeof startWebServer>> | undefined;
+  let stopping = false;
+  const stop = (): void => {
+    if (stopping) return;
+    stopping = true;
+    const tasks = [server.close(), ...(webServer ? [webServer.close()] : [])];
+    void Promise.allSettled(tasks).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        console.error("服务关闭时发生清理错误。");
+        process.exitCode = 1;
+      }
+    });
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
   if (web.enabled) {
     try {
       webServer = await startWebServer(server.runtime, config, {
@@ -104,6 +139,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         `Web UI 服务启动失败，MCP 仍可使用：${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+  if (stopping) {
+    await webServer?.close();
+    return;
   }
 
   const webMsg = webServer
@@ -121,20 +160,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         : "仅允许受信任的 OpenAI 私有 Tunnel；不要公开此无认证端口。"
     }`,
   );
-  let stopping = false;
-  const stop = (): void => {
-    if (stopping) return;
-    stopping = true;
-    const tasks = [server.close(), ...(webServer ? [webServer.close()] : [])];
-    void Promise.allSettled(tasks).then((results) => {
-      if (results.some((result) => result.status === "rejected")) {
-        console.error("服务关闭时发生清理错误。");
-        process.exitCode = 1;
-      }
-    });
-  };
-  process.once("SIGINT", stop);
-  process.once("SIGTERM", stop);
 }
 // Node resolves the entry module through symlinks (/var -> /private/var on
 // macOS, npm bin links, etc.); argv[1] is not a canonical module identity.

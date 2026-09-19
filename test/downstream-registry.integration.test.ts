@@ -258,9 +258,9 @@ serveStdio(() => {
     state.failInitialize = true;
 
     await expect(registry.callTool(tool!.id)).rejects.toThrow("未自动重试");
-    expect(await registry.inventory()).toEqual({
+    expect(await registry.inventory()).toMatchObject({
       tools: [],
-      errors: { fixture: 'MCP server "fixture" failed to connect' },
+      errors: { fixture: expect.stringContaining('下游 MCP "fixture"') },
     });
     expect(state.callSessions).toEqual(["session-1"]);
 

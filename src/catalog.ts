@@ -268,7 +268,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "tool_search",
     schema: SEARCH_SCHEMA,
     description:
-      "按需连接配置的下游 MCP，缓存目录并进行 BM25 搜索。返回 {tools:[{name,description}],errors,note}，描述含完整契约。新发现或更新的方法从下一次 exec 可用；同一脚本不能调用尚未绑定的方法。",
+      "在已加载的下游目录中进行 BM25 搜索，返回 {tools:[{name,description}],errors}；description 含完整调用契约。",
   },
 ];
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -323,7 +323,7 @@ export function execDescription(
 本次默认目录来自 workdir；不同 exec 不共享普通 JS 变量或当前目录。Shell 的 cd 不改变工具默认目录，下游 MCP 参数不改写。
 store(key,value)/load(key) 使用原生对话内存存储；key 为字符串，未命中返回 undefined；需宿主的 openai/session。空闲 ${idleHours} 小时、内存压力回收或服务/host 重启后数据可能丢失；同一对话可重新 exec，旧 cell_id 不迁移。新 cell 读启动快照，host 完成时合并写入；脚本报错也可能提交。load 返回副本，修改后需 store，并发同键非事务；长期数据用文件。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 Promise.all，必须 await；未等待的 Promise 不是可靠后台任务。
-ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约。外部能力先 tools.tool_search；新方法下一次 exec 才绑定。不要猜名称或参数。
+ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
 返回值不会自动交给模型；text(value) 输出文字或 JSON，image(block)/audio(block) 输出原生媒体块，generatedImage({image_url,output_hint?}) 输出已有图片和可选说明，不调用生成 API；image_url 仅支持 base64 data URL，不接受 HTTP URL 或路径。MCP 返回先检查 isError，有 structuredContent 优先使用，仅从 content 补充不同内容，避免重复 JSON。
 audio() 沿用 host 规则：可识别且短于 25 ms 的 WAV 会改为说明文本，不返回该音频片段。
 超过等待窗口返回 Script running 与 cell_id，只用 wait 续取；yield_control() 主动交回累计输出并继续执行；exit() 结束脚本。setTimeout/clearTimeout 可用，但计时器必须通过 Promise 等待。notify 不支持。

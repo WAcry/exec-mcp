@@ -52,7 +52,7 @@ export function McpView() {
         </div>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          下游服务按需懒加载连接，不会在冷启动时拖慢本机命令。
+          所有启用的下游在服务就绪前完成连接与工具加载；检索只查询本地目录，不负责解锁工具。
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
@@ -187,7 +187,7 @@ export function McpView() {
           <div className="flex items-center gap-2">
             <Wrench className="w-4 h-4 text-zinc-400" />
             <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              已加载的 V8 工具快照 (ALL_TOOLS)
+              已加载的下游工具（下一次 exec 的目录）
             </h3>
           </div>
           <span className="text-xs font-mono text-zinc-400">
@@ -198,8 +198,8 @@ export function McpView() {
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
           {!data || data.tools.length === 0 ? (
             <div className="py-6 text-center text-zinc-400 text-xs">
-              当前尚未绑定下游工具。在执行中通过 tool_search 命中后将从下一次
-              exec 自动注入。
+              当前没有下游工具；请检查启用的服务是否提供工具，以及 enabled_tools
+              的目录选择。
             </div>
           ) : (
             data.tools.map((t) => (

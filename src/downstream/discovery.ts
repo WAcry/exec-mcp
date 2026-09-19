@@ -4,7 +4,10 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import type { CodeModeToolDefinition } from "../code-mode/types.js";
 import type { DownstreamTool } from "../types.js";
-import { DownstreamMcpRegistry } from "./registry.js";
+import {
+  DownstreamMcpRegistry,
+  type DownstreamStartupEvent,
+} from "./registry.js";
 import { buildToolSearchIndex, type ToolSearchIndex } from "./search.js";
 
 interface Prepared {
@@ -16,8 +19,15 @@ export class ToolDiscovery {
   private indexed: readonly Prepared[] = [];
   private index: ToolSearchIndex | undefined;
   constructor(private readonly registry: DownstreamMcpRegistry) {}
+  async initialize(
+    signal?: AbortSignal,
+    onProgress?: (event: DownstreamStartupEvent) => void,
+  ): Promise<void> {
+    await this.registry.initialize(signal, onProgress);
+    this.snapshot(); // Compile every input contract before declaring the instance ready.
+  }
   snapshot(): CodeModeToolDefinition[] {
-    return this.prepare(this.registry.catalogSnapshot()).map(
+    return this.prepare(this.registry.bindingSnapshot()).map(
       (entry) => entry.definition,
     );
   }
@@ -28,10 +38,9 @@ export class ToolDiscovery {
   ): Promise<{
     tools: { name: string; description: string }[];
     errors: Record<string, string>;
-    note: string;
   }> {
-    const inventory = await this.registry.inventory(signal);
-    const prepared = this.prepare(inventory.tools);
+    signal?.throwIfAborted();
+    const prepared = this.prepare(this.registry.bindingSnapshot());
     if (
       this.index === undefined ||
       prepared.length !== this.indexed.length ||
@@ -46,8 +55,7 @@ export class ToolDiscovery {
         const definition = this.cached.get(tool.codeName)!.definition;
         return { name: definition.name, description: definition.description };
       }),
-      errors: inventory.errors,
-      note: "新发现或更新的工具从下一次 exec 可调用；本次 ALL_TOOLS 与 tools 绑定保持不变。",
+      errors: this.registry.catalogErrors(),
     };
   }
   private prepare(tools: readonly DownstreamTool[]): Prepared[] {
@@ -61,7 +69,20 @@ export class ToolDiscovery {
         continue;
       }
       const schema = tool.tool.inputSchema;
-      let validate: ValidateFunction | undefined;
+      const ajv =
+        typeof schema.$schema === "string" &&
+        schema.$schema.includes("draft-07")
+          ? new Ajv({ strict: false, allErrors: true })
+          : new Ajv2020({ strict: false, allErrors: true });
+      formats.default(ajv);
+      let validate: ValidateFunction;
+      try {
+        validate = ajv.compile(schema);
+      } catch {
+        throw new Error(
+          `无法校验工具输入契约：${tool.codeName}；请修正下游 schema 后重启，未发送工具调用。`,
+        );
+      }
       const description = [
         `来源：${tool.serverId}。${tool.namespaceInstructions ? `服务说明（原文）：${tool.namespaceInstructions}\n` : ""}${tool.tool.description ?? ""}`,
         `调用：await tools.${tool.codeName}(args)。args 必须满足以下 JSON Schema：`,
@@ -81,21 +102,6 @@ export class ToolDiscovery {
         description,
         inputSchema: schema,
         call: async (args, context) => {
-          if (validate === undefined) {
-            const ajv =
-              typeof schema.$schema === "string" &&
-              schema.$schema.includes("draft-07")
-                ? new Ajv({ strict: false, allErrors: true })
-                : new Ajv2020({ strict: false, allErrors: true });
-            formats.default(ajv);
-            try {
-              validate = ajv.compile(schema);
-            } catch {
-              throw new Error(
-                `无法校验工具输入契约：${tool.codeName}；未发送调用。`,
-              );
-            }
-          }
           if (!validate(args))
             throw new Error(
               `工具 ${tool.codeName} 参数不符：${validate.errors?.map((error) => `${error.instancePath || "/"} ${error.keyword}`).join(", ")}；未发送调用。`,

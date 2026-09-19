@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -133,76 +133,91 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
     expect(texts(last).join("\n")).toContain("done");
   });
 });
-describe("lazy discovery over actual MCP", () => {
-  it("discovers on demand, calls only on the next snapshot, validates and deduplicates", async () => {
-    const marker = path.join(await directory(), "calls.txt");
-    const { client } = await connection({ mcpServers: [fixture(marker)] });
-    await client.listTools();
-    await exec(client, "text(ALL_TOOLS.map(t=>t.name));");
-    await expect(stat(marker)).rejects.toThrow();
-    const search = await exec(
-      client,
-      'const r=await tools.tool_search({query:"求和"});text({r,bound:typeof tools.mcp__fixture__add});',
-    );
-    expect(jsonOutput(search)).toMatchObject({
-      bound: "undefined",
-      r: { errors: {}, tools: [{ name: "mcp__fixture__add" }] },
+describe.each([false, true])(
+  "startup discovery over actual MCP (legacy=%s)",
+  (legacy) => {
+    it("binds a known name on the first exec and searches/calls within one snapshot", async () => {
+      const marker = path.join(await directory(), "calls.txt");
+      const { client } = await connection(
+        { mcpServers: [fixture(marker)] },
+        legacy,
+      );
+      // The official SDK may start a disposable stdio protocol-negotiation probe.
+      expect(await readFile(marker, "utf8")).toMatch(/^(started\n)+$/);
+      const direct = await exec(
+        client,
+        "text(await tools.mcp__fixture__add({value:9}));",
+      );
+      expect(jsonOutput(direct)).toMatchObject({
+        structuredContent: { value: 10 },
+      });
+      await client.listTools();
+      expect(
+        jsonOutput(await exec(client, "text(ALL_TOOLS.map(t=>t.name));")),
+      ).toContain("mcp__fixture__add");
+      const search = await exec(
+        client,
+        'const r=await tools.tool_search({query:"求和"});text({r,bound:typeof tools.mcp__fixture__add,result:await tools[r.tools[0].name]({value:4})});',
+      );
+      expect(jsonOutput(search)).toMatchObject({
+        bound: "function",
+        r: { errors: {}, tools: [{ name: "mcp__fixture__add" }] },
+        result: { structuredContent: { value: 5 } },
+      });
+      expect(
+        jsonOutput<{ r: Record<string, unknown> }>(search).r,
+      ).not.toHaveProperty("note");
+      const result = await exec(
+        client,
+        "text(await tools.mcp__fixture__add({value:2}));",
+      );
+      expect(jsonOutput(result)).toMatchObject({
+        structuredContent: { value: 3 },
+        content: [{ type: "text", text: "distinct note" }],
+      });
+      const before = await readFile(marker, "utf8");
+      const invalid = await exec(
+        client,
+        'text(await tools.mcp__fixture__add({value:"bad"}));',
+      );
+      expect(invalid.isError).toBe(true);
+      expect(texts(invalid).join("\n")).toContain("未发送调用");
+      expect(await readFile(marker, "utf8")).toBe(before);
+      const failed = await exec(
+        client,
+        "text(await tools.mcp__fixture__add({value:-1}));",
+      );
+      expect(jsonOutput(failed)).toMatchObject({ isError: true });
     });
-    expect(JSON.stringify(jsonOutput(search))).toContain("下一次 exec");
-    const result = await exec(
-      client,
-      "text(await tools.mcp__fixture__add({value:2}));",
-    );
-    expect(jsonOutput(result)).toMatchObject({
-      structuredContent: { value: 3 },
-      content: [{ type: "text", text: "distinct note" }],
+    it("refuses to declare readiness with an unavailable enabled downstream", async () => {
+      await expect(
+        connection(
+          {
+            mcpServers: [
+              {
+                name: "offline",
+                transport: "streamable-http",
+                url: "http://127.0.0.1:1/mcp",
+                headers: {},
+                startupTimeoutMs: 100,
+              },
+            ],
+          },
+          legacy,
+        ),
+      ).rejects.toThrow('下游 MCP "offline"');
     });
-    const before = await readFile(marker, "utf8");
-    const invalid = await exec(
-      client,
-      'text(await tools.mcp__fixture__add({value:"bad"}));',
-    );
-    expect(invalid.isError).toBe(true);
-    expect(texts(invalid).join("\n")).toContain("未发送调用");
-    expect(await readFile(marker, "utf8")).toBe(before);
-    const failed = await exec(
-      client,
-      "text(await tools.mcp__fixture__add({value:-1}));",
-    );
-    expect(jsonOutput(failed)).toMatchObject({ isError: true });
-  });
-  it("does not block local calls on an unrelated unavailable downstream", async () => {
-    const { client } = await connection({
-      mcpServers: [
-        {
-          name: "offline",
-          transport: "streamable-http",
-          url: "http://127.0.0.1:1/mcp",
-          headers: {},
-          startupTimeoutMs: 100,
-        },
-      ],
+    it("keeps names stable and disambiguates normalization collisions", () => {
+      expect(createDownstreamCodeName("a", "b")).toBe("mcp__a__b");
+      expect(createDownstreamCodeName("a-b", "c")).not.toBe(
+        createDownstreamCodeName("a_b", "c"),
+      );
+      expect(createDownstreamCodeName("a__b", "c")).not.toBe(
+        createDownstreamCodeName("a", "b__c"),
+      );
     });
-    const result = await exec(client, "text(42)");
-    expect(jsonOutput(result)).toBe(42);
-    const search = await exec(
-      client,
-      'text(await tools.tool_search({query:"anything"}));',
-    );
-    expect(
-      jsonOutput<{ errors: Record<string, string> }>(search).errors.offline,
-    ).toBeTruthy();
-  });
-  it("keeps names stable and disambiguates normalization collisions", () => {
-    expect(createDownstreamCodeName("a", "b")).toBe("mcp__a__b");
-    expect(createDownstreamCodeName("a-b", "c")).not.toBe(
-      createDownstreamCodeName("a_b", "c"),
-    );
-    expect(createDownstreamCodeName("a__b", "c")).not.toBe(
-      createDownstreamCodeName("a", "b__c"),
-    );
-  });
-});
+  },
+);
 describe("ingress boundaries", () => {
   it("rejects hostile Origin and Host, and only serves the MCP path", async () => {
     const server = await connection();

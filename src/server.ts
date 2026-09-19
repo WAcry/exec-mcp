@@ -27,6 +27,7 @@ import {
 import { validatePublicAccess } from "./http/access-config.js";
 
 import type { ActivityStore } from "./web/activity.js";
+import type { DownstreamStartupEvent } from "./downstream/registry.js";
 
 export async function startServer(
   config: Config,
@@ -34,6 +35,8 @@ export async function startServer(
     artifacts?: ArtifactStore;
     authFetch?: typeof fetch;
     activity?: ActivityStore;
+    signal?: AbortSignal;
+    onDownstreamProgress?: (event: DownstreamStartupEvent) => void;
   } = {},
 ): Promise<{
   url: string;
@@ -42,6 +45,7 @@ export async function startServer(
   close(): Promise<void>;
 }> {
   validatePublicAccess(config);
+  options.signal?.throwIfAborted();
   const access =
     config.access === "public"
       ? new PublicAccess(
@@ -59,11 +63,13 @@ export async function startServer(
   }
   let downloads: Awaited<ReturnType<typeof startDownloadGateway>> | undefined;
   try {
+    // No MCP, Web or file-download listener is published with a partial catalog.
+    await runtime.initialize(options.signal, options.onDownstreamProgress);
+    options.signal?.throwIfAborted();
     if (runtime.artifacts.config.download)
       downloads = await startDownloadGateway(runtime.artifacts);
   } catch (error) {
-    await runtime.close();
-    await access?.close();
+    await Promise.allSettled([runtime.close(), access?.close()]);
     throw error;
   }
   const onerror = (): void => {
@@ -164,6 +170,7 @@ export async function startServer(
   server.requestTimeout = 120_000;
   server.headersTimeout = 15_000;
   try {
+    options.signal?.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(config.port, config.host, () => {

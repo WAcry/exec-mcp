@@ -40,7 +40,8 @@ const downstreamSchema = z
   .object({
     enabled: z.boolean().default(true),
     enabled_tools: z.array(z.string()).optional(),
-    startup_timeout_sec: z.number().positive().max(110).optional(),
+    // Startup is not a connector call. Bound only by Node's timer range.
+    startup_timeout_sec: z.number().min(0.001).max(2_147_483.647).optional(),
     tool_timeout_sec: z.number().positive().optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),

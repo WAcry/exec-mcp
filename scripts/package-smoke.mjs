@@ -103,6 +103,17 @@ try {
   assert.match(aliasHelp.stdout, /init\|serve\|doctor/);
   await executeCli(["init", "--config", config]);
   const originalConfig = await readFile(config, "utf8");
+  const downstream = path.join(isolated, "packaged downstream.mjs");
+  await writeFile(
+    downstream,
+    `
+import {Server} from '@modelcontextprotocol/server';
+import {serveStdio} from '@modelcontextprotocol/server/stdio';
+serveStdio(()=>{const s=new Server({name:'packaged',version:'1'},{capabilities:{tools:{}}});
+s.setRequestHandler('tools/list',async()=>({tools:[{name:'echo',inputSchema:{type:'object'}}]}));
+s.setRequestHandler('tools/call',async()=>({content:[{type:'text',text:'PACKAGED_DIRECT_CALL'}]}));return s;});
+`,
+  );
   await writeFile(
     config,
     originalConfig.replace("port = 8891", "port = 0") +
@@ -110,6 +121,11 @@ try {
 [web]
 host = "127.0.0.1"
 port = 0
+
+[mcp_servers.packaged]
+command = ${JSON.stringify(process.execPath)}
+args = ${JSON.stringify([downstream])}
+startup_timeout_sec = 10
 
 [[skills.config]]
 name = "packaged-disabled"
@@ -164,6 +180,13 @@ enabled = true
     { versionNegotiation: { mode: "auto" } },
   );
   await client.connect(new StreamableHTTPClientTransport(new URL(started.mcp)));
+  // A known downstream method works on the first exec, without tool_search.
+  const direct = await client.callTool({
+    name: "exec",
+    arguments: { source: "text(await tools.mcp__packaged__echo({}));" },
+  });
+  assert.ok(!direct.isError, JSON.stringify(direct));
+  assert.match(JSON.stringify(direct.content), /PACKAGED_DIRECT_CALL/);
   const webPage = await fetch(started.web);
   assert.equal(webPage.status, 200);
   assert.match(await webPage.text(), /EXEC MCP 控制台/);

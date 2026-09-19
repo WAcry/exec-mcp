@@ -24,6 +24,8 @@ const terminals: TerminalManager[] = [];
 const directories: string[] = [];
 const SKILL_RULE =
   "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
+const FILE_EDIT_RULE =
+  "创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -78,6 +80,7 @@ describe("self-contained model-visible contracts", () => {
     ]);
     const description = execDescription(contracts);
     expect(description).toContain("V8 本身");
+    expect(description.split("本机及发现契约：")[0]).toContain(FILE_EDIT_RULE);
     expect(description).toContain(
       "文件与网络等外部操作由 tools.* 在实际机器执行",
     );
@@ -187,6 +190,9 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     const listed = (await connection.client.listTools()).tools;
     expect(listed.map((tool) => tool.name)).toEqual(["exec", "wait"]);
     expect(listed[0]!.description).not.toContain("revoke_file");
+    expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
+      FILE_EDIT_RULE,
+    );
     expect(listed[0]!.description).toContain(SKILL_RULE);
     expect(listed[0]!.description).toContain(
       "对下游 MCP 的 CallToolResult，先检查 isError",

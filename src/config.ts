@@ -5,6 +5,14 @@ import { z } from "zod/v4";
 import { configDirectory } from "./host/platform.js";
 import { resolveUserPath } from "./util.js";
 import type { ExecutionConfig } from "./host/shell.js";
+import {
+  AUTH_SCHEMA,
+  TUNNEL_SCHEMA,
+  PUBLIC_URL_SCHEMA,
+  validatePublicAccess,
+  type AuthConfig,
+  type TunnelConfig,
+} from "./http/access-config.js";
 import type { DownstreamMcpServerConfig } from "./downstream/config.js";
 import { FILE_CONFIG_SCHEMA, type FileConfig } from "./files/contracts.js";
 import {
@@ -16,9 +24,10 @@ import {
 const strings = z.record(z.string(), z.string());
 const serverSchema = z
   .object({
-    access: z.literal("openai-tunnel"),
+    access: z.enum(["openai-tunnel", "public"]),
     host: z.enum(["127.0.0.1", "::1"]).default("127.0.0.1"),
     port: z.number().int().min(0).max(65535).default(8891),
+    public_url: PUBLIC_URL_SCHEMA.optional(),
   })
   .strict();
 const downstreamSchema = z
@@ -61,6 +70,8 @@ const downstreamSchema = z
 const configSchema = z
   .object({
     server: serverSchema,
+    auth: AUTH_SCHEMA.optional(),
+    tunnel: TUNNEL_SCHEMA.optional(),
     files: FILE_CONFIG_SCHEMA.optional(),
     skills: SKILLS_CONFIG_SCHEMA.optional(),
     execution: z
@@ -79,7 +90,10 @@ const configSchema = z
 export interface Config {
   host: "127.0.0.1" | "::1";
   port: number;
-  access: "openai-tunnel";
+  access: "openai-tunnel" | "public";
+  public_url?: string | undefined;
+  auth?: AuthConfig;
+  tunnel?: TunnelConfig;
   mcpServers: DownstreamMcpServerConfig[];
   files?: FileConfig;
   skills?: SkillsConfig;
@@ -103,7 +117,27 @@ export function parseConfig(text: string, filename: string): Config {
     throw new Error(
       `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
     );
-  const { server, mcp_servers, files, skills, execution } = parsed.data;
+  const { server, mcp_servers, files, skills, execution, auth, tunnel } =
+    parsed.data;
+  validatePublicAccess({
+    ...server,
+    ...(auth ? { auth } : {}),
+    ...(tunnel ? { tunnel } : {}),
+  });
+  if (tunnel?.provider === "cloudflare")
+    tunnel.token_file = resolveUserPath(
+      tunnel.token_file,
+      path.dirname(filename),
+    );
+  if (
+    tunnel?.executable &&
+    (tunnel.executable.includes("/") ||
+      (process.platform === "win32" && tunnel.executable.includes("\\")))
+  )
+    tunnel.executable = resolveUserPath(
+      tunnel.executable,
+      path.dirname(filename),
+    );
   if (skills?.config) {
     skills.config = skills.config.map((setting) =>
       "path" in setting
@@ -155,6 +189,8 @@ export function parseConfig(text: string, filename: string): Config {
   return {
     ...server,
     mcpServers,
+    ...(auth === undefined ? {} : { auth }),
+    ...(tunnel === undefined ? {} : { tunnel }),
     ...(files === undefined ? {} : { files }),
     ...(skills === undefined ? {} : { skills }),
     ...(execution === undefined

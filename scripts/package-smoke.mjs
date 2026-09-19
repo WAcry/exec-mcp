@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import {
   Client,
@@ -362,8 +362,36 @@ enabled = true
   );
   assert.ok(!revoked.isError, JSON.stringify(revoked));
   await assert.rejects(client.readResource({ uri: fileLink.uri }));
+  const installedServer = pathToFileURL(
+    path.join(isolated, "node_modules", "exec-mcp", "dist", "src", "server.js"),
+  ).href;
+  const publicCheck = await run(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+    import assert from 'node:assert/strict';
+    import {startServer} from ${JSON.stringify(installedServer)};
+    import {Client,StreamableHTTPClientTransport} from '@modelcontextprotocol/client';
+    process.env.EXEC_MCP_PACKAGE_TOKEN='package-fixture-token-012345678901234567890123';
+    const server=await startServer({host:'127.0.0.1',port:0,access:'public',public_url:'https://package.example.test',auth:{type:'bearer',token_env:'EXEC_MCP_PACKAGE_TOKEN'},mcpServers:[]});
+    const client=new Client({name:'packaged-public',version:'1'});
+    try{
+      assert.equal((await fetch(server.url)).status,401);
+      await client.connect(new StreamableHTTPClientTransport(new URL(server.url),{requestInit:{headers:{Authorization:'Bearer '+process.env.EXEC_MCP_PACKAGE_TOKEN}}}));
+      const result=await client.callTool({name:'exec',arguments:{source:'text(42);'}});
+      assert.ok(!result.isError&&result.content.some(x=>x.type==='text'&&x.text==='42'));
+      console.log('PUBLIC_AUTH_OK');
+    }finally{await client.close();await server.close();}
+  `,
+    ],
+    { cwd: isolated, timeout: 30_000 },
+  );
+  assert.match(publicCheck.stdout, /PUBLIC_AUTH_OK/);
+  await assert.rejects(executeCli(["tunnel", "--config", config])); // The private mode must never publish a tunnel.
   console.log(
-    "PASS: 独立 tarball 安装、CLI、原生管道和 PTY、固定 V8、补丁、存储、输出预算、媒体、文件资源及 Skill 发现与配置启停。",
+    "PASS: 独立 tarball 安装、CLI、管道/PTY、固定 V8、文件/Skill，以及公网认证和私有模式 Tunnel 拒绝。",
   );
 } finally {
   await client?.close();

@@ -16,13 +16,13 @@
 
 ## 可达性与认证分开
 
-首版只交付 OpenAI Secure MCP Tunnel 连接，服务默认监听本机回环地址。
+支持 OpenAI Secure MCP Tunnel、Cloudflare Named Tunnel 和 Tailscale Funnel；服务始终监听本机回环地址。
 [官方 Tunnel 路径](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 由私网客户端主动连接，并利用 OpenAI 组织/工作区的访问范围。
 只有明确配置为这一私有、单操作者路径，才允许本地 MCP 跳不另设应用认证；
 本机其他进程仍属于被信任的环境。回环地址自身不证明请求来自 OpenAI。
 
-其他 Tunnel 的延后接入计划见 [Backlog](BACKLOG.md)；实施时不能继承无认证例外。
+Cloudflare/Tailscale 使用显式 public 模式，必须配置稳定的 HTTPS origin 和应用认证，不能继承无认证例外。
 [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) 可以对公网开放，
 不等同于只供 tailnet 内访问的 Serve；
 [Cloudflare Tunnel](https://developers.cloudflare.com/tunnel/) 的可达性也不能替代调用方授权。
@@ -30,7 +30,18 @@
 
 接入方式只影响部署与 HTTP 入口，工具内核不分支判断 Tunnel 品牌。
 认证、允许的 Host/Origin、代理信任和公开地址在入口集中处理。
-预留的是这个职责边界，不预建三个空 adapter、OAuth 账号系统或多租户模型。
+ChatGPT 公网接入使用外部 OAuth/OIDC 授权服务器；本服务验证 JWT 的签名、issuer、MCP resource audience、
+expiry、scope 和唯一操作者 subject，并提供 protected resource metadata。不自建 OAuth 账号/登录/签发系统。
+支持自定义 Authorization 的非 ChatGPT 客户端另可使用环境中的高熵 Bearer token，不使用 URL 秘密或身份头冒充认证。
+供应商只解决可达性；Host/Origin 检查和认证覆盖每次 MCP 请求，不因为来自回环、会话 ID 或代理头而跳过。
+既有私有路径不变，业务工具描述不因 Tunnel 品牌分叉；只按认证模式更新标准 securitySchemes 元数据。
+
+新增 tunnel CLI 只在操作者显式运行时启动一个前台供应商客户端。先验证本机认证入口，再检查 provider 前置条件；
+不创建账户/DNS、不安装系统服务、不修改 tailnet 策略或覆盖既有 Serve/Funnel 端口，也不自动重启失败连接。
+Cloudflare 使用 Named Tunnel token 文件，不支持缺少 SSE 的 Quick Tunnel；Tailscale 不使用 --bg/reset，
+并在启动前核对本节点 DNS 名称及既有端口配置。保留人工确认与供应商终端输出，不自动回答授权提示。
+token 文件与父进程环境属于操作者管理范围；stdout 中只主动打印连接地址和状态，不主动打印凭据。
+具体安装与身份提供方要求见 [连接方式](connections.md)。
 协议路径必须保留取消与响应语义；不能通过写进 schema 就宣称实现了某种宿主能力。
 
 ## 安装与发布的边界

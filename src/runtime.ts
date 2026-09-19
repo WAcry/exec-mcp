@@ -49,7 +49,16 @@ export class ExecRuntime {
   private readonly skillMaxChars: number;
   private readonly skillConfig: readonly SkillSetting[];
   private readonly native: ReturnType<typeof nativeContracts>;
+  private readonly securitySchemes:
+    | { type: string; scopes?: string[] }[]
+    | undefined;
   constructor(config: Config, artifacts?: ArtifactStore) {
+    this.securitySchemes =
+      config.access === "openai-tunnel"
+        ? [{ type: "noauth" }]
+        : config.auth?.type === "oauth"
+          ? [{ type: "oauth2", scopes: config.auth.scopes }]
+          : undefined;
     // Fail bad shell configuration before creating timers, hosts or listeners.
     const shell = resolveShell(config.execution);
     this.terminal = new TerminalManager({ shell });
@@ -86,7 +95,9 @@ export class ExecRuntime {
         inputSchema: EXEC_SCHEMA,
         annotations,
         _meta: {
-          securitySchemes: [{ type: "noauth" }],
+          ...(this.securitySchemes
+            ? { securitySchemes: this.securitySchemes }
+            : {}),
           "openai/fileParams": ["files"],
         },
       },
@@ -247,7 +258,9 @@ export class ExecRuntime {
         description: WAIT_DESCRIPTION,
         inputSchema: WAIT_SCHEMA,
         annotations,
-        _meta: { securitySchemes: [{ type: "noauth" }] },
+        _meta: this.securitySchemes
+          ? { securitySchemes: this.securitySchemes }
+          : {},
       },
       async (args, context) => {
         try {

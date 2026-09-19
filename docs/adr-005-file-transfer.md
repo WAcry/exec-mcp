@@ -44,7 +44,7 @@ URL 模式需要操作者预先配置真实 HTTPS 基址，并显式选择 deliv
 独立回环端口只提供指定导出的 GET/HEAD/单范围读取，使用不同的高熵限时 bearer token；
 不提供 MCP、目录浏览、上传或任意本机路径读取。禁止把无认证 MCP 端口顺便转发到公网。
 下载强制 attachment、nosniff 和禁止执行的 CSP；链接可转发，权限与此风险必须在工具说明中明确。
-本轮不自动配置 Tunnel 或对象存储，也不会在 resource 失败时偷偷降级为公开 URL。
+文件下载入口不自动配置 Tunnel 或对象存储，也不会在 resource 失败时偷偷降级为公开 URL。
 
 ## 接受的限制
 

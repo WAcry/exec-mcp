@@ -4,18 +4,7 @@
 不是当前功能清单、排期承诺或立即开发的授权；当前行为以代码、README 和生效 ADR 为准。
 只保留目标与必要的前置条件，不展开成 Planning Spec；完成、调整或放弃时更新条目。
 
-## 1. 其他 Tunnel 接入方式
-
-状态：计划中，未实现。
-
-在 OpenAI Secure MCP Tunnel 之外，支持 **Cloudflare Tunnel** 和 **Tailscale Funnel**，
-让用户按自己的环境选择连接方式；接入变化不改变 exec/wait 的执行内核。
-
-前置条件：确认各方式需要的外部工具、账户及凭据，落实公开入口的认证、代理信任和
-Host/Origin 边界，再提供配置与连接流程。遵循 [ADR-004](adr-004-connectivity-trust.md)，
-不能把当前无应用认证的本机 MCP 入口直接公开。
-
-## 2. 公共 npm 安装与启动后的 Web UI
+## 1. 公共 npm 安装与启动后的 Web UI
 
 状态：计划中，尚未公开发布 npm 包，也未实现产品 Web UI。
 

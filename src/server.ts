@@ -19,28 +19,45 @@ import { LegacySessionRouter } from "./http/legacy.js";
 import { MAX_PAYLOAD_BYTES } from "./limits.js";
 import { startDownloadGateway } from "./files/gateway.js";
 import type { ArtifactStore } from "./files/artifacts.js";
+import {
+  PublicAccess,
+  RESOURCE_METADATA_PATH,
+  publicHeadersAllowed,
+} from "./http/access.js";
+import { validatePublicAccess } from "./http/access-config.js";
 
 export async function startServer(
   config: Config,
-  options: { artifacts?: ArtifactStore } = {},
+  options: { artifacts?: ArtifactStore; authFetch?: typeof fetch } = {},
 ): Promise<{
   url: string;
   downloadAddress?: string;
   runtime: ExecRuntime;
   close(): Promise<void>;
 }> {
-  if (
-    !["127.0.0.1", "::1"].includes(config.host) ||
-    config.access !== "openai-tunnel"
-  )
-    throw new Error("首版只允许明确配置的 OpenAI 私有 Tunnel 与本机回环入口。");
-  const runtime = new ExecRuntime(config, options.artifacts);
+  validatePublicAccess(config);
+  const access =
+    config.access === "public"
+      ? new PublicAccess(
+          new URL(config.public_url!).origin,
+          config.auth!,
+          options.authFetch ? { fetch: options.authFetch } : {},
+        )
+      : undefined;
+  let runtime: ExecRuntime;
+  try {
+    runtime = new ExecRuntime(config, options.artifacts);
+  } catch (error) {
+    await access?.close();
+    throw error;
+  }
   let downloads: Awaited<ReturnType<typeof startDownloadGateway>> | undefined;
   try {
     if (runtime.artifacts.config.download)
       downloads = await startDownloadGateway(runtime.artifacts);
   } catch (error) {
     await runtime.close();
+    await access?.close();
     throw error;
   }
   const onerror = (): void => {
@@ -69,8 +86,34 @@ export async function startServer(
   const origin = localhostOriginValidation();
   let closing: Promise<void> | undefined;
   const server = createServer((request, response) => {
-    if (!host(request, response) || !origin(request, response)) return;
+    if (access) {
+      const port = (server.address() as AddressInfo).port;
+      const authority = `${config.host === "::1" ? "[::1]" : config.host}:${port}`;
+      if (!publicHeadersAllowed(request, response, access.origin, authority))
+        return;
+    } else if (!host(request, response) || !origin(request, response)) return;
     const route = request.url?.split("?")[0];
+    if (
+      access &&
+      [
+        RESOURCE_METADATA_PATH,
+        "/.well-known/oauth-protected-resource",
+      ].includes(route ?? "")
+    ) {
+      const metadata = access.metadata();
+      if (!metadata || !["GET", "HEAD"].includes(request.method ?? "")) {
+        respond(response, 404, { error: "not_found" });
+        return;
+      }
+      response.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+      });
+      response.end(
+        request.method === "HEAD" ? undefined : JSON.stringify(metadata),
+      );
+      return;
+    }
     if (route === "/healthz" || route === "/readyz") {
       respond(response, closing ? 503 : 200, {
         status: closing ? "stopping" : "ready",
@@ -87,6 +130,10 @@ export async function startServer(
     }
     void (async () => {
       try {
+        if (access && !(await access.authorize(request, response))) {
+          request.resume();
+          return;
+        }
         if (request.method === "POST") {
           const parsedBody = await readBody(request);
           await handler(
@@ -124,6 +171,7 @@ export async function startServer(
       legacy.close(),
       runtime.close(),
       downloads?.close(),
+      access?.close(),
     ]);
     throw error;
   }
@@ -142,6 +190,7 @@ export async function startServer(
           legacy.close(),
           runtime.close(),
           downloads?.close(),
+          access?.close(),
         ]);
         server.closeAllConnections();
         await stopped;

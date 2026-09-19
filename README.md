@@ -171,7 +171,8 @@ policy:
 
 ## 连接 ChatGPT
 
-首版只使用 **OpenAI Secure MCP Tunnel**，不支持无认证的公网访问。
+支持 **OpenAI Secure MCP Tunnel、Cloudflare Named Tunnel、Tailscale Funnel**；后两者必须启用应用认证。
+完整配置、OAuth 身份提供方要求和前台启动步骤见 [连接方式](docs/connections.md)。下面保留原有 OpenAI 私有接入流程。
 按照 [OpenAI 官方说明](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 安装 `tunnel-client`，创建属于自己的 Tunnel，并取得相应的 Runtime API key。
 
@@ -196,8 +197,8 @@ tunnel-client run --profile exec-mcp
 连接后可直接告诉 ChatGPT：“检查我的项目并运行测试”，附上明确的项目路径。
 首次使用建议先执行只读检查，确认访问的是预期机器与目录。
 
-其他 Tunnel 接入仍在 [Backlog](docs/BACKLOG.md) 中，尚未交付。
-不要将当前无认证入口转发到公网；隧道可达不代表调用者已经获得授权。
+不要将 `access="openai-tunnel"` 的无认证入口转发到公网；切换其他 Tunnel 时使用文档中的 public + auth 配置。
+隧道可达不代表调用者已经获得授权。公网模式使用外部 OAuth 授权服务器连接 ChatGPT，不要求新增 UI 或更改执行内核。
 
 ## 文件传输
 

@@ -49,6 +49,7 @@ interface Session {
   backend: Backend;
   chunks: Buffer[];
   bytes: number;
+  paused: boolean;
   mutex: AsyncMutex;
   done: Promise<number>;
   finish(code: number): void;
@@ -64,8 +65,6 @@ export class TerminalManager {
   private readonly highWater: number;
   private readonly lowWater: number;
   private sessions = new Map<string, Session>();
-  private unread = 0;
-  private paused = false;
   private closed = false;
   constructor(
     options: {
@@ -122,6 +121,7 @@ export class TerminalManager {
       backend,
       chunks: [],
       bytes: 0,
+      paused: false,
       mutex: new AsyncMutex(),
       done,
       finish,
@@ -150,7 +150,6 @@ export class TerminalManager {
       backend.process.onData((text) => this.append(session, text));
       backend.process.onExit((event) => ended(event.exitCode));
     }
-    if (this.paused) this.pause(session, true);
     const started = performance.now();
     try {
       await waitUntil(done, input.yield_time_ms ?? 10_000, signal);
@@ -243,9 +242,8 @@ export class TerminalManager {
     const chunk = Buffer.from(text);
     session.chunks.push(chunk);
     session.bytes += chunk.length;
-    this.unread += chunk.length;
     session.outputReady?.();
-    this.backpressure();
+    this.backpressure(session);
   }
   private collect(session: Session, started: number): TerminalResult {
     const chunks: Buffer[] = [];
@@ -263,11 +261,10 @@ export class TerminalManager {
       chunks.push(chunk.subarray(0, count));
       remaining -= count;
       session.bytes -= count;
-      this.unread -= count;
       if (count === chunk.length) session.chunks.shift();
       else session.chunks[0] = chunk.subarray(count);
     }
-    this.backpressure();
+    this.backpressure(session);
     const result: TerminalResult = {
       output: Buffer.concat(chunks).toString("utf8"),
       wall_time_seconds: (performance.now() - started) / 1000,
@@ -297,13 +294,12 @@ export class TerminalManager {
   }
   private remove(session: Session): void {
     if (!this.sessions.delete(session.id)) return;
-    this.unread -= session.bytes;
     session.bytes = 0;
     session.chunks = [];
-    this.backpressure();
   }
   private pause(session: Session, value: boolean): void {
-    if (session.exitCode !== undefined) return;
+    if (session.exitCode !== undefined || session.paused === value) return;
+    session.paused = value;
     const { backend } = session;
     if (backend.kind === "pty") {
       if (value) backend.process.pause();
@@ -314,13 +310,16 @@ export class TerminalManager {
         else stream.resume();
       }
   }
-  private backpressure(): void {
-    const next = this.paused
-      ? this.unread > this.lowWater
-      : this.unread >= this.highWater;
-    if (this.paused === next) return;
-    this.paused = next;
-    for (const session of this.sessions.values()) this.pause(session, next);
+  private backpressure(session: Session): void {
+    // An unread producer cannot prevent other sessions from reporting progress.
+    // Once stopping, keep its streams draining so process close can be observed.
+    if (session.terminating) return;
+    this.pause(
+      session,
+      session.paused
+        ? session.bytes > this.lowWater
+        : session.bytes >= this.highWater,
+    );
   }
   private requireOpen(): void {
     if (this.closed) throw new Error("终端管理器已关闭。");

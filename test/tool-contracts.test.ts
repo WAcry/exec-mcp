@@ -26,6 +26,8 @@ const SKILL_RULE =
   "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 const FILE_EDIT_RULE =
   "创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。";
+const MULTILINE_RULE =
+  "多行字符串优先用模板字面量；需保留反斜杠时用 String.raw。两者仍有反引号和 ${...} 语义；补丁以 *** Begin Patch 起始，标记顶格、正文缩进保留。";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -81,6 +83,7 @@ describe("self-contained model-visible contracts", () => {
     const description = execDescription(contracts);
     expect(description).toContain("V8 本身");
     expect(description.split("本机及发现契约：")[0]).toContain(FILE_EDIT_RULE);
+    expect(description.split("本机及发现契约：")[0]).toContain(MULTILINE_RULE);
     expect(description).toContain(
       "文件与网络等外部操作由 tools.* 在实际机器执行",
     );
@@ -193,6 +196,9 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
       FILE_EDIT_RULE,
     );
+    expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
+      MULTILINE_RULE,
+    );
     expect(listed[0]!.description).toContain(SKILL_RULE);
     expect(listed[0]!.description).toContain(
       "对下游 MCP 的 CallToolResult，先检查 isError",
@@ -225,5 +231,56 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     ).toContain(SKILL_RULE);
     for (const tool of value.catalog)
       expect(listed[0]!.description).toContain(tool.description);
+  });
+  it("creates and edits files with multiline templates while preserving raw backslashes and content indentation", async () => {
+    const connection = await connect({}, legacy);
+    connections.push(connection);
+    const directory = await mkdtemp(path.join(tmpdir(), "exec-template-"));
+    directories.push(directory);
+    // The host receives real multiline templates, not a JSON-escaped patch argument.
+    // Substitution values can safely carry literal template delimiters into the patch.
+    const source = [
+      'const literal = "${value}";',
+      'const tick = "`";',
+      "const created = await tools.apply_patch(`*** Begin Patch",
+      "*** Add File: example.txt",
+      "+initial",
+      "+    indented",
+      "*** End Patch",
+      "`);",
+      "const updated = await tools.apply_patch(String.raw`*** Begin Patch",
+      "*** Update File: example.txt",
+      "@@",
+      "-initial",
+      String.raw`+path=C:\work\new\task.txt`,
+      String.raw`+pattern=Sig\[\d+\]`,
+      "+literal=${literal}",
+      "+tick=${tick}",
+      "     indented",
+      "*** End Patch",
+      "`);",
+      "text({created,updated});",
+    ].join("\n");
+    const result = await connection.client.callTool({
+      name: "exec",
+      arguments: { workdir: directory, source },
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    const value = jsonOutput<{
+      created: { success: boolean };
+      updated: { success: boolean };
+    }>(result);
+    expect(value.created.success).toBe(true);
+    expect(value.updated.success).toBe(true);
+    expect(await readFile(path.join(directory, "example.txt"), "utf8")).toBe(
+      [
+        String.raw`path=C:\work\new\task.txt`,
+        String.raw`pattern=Sig\[\d+\]`,
+        "literal=${value}",
+        "tick=`",
+        "    indented",
+        "",
+      ].join("\n"),
+    );
   });
 });

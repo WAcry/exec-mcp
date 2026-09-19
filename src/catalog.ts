@@ -156,6 +156,8 @@ export const SEARCH_SCHEMA = z
   })
   .strict();
 const PATCH_SCHEMA = z.string().min(1);
+const SKILL_INVOCATION_RULE =
+  "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 const SKILL_SCHEMA = z
   .object({
     workdir: z
@@ -207,8 +209,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
-    description:
-      "返回可用 Skill 的名称、用途和 SKILL.md 真实路径，以 text(result) 输出目录。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。选定后读取完整 SKILL.md；标为“仅显式”的项只在用户明确要求使用时读取。",
+    description: `返回可用 Skill 的名称、用途和 SKILL.md 真实路径，以 text(result) 输出目录。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md。`,
   },
   {
     name: "import_file",
@@ -312,11 +313,11 @@ export function execDescription(
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
   return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。
-首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录，选定后读取完整 SKILL.md。目录仍在上下文中时可直接使用。
+首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
 用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 可读取完整契约，tools.tool_search 可检索下游。已知工具可直接 tools[name](args)；目录更新从下一次 exec 生效。
 本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
-通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。MCP 结果先检查 isError，优先取 structuredContent，再从 content 补充不同文本与媒体。
+通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
 文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。
 store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未命中为 undefined；key 为字符串，依赖宿主的对话标识 openai/session。每次 exec 读启动快照，结束时合并写入，脚本报错也可能提交；修改 load 的副本后需再次 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启后存储可能清空；同一对话可重新 exec，长期数据用文件。
 超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。

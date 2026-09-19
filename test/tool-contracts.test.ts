@@ -20,6 +20,8 @@ import {
 const connections: Awaited<ReturnType<typeof connect>>[] = [];
 const terminals: TerminalManager[] = [];
 const directories: string[] = [];
+const SKILL_RULE =
+  "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -33,6 +35,18 @@ afterEach(async () => {
 });
 
 describe("self-contained model-visible contracts", () => {
+  it("states skill selection in both entry points and scopes result handling to downstream MCP", () => {
+    const contracts = nativeContracts(resolveShell());
+    const description = execDescription(contracts);
+    expect(description.split("本机及发现契约：")[0]).toContain(SKILL_RULE);
+    expect(
+      contracts.find((contract) => contract.name === "list_skills")!
+        .description,
+    ).toContain(SKILL_RULE);
+    expect(description).toContain(
+      "对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用",
+    );
+  });
   it("keeps the current native surface, runtime boundary and actual calling forms without historical instructions", () => {
     const contracts = nativeContracts(resolveShell());
     expect(contracts.map((contract) => contract.name)).toEqual([
@@ -124,6 +138,10 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     const listed = (await connection.client.listTools()).tools;
     expect(listed.map((tool) => tool.name)).toEqual(["exec", "wait"]);
     expect(listed[0]!.description).not.toContain("revoke_file");
+    expect(listed[0]!.description).toContain(SKILL_RULE);
+    expect(listed[0]!.description).toContain(
+      "对下游 MCP 的 CallToolResult，先检查 isError",
+    );
     const patch =
       "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
     const result = await connection.client.callTool({
@@ -147,6 +165,9 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     expect(value.catalog.some((tool) => tool.name === "revoke_file")).toBe(
       false,
     );
+    expect(
+      value.catalog.find((tool) => tool.name === "list_skills")!.description,
+    ).toContain(SKILL_RULE);
     for (const tool of value.catalog)
       expect(listed[0]!.description).toContain(tool.description);
   });

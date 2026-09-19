@@ -69,7 +69,14 @@ describe("native host pressure reclamation", () => {
     });
     await run(value, 'store("before",42);');
     const old = opened[0]!;
-    await value.checkMemory();
+    // The OS sampler may transiently fail while PowerShell/ps observes a newly
+    // spawned host. Production retries on the next maintenance tick; mirror
+    // that behavior instead of making one sampling attempt a CI contract.
+    const deadline = Date.now() + 10_000;
+    while (old.usable && Date.now() < deadline) {
+      await value.checkMemory();
+      if (old.usable) await pause(100);
+    }
     expect(old.usable).toBe(false);
     const result = await run(value, 'text(load("before")===undefined);');
     expect(jsonOutput(result)).toBe(true);

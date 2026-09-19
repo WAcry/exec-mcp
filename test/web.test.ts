@@ -486,7 +486,9 @@ describe("Web management data and actions", () => {
 
     const localConfig = await request(web, "/api/config");
     expect(localConfig.status).toBe(200);
-    expect(localConfig.text).toContain(configPath);
+    expect(localConfig.json<{ config_path: string }>().config_path).toBe(
+      configPath,
+    );
     for (const value of forbidden)
       expect(localConfig.text).not.toContain(value);
     expect(localConfig.text).toContain("<redacted>");

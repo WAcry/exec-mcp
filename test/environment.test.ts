@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 import { inheritedEnvironment } from "../src/environment.js";
 import { TerminalManager } from "../src/host/terminal.js";
 import { resolveShell } from "../src/host/shell.js";
@@ -67,7 +69,7 @@ describe("trusted subprocess environment inheritance", () => {
         const keys = Object.keys(fixture);
         const capture = `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,process.env[key]]))))`;
         const command = nodeCommand(
-          `const {execFileSync}=require('node:child_process');const child=execFileSync(process.execPath,['-e',${JSON.stringify(capture)}],{encoding:'utf8'});console.log(JSON.stringify({direct:Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,process.env[key]])),child:JSON.parse(child)}));`,
+          `const {execFileSync}=require('node:child_process');const child=execFileSync(process.execPath,['-e',${JSON.stringify(capture)}],{encoding:'utf8'});const captured={direct:Object.fromEntries(${JSON.stringify(keys)}.map(key=>[key,process.env[key]])),child:JSON.parse(child)};console.log('ENV_SHA256:'+require('node:crypto').createHash('sha256').update(JSON.stringify(captured)).digest('hex'));`,
         );
         const first = await terminal.execCommand(
           { cmd: command, tty, yield_time_ms: 0 },
@@ -77,9 +79,14 @@ describe("trusted subprocess environment inheritance", () => {
           terminal.writeStdin(input),
         );
         expect(result.exit_code).toBe(0);
-        const parsed = JSON.parse(result.output.trim());
-        expect(parsed.direct).toEqual(fixture);
-        expect(parsed.child).toEqual(fixture);
+        // ConPTY legitimately returns terminal controls. Check all captured bytes
+        // via a short digest that cannot be split by the default terminal width.
+        const expected = createHash("sha256")
+          .update(JSON.stringify({ direct: fixture, child: fixture }))
+          .digest("hex");
+        expect(stripVTControlCharacters(result.output).trim()).toBe(
+          `ENV_SHA256:${expected}`,
+        );
       } finally {
         for (const [key, value] of saved) {
           if (value === undefined) delete process.env[key];

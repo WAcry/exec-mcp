@@ -219,7 +219,11 @@ describe("real TLS through environment proxies", () => {
         await fixtures.child(source, {
           HTTP_PROXY: proxy.url,
           no_proxy: "127.0.0.1",
-          NO_PROXY: "ignored.example.test",
+          // Windows cannot transmit two differently-cased environment keys.
+          // Distinct-key precedence is covered in-process on every platform.
+          ...(process.platform === "win32"
+            ? {}
+            : { NO_PROXY: "ignored.example.test" }),
         })
       ).stdout.trim(),
     ).toBe("secure");

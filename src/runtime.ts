@@ -30,7 +30,7 @@ import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import { listSkills } from "./skills/index.js";
-import { DEFAULT_SKILL_MAX_CHARS } from "./skills/types.js";
+import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
 import { resolveShell } from "./host/shell.js";
 
 function sessionScope(context: ServerContext): string | undefined {
@@ -47,6 +47,7 @@ export class ExecRuntime {
   readonly artifacts: ArtifactStore;
   private closing: Promise<void> | undefined;
   private readonly skillMaxChars: number;
+  private readonly skillConfig: readonly SkillSetting[];
   private readonly native: ReturnType<typeof nativeContracts>;
   constructor(config: Config, artifacts?: ArtifactStore) {
     // Fail bad shell configuration before creating timers, hosts or listeners.
@@ -55,6 +56,7 @@ export class ExecRuntime {
     this.native = nativeContracts(shell);
     this.codeMode = new CodeModeService();
     this.skillMaxChars = config.skills?.max_chars ?? DEFAULT_SKILL_MAX_CHARS;
+    this.skillConfig = config.skills?.config ?? [];
     this.artifacts = artifacts ?? new ArtifactStore(config.files);
     this.downstream = new DownstreamMcpRegistry({ servers: config.mcpServers });
     this.discovery = new ToolDiscovery(this.downstream);
@@ -123,6 +125,7 @@ export class ExecRuntime {
                   return listSkills({
                     ...(workdir === undefined ? {} : { workdir }),
                     maxChars: this.skillMaxChars,
+                    config: this.skillConfig,
                     signal: nested.signal,
                   });
                 }

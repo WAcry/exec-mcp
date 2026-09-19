@@ -137,6 +137,27 @@ max_chars = 40000
 名称、可还原的全文路径和调用策略不截短；如果仅这些信息就超过目标，会明确说明并保留完整目录，
 不以分页或搜索隐藏部分 Skill。修改配置后重启自己的 exec-mcp；Skill 文件修改本身不需要重启，重新发现即可。
 
+可以在 **exec-mcp 自己的 config.toml** 中使用 Codex 风格的 `[[skills.config]]` 启用或禁用 Skill：
+
+```toml
+[[skills.config]]
+name = "release"
+enabled = false
+
+[[skills.config]]
+path = '~/projects/my-project/.agents/skills/release/SKILL.md'
+enabled = true
+```
+
+未配置的 Skill 默认启用。每项必须填写 `enabled`，并在 `name` 与 `path` 中二选一：
+`name` 精确匹配 frontmatter 中的名称，作用于所有同名 Skill；`path` 精确指定一个 `SKILL.md`，
+支持绝对路径、`~/` 和相对配置文件目录的路径，也支持软链接。匹配同一真实文件时，**后写的规则优先**。
+上例先禁用所有名为 `release` 的 Skill，再为指定文件恢复启用。
+
+禁用项不会出现在返回目录中，也不占用描述预算；不会增加启停工具或向 Agent 展示启停配置。
+启用只影响原有发现范围内的 Skill，不额外扫描配置路径，也不覆盖下面的“仅显式调用”策略。
+修改配置后重启服务；禁用不删除文件、不阻止已有 Shell 直接读取文件，也不读取或修改 Codex 自己的配置。
+
 不希望助手按任务自行启用某个流程时，在该 Skill 的 `agents/openai.yaml` 中设置：
 
 ```yaml

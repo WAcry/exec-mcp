@@ -72,6 +72,151 @@ function directoryText(result: CallToolResult): string {
 describe.each([false, true])(
   "Skill discovery through the real host and MCP (legacy=%s)",
   (legacy) => {
+    it("applies TOML enablement across user and project skills without changing either tool catalog", async () => {
+      await skill(
+        path.join(environment.home, ".agents", "skills", "release"),
+        "release",
+        "USER_RELEASE_TRIGGER",
+      );
+      await skill(
+        path.join(environment.home, ".codex", "skills", "release"),
+        "release",
+        "CODEX_RELEASE_TRIGGER",
+      );
+      await skill(
+        path.join(environment.home, ".agents", "skills", "general"),
+        "general",
+      );
+      await skill(
+        path.join(environment.home, ".agents", "skills", "manual"),
+        "manual",
+        "PRIVATE_MANUAL_TRIGGER",
+        true,
+      );
+      const project = path.join(dir, "repo");
+      await mkdir(path.join(project, ".git"), { recursive: true });
+      const local = path.join(project, ".agents", "skills", "release");
+      await skill(local, "release", "PROJECT_RELEASE_TRIGGER");
+      const config = parseConfig(
+        CONFIG_TEMPLATE +
+          `
+[skills]
+max_chars = 4000
+[[skills.config]]
+name = "release"
+enabled = false
+[[skills.config]]
+path = "./repo/.agents/skills/release/SKILL.md"
+enabled = true
+[[skills.config]]
+name = "manual"
+enabled = true
+`,
+        path.join(dir, "config.toml"),
+      );
+      const plain = await connection(legacy);
+      const configured = await connect({ skills: config.skills! }, legacy);
+      clients.push(configured);
+      expect((await configured.client.listTools()).tools).toEqual(
+        (await plain.client.listTools()).tools,
+      );
+      const catalogCall = {
+        name: "exec",
+        arguments: {
+          source: 'text(ALL_TOOLS.find(tool=>tool.name==="list_skills"));',
+        },
+      };
+      expect(jsonOutput(await configured.client.callTool(catalogCall))).toEqual(
+        jsonOutput(await plain.client.callTool(catalogCall)),
+      );
+      const output = directoryText(
+        await configured.client.callTool({
+          name: "exec",
+          arguments: {
+            workdir: project,
+            source: "text(await tools.list_skills({}));",
+          },
+        }),
+      );
+      expect(output).toContain("3 项");
+      expect(output).toContain("PROJECT_RELEASE_TRIGGER");
+      expect(output).not.toMatch(
+        /USER_RELEASE_TRIGGER|CODEX_RELEASE_TRIGGER|PRIVATE_MANUAL_TRIGGER|skills.config|enabled/,
+      );
+      expect(output).toContain('"general"');
+      expect(output).toContain('"manual"');
+      expect(output).toContain("仅用户明确要求使用时才可读取");
+      expect(characterCount(output)).toBeLessThanOrEqual(4000);
+    });
+    it("can explicitly enable a previously disabled name while unchanged instances retain their own settings", async () => {
+      const root = path.join(environment.home, ".agents", "skills", "toggle");
+      await skill(root, "toggle");
+      const filename = path.join(dir, "config.toml");
+      const disabledConfig = parseConfig(
+        CONFIG_TEMPLATE + '\n[[skills.config]]\nname="toggle"\nenabled=false\n',
+        filename,
+      );
+      const enabledConfig = parseConfig(
+        CONFIG_TEMPLATE + '\n[[skills.config]]\nname="toggle"\nenabled=true\n',
+        filename,
+      );
+      const disabled = await connect(
+        { skills: disabledConfig.skills! },
+        legacy,
+      );
+      const enabled = await connect({ skills: enabledConfig.skills! }, legacy);
+      clients.push(disabled, enabled);
+      const call = {
+        name: "exec",
+        arguments: { source: "text(await tools.list_skills({}));" },
+      };
+      expect(directoryText(await disabled.client.callTool(call))).toContain(
+        "0 项",
+      );
+      expect(directoryText(await enabled.client.callTool(call))).toContain(
+        '"toggle"',
+      );
+      expect(directoryText(await disabled.client.callTool(call))).not.toContain(
+        '"toggle"',
+      );
+      const restored = await connection(legacy);
+      expect(directoryText(await restored.client.callTool(call))).toContain(
+        '"toggle"',
+      );
+    });
+    it("disables a real Skill reached through multiple directory links before returning metadata", async () => {
+      const shared = path.join(dir, "shared-hidden");
+      await skill(shared, "HIDDEN_ALIAS_SKILL", "HIDDEN_ALIAS_TRIGGER");
+      const genericRoot = path.join(environment.home, ".agents", "skills");
+      const codexRoot = path.join(environment.home, ".codex", "skills");
+      await mkdir(genericRoot, { recursive: true });
+      await mkdir(codexRoot, { recursive: true });
+      await symlink(
+        shared,
+        path.join(genericRoot, "alias"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      await symlink(
+        shared,
+        path.join(codexRoot, "alias"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const config = parseConfig(
+        CONFIG_TEMPLATE +
+          '\n[[skills.config]]\npath="~/.agents/skills/alias/SKILL.md"\nenabled=false\n',
+        path.join(dir, "config.toml"),
+      );
+      const c = await connect({ skills: config.skills! }, legacy);
+      clients.push(c);
+      const output = directoryText(
+        await c.client.callTool({
+          name: "exec",
+          arguments: { source: "text(await tools.list_skills({}));" },
+        }),
+      );
+      expect(output).toContain("0 项");
+      expect(output).not.toMatch(/HIDDEN_ALIAS|shared-hidden|enabled|禁用/);
+    });
     it("returns the full default-budget directory above 10000 characters over the actual transport", async () => {
       const c = await connection(legacy);
       for (let start = 0; start < 180; start += 12) {

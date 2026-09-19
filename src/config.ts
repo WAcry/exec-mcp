@@ -104,6 +104,16 @@ export function parseConfig(text: string, filename: string): Config {
       `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
     );
   const { server, mcp_servers, files, skills, execution } = parsed.data;
+  if (skills?.config) {
+    skills.config = skills.config.map((setting) =>
+      "path" in setting
+        ? {
+            ...setting,
+            path: resolveUserPath(setting.path, path.dirname(filename)),
+          }
+        : setting,
+    );
+  }
   if (
     execution?.shell !== undefined &&
     (execution.shell.includes("/") ||

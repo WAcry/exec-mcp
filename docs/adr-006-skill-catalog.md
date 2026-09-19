@@ -27,6 +27,20 @@ Skill 集合可分层，包括 .codex/skills/.system；发现一个 SKILL.md 后
 不继续进入它的脚本、依赖和参考资料寻找其他 Skill；忽略版本控制的内部目录。
 不执行 Git、Skill 脚本或安装操作，不读取 Codex 的其他配置、数据库、插件或 enabled 列表。
 
+## 实例配置中的启停
+
+由操作者在本服务的 config.toml 中设置 Codex 风格的 skills.config 数组；未匹配规则默认启用。
+选择器与顺序语义参考 [Codex 0.155.1 的 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/skills_config.rs)，不加载其配置层。
+每项用 name 或 path 二选一，加显式 enabled 布尔值；名称精确匹配所有同名项，路径只匹配指定的 SKILL.md，
+按配置顺序应用，最后匹配者生效。采用路径选择器而不是只按名称去重，才能为同名 Skill 单独启用或禁用。
+相对路径基于配置文件，支持 ~/；每次发现时解析软链接，与目录中的真实文件身份一致，不缓存旧链接目标。
+
+禁用在呈现、描述预算和调用策略处理之前生效，不返回禁用项的元数据或状态清单；
+配置与工具协议分离，不增加工具参数、管理工具或工具描述中的启停教程。用法只放 README。
+enabled=true 不改变 allow_implicit_invocation=false，也不增加搜索根目录或验证/执行 Skill 正文。
+缺失的配置目标可以以后出现，不要求配置时文件必须存在；修改配置仍需重启服务，不引入热更新或 watcher。
+该开关只管理目录可见性，不是文件访问权限，也不会撤回模型先前已经收到的内容。
+
 ## 显式调用的策略不能被压缩掉
 
 解析 SKILL.md 的 YAML frontmatter，正文不返回；agents/openai.yaml 只读取调用策略。

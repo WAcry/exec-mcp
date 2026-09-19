@@ -103,7 +103,21 @@ try {
   assert.match(aliasHelp.stdout, /init\|serve\|doctor/);
   await executeCli(["init", "--config", config]);
   const originalConfig = await readFile(config, "utf8");
-  await writeFile(config, originalConfig.replace("port = 8891", "port = 0"));
+  await writeFile(
+    config,
+    originalConfig.replace("port = 8891", "port = 0") +
+      `
+[[skills.config]]
+name = "packaged-disabled"
+enabled = false
+[[skills.config]]
+name = "packaged-skill"
+enabled = false
+[[skills.config]]
+path = "./project with spaces/.agents/skills/packaged-skill/SKILL.md"
+enabled = true
+`,
+  );
   assert.match(await executeCli(["doctor", "--config", config]), /V8 探针通过/);
   child = spawn(process.execPath, [cli, "serve", "--config", config], {
     cwd: isolated,
@@ -166,6 +180,17 @@ try {
     path.join(skillDirectory, "agents", "openai.yaml"),
     "policy:\n  allow_implicit_invocation: false\n",
   );
+  const disabledDirectory = path.join(
+    project,
+    ".agents",
+    "skills",
+    "packaged-disabled",
+  );
+  await mkdir(disabledDirectory, { recursive: true });
+  await writeFile(
+    path.join(disabledDirectory, "SKILL.md"),
+    "---\nname: packaged-disabled\ndescription: PRIVATE_DISABLED_TRIGGER\n---\nPRIVATE_DISABLED_BODY\n",
+  );
   const skillsResult = await client.callTool({
     name: "exec",
     arguments: {
@@ -185,6 +210,10 @@ try {
     /PRIVATE_PACKAGED_TRIGGER|PRIVATE_PACKAGED_BODY/,
   );
   assert.equal(skillsResult.structuredContent, undefined);
+  assert.doesNotMatch(
+    skillsText,
+    /packaged-disabled|PRIVATE_DISABLED_TRIGGER|PRIVATE_DISABLED_BODY/,
+  );
   const patch =
     "*** Begin Patch\n*** Add File: smoke.txt\n+packaged runtime works\n*** End Patch\n";
   const result = await client.callTool({
@@ -334,7 +363,7 @@ try {
   assert.ok(!revoked.isError, JSON.stringify(revoked));
   await assert.rejects(client.readResource({ uri: fileLink.uri }));
   console.log(
-    "PASS: 独立 tarball 安装、CLI、原生管道和 PTY、固定 V8、补丁、存储、输出预算、媒体、文件资源及 Skill 发现。",
+    "PASS: 独立 tarball 安装、CLI、原生管道和 PTY、固定 V8、补丁、存储、输出预算、媒体、文件资源及 Skill 发现与配置启停。",
   );
 } finally {
   await client?.close();

@@ -5,12 +5,13 @@ import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { parseDocument } from "yaml";
 import { MAX_PAYLOAD_BYTES } from "../limits.js";
-import type { SkillCatalog, SkillMetadata } from "./types.js";
+import type { SkillCatalog, SkillMetadata, SkillSetting } from "./types.js";
 
 export interface DiscoverSkillsOptions {
   homeDir?: string;
   workdir?: string;
   signal?: AbortSignal;
+  config?: readonly SkillSetting[];
 }
 
 /** Metadata only: no shell, configuration imports, installation or persistent scan cache. */
@@ -20,6 +21,7 @@ export async function discoverSkills(
   const { signal } = options;
   signal?.throwIfAborted();
   const home = path.resolve(options.homeDir ?? homedir());
+  const enabled = await skillSelection(options.config ?? [], signal);
   const catalog: SkillCatalog = { skills: [], warnings: [] };
   const warn = (file: string, message: string) =>
     catalog.warnings.push(`${JSON.stringify(file)}：${message}`);
@@ -83,10 +85,18 @@ export async function discoverSkills(
         }
         if (files.has(target)) continue;
         files.add(target);
+        if (!enabled(target)) continue;
         try {
           const metadata = mapping(
             parseYaml(await readMetadata(target, true, signal)),
           );
+          if (
+            !enabled(
+              target,
+              typeof metadata.name === "string" ? metadata.name.trim() : "",
+            )
+          )
+            continue;
           if (
             typeof metadata.name !== "string" ||
             !metadata.name.trim() ||
@@ -146,6 +156,7 @@ export async function discoverSkills(
           catalog.skills.push(skill);
         } catch {
           signal?.throwIfAborted();
+          if (!enabled(target, "")) continue;
           warn(
             target,
             "SKILL.md 元数据不可读或无有效 name/description；未列出该 Skill。",
@@ -173,6 +184,43 @@ export async function discoverSkills(
   }
   signal?.throwIfAborted();
   return catalog;
+}
+
+/** Match Codex's ordered name/path selectors; a missing rule means enabled.
+ * Resolve paths on each scan so a moved symlink cannot leave stale enablement.
+ */
+async function skillSelection(
+  settings: readonly SkillSetting[],
+  signal?: AbortSignal,
+) {
+  const rules: SkillSetting[] = [];
+  for (const setting of settings) {
+    signal?.throwIfAborted();
+    if ("name" in setting) rules.push(setting);
+    else {
+      const selected = path.resolve(setting.path);
+      let resolved = selected;
+      try {
+        resolved = await realpath(selected);
+      } catch {
+        signal?.throwIfAborted(); /* An absent configured file may appear on a later scan. */
+      }
+      rules.push({ path: resolved, enabled: setting.enabled });
+    }
+  }
+  return (file: string, name?: string): boolean => {
+    let result = true;
+    for (const rule of rules) {
+      if ("path" in rule) {
+        if (rule.path === file) result = rule.enabled;
+      } else if (name === undefined) {
+        // Before parsing, a later enabling name rule may restore a disabled path.
+        // Do not skip its metadata until the name is known.
+        if (rule.enabled) result = true;
+      } else if (rule.name === name) result = rule.enabled;
+    }
+    return result;
+  };
 }
 
 async function projectRoots(

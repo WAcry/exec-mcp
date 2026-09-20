@@ -27,6 +27,7 @@ import {
 import { validatePublicAccess } from "./http/access-config.js";
 
 import type { ActivityStore } from "./web/activity.js";
+import type { SessionNotes } from "./session-notes.js";
 import type { DownstreamStartupEvent } from "./downstream/registry.js";
 
 export async function startServer(
@@ -35,6 +36,7 @@ export async function startServer(
     artifacts?: ArtifactStore;
     authFetch?: typeof fetch;
     activity?: ActivityStore;
+    notes?: SessionNotes;
     signal?: AbortSignal;
     onDownstreamProgress?: (event: DownstreamStartupEvent) => void;
   } = {},
@@ -56,7 +58,12 @@ export async function startServer(
       : undefined;
   let runtime: ExecRuntime;
   try {
-    runtime = new ExecRuntime(config, options.artifacts, options.activity);
+    runtime = new ExecRuntime(
+      config,
+      options.artifacts,
+      options.activity,
+      options.notes,
+    );
   } catch (error) {
     await access?.close();
     throw error;

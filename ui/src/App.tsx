@@ -15,6 +15,10 @@ import { apiFetch } from "./lib/api";
 import type { CallSummary, PaginatedResult, SessionSummary } from "./types";
 import { ManagementProvider, useManagement } from "./context/ManagementContext";
 import { RuntimeControl } from "./components/RuntimeControl";
+import {
+  SessionNotesPanel,
+  type NoteDraft,
+} from "./components/SessionNotesPanel";
 
 export function App() {
   return (
@@ -29,6 +33,9 @@ function ConsoleApp() {
     useAuth();
   const [activeTab, setActiveTab] = useState("calls");
   const [online, setOnline] = useState(false);
+  const [notesTarget, setNotesTarget] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, NoteDraft>>({});
+  const [notesRevision, setNotesRevision] = useState(0);
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -142,7 +149,9 @@ function ConsoleApp() {
         eventSource.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
-            if (data.type?.startsWith("call:")) scheduleRefresh();
+            if (data.type?.startsWith("call:") || data.type === "session:notes")
+              scheduleRefresh();
+            if (data.type === "session:notes") setNotesRevision((v) => v + 1);
           } catch {
             /* ignore ping */
           }
@@ -165,10 +174,12 @@ function ConsoleApp() {
     if (isAuthenticated) return;
     setCallsData(null);
     setSessionsData(null);
+    setNotesTarget(null);
+    setNoteDrafts({});
   }, [isAuthenticated]);
 
   const handleClearHistory = async () => {
-    if (!confirm("确定要清空所有调用审计流和会话记录吗？")) return;
+    if (!confirm("确定清空调用审计吗？会话备注和补充消息保留。")) return;
     try {
       await apiFetch("/api/calls", { method: "DELETE" });
       setCallsPage(1);
@@ -210,6 +221,23 @@ function ConsoleApp() {
 
         {systemStatus?.stats && <StatsOverview stats={systemStatus.stats} />}
 
+        {activeTab === "calls" && callsFilters.sessionId && (
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs">
+            <span className="font-mono text-zinc-500 truncate">
+              会话：
+              {sessionsData?.items.find((s) => s.id === callsFilters.sessionId)
+                ?.label || callsFilters.sessionId}
+            </span>
+            <button
+              disabled={callsFilters.sessionId === "unscoped"}
+              onClick={() => setNotesTarget(callsFilters.sessionId!)}
+              className="shrink-0 px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 disabled:opacity-40 cursor-pointer"
+            >
+              发送补充
+            </button>
+          </div>
+        )}
+
         {activeTab === "calls" && (
           <CallsView
             callsData={callsData}
@@ -227,6 +255,7 @@ function ConsoleApp() {
         {activeTab === "sessions" && (
           <SessionsView
             sessionsData={sessionsData}
+            onMessageSession={setNotesTarget}
             onSelectSession={handleSelectSession}
             onPageChange={setSessionsPage}
             onSearchChange={(q) => {
@@ -249,6 +278,30 @@ function ConsoleApp() {
           <ConfigView key={management.data?.generation} />
         )}
       </main>
+
+      {notesTarget && (
+        <SessionNotesPanel
+          key={notesTarget}
+          sessionId={notesTarget}
+          draft={noteDrafts[notesTarget]}
+          revision={notesRevision}
+          onClose={() => setNotesTarget(null)}
+          onChange={() => {
+            void fetchSessions();
+          }}
+          onDraft={(draft) =>
+            setNoteDrafts((previous) => ({ ...previous, [notesTarget]: draft }))
+          }
+          onSent={(id) =>
+            setNoteDrafts((previous) => {
+              if (previous[notesTarget]?.id !== id) return previous;
+              const next = { ...previous };
+              delete next[notesTarget];
+              return next;
+            })
+          }
+        />
+      )}
 
       <footer className="border-t border-zinc-200/80 dark:border-zinc-800/80 py-5 text-center text-xs text-zinc-400 dark:text-zinc-500">
         <p>EXEC MCP • 本机工具代码执行与审计控制台</p>

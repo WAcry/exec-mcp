@@ -49,6 +49,9 @@ host 返回的媒体原样保留，状态、cell_id 和截断提示不计入显�
 因此直接 MCP 边界不声明强制 outputSchema；exec 内完整原始值仍遵循其目录契约。
 显式导出的原生文件链接同样不受文本预算影响；这不是自动落盘，见 [ADR-005](adr-005-file-transfer.md)。
 
+Web 用户补充在正常结果之后独立附带，总文本可至 37,000 UTF-8 字节；只利用剩余额度，
+不缩小普通结果、不截断补充。该队列与 store/审计独立，见 [ADR-010](adr-010-session-notes.md)。
+
 仍然保护请求、目录、嵌套结果和总响应的真实传输大小，以及 V8 与并发执行的资源消耗。
 **48 MiB 是单次已编码载荷的宽松保护参考，不是进程总内存上限，也不是模型上下文预算。**
 参考 host 的 [64 MiB IPC frame 上限](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/host/codec.rs)，

@@ -25,6 +25,8 @@ import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
 import { inputPreview } from "../tool-names.js";
+import { SessionNoteError } from "../session-notes.js";
+import { NOTE_MAX_BYTES } from "../session-notes-types.js";
 import {
   WEB_ACTION_HEADER,
   WEB_COOKIE,
@@ -297,6 +299,10 @@ export async function startWebServer(
     throw error;
   }
 
+  const unsubscribeNotes = runtime.notes.openWeb((event) =>
+    sse.broadcast(event),
+  );
+
   const loopbackUrl = loopbackUrlFor(web.host, actualPort);
   return {
     server,
@@ -313,6 +319,7 @@ export async function startWebServer(
     async close() {
       closePromise ??= (async () => {
         unsubscribeActivity();
+        unsubscribeNotes();
         sse.close();
         await new Promise<void>((resolve, reject) => {
           server.close((error) => (error ? reject(error) : resolve()));
@@ -435,13 +442,76 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
     jsonResponse(
       res,
       200,
-      runtime.activity.getSessions({
+      runtime.notes.sessions(runtime.activity.sessionSummaries(), {
         page,
         pageSize,
         ...(search ? { search } : {}),
       }),
     );
     return;
+  }
+
+  const noteRoute = /^\/api\/sessions\/([^/]+)(?:\/notes(?:\/([^/]+))?)?$/.exec(
+    pathname,
+  );
+  if (noteRoute) {
+    let id: string;
+    let noteId: string | undefined;
+    try {
+      id = decodeURIComponent(noteRoute[1]!);
+      noteId =
+        noteRoute[2] === undefined
+          ? undefined
+          : decodeURIComponent(noteRoute[2]);
+    } catch {
+      throw new HttpError(400, "会话或消息 ID 无效。");
+    }
+    const collection = pathname.endsWith("/notes");
+    if (req.method === "GET" && collection) {
+      jsonResponse(
+        res,
+        200,
+        runtime.notes.page(
+          id,
+          positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
+        ),
+      );
+      return;
+    }
+    if (req.method === "PATCH" && !collection && noteId === undefined) {
+      const body = await readJsonBody(req);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("label" in body) ||
+        typeof body.label !== "string"
+      )
+        throw new HttpError(400, "备注名必须是字符串。");
+      runtime.notes.rename(id, body.label);
+      jsonResponse(res, 200, { success: true });
+      return;
+    }
+    if (req.method === "POST" && collection) {
+      // JSON escaping can make a valid 30 KB message larger than the usual management body cap.
+      const body = await readJsonBody(req, NOTE_MAX_BYTES * 6 + 2048);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        !("id" in body) ||
+        !("text" in body) ||
+        typeof body.id !== "string" ||
+        typeof body.text !== "string"
+      )
+        throw new HttpError(400, "消息需要提交 ID 和文本。");
+      jsonResponse(res, 200, runtime.notes.enqueue(id, body.id, body.text));
+      return;
+    }
+    if (req.method === "DELETE" && noteId !== undefined) {
+      runtime.notes.withdraw(id, noteId);
+      jsonResponse(res, 200, { success: true });
+      return;
+    }
+    throw new HttpError(405, "此消息操作不支持该请求方法。");
   }
 
   if (pathname === "/api/calls" && req.method === "GET") {
@@ -869,25 +939,26 @@ function jsonResponse(
 }
 
 function respondError(res: ServerResponse, error: unknown): void {
-  const status = error instanceof HttpError ? error.status : 500;
+  const known = error instanceof HttpError || error instanceof SessionNoteError;
+  const status = known ? error.status : 500;
   jsonResponse(res, status, {
     error: status === 500 ? "internal_error" : "request_error",
-    message:
-      error instanceof HttpError
-        ? error.message
-        : "内部操作失败；请查看服务状态或本机日志。",
+    message: known ? error.message : "内部操作失败；请查看服务状态或本机日志。",
   });
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+async function readJsonBody(
+  req: IncomingMessage,
+  maximum = JSON_BODY_BYTES,
+): Promise<unknown> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > JSON_BODY_BYTES) {
+    if (bytes > maximum) {
       req.resume();
-      throw new HttpError(413, "请求正文超过 64 KiB。");
+      throw new HttpError(413, `请求正文超过 ${maximum} 字节。`);
     }
     chunks.push(buffer);
   }

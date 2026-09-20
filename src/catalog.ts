@@ -17,7 +17,7 @@ const tokenBudget = z
   .min(0)
   .max(Number.MAX_SAFE_INTEGER)
   .describe(
-    "本次文本的近似 token 预算，0 省略文本；最终响应仍限 36,000 UTF-8 字节。超限保留首尾；媒体和状态保留，嵌套结果及 store 不变。",
+    "本次文本的近似 token 预算，0 省略文本；普通结果仍限 36,000 UTF-8 字节。超限保留首尾；媒体和状态保留，嵌套结果及 store 不变；用户补充另计。",
   )
   .optional();
 export const EXEC_SCHEMA = z
@@ -386,7 +386,7 @@ export function directContract(contract: NativeContract) {
       "创建和修改文本文件优先使用 apply_patch，避免命令行参数长度限制。";
   if (contract.name !== "view_image")
     description +=
-      "对象结果在 structuredContent，文本在 content；与 exec/wait 一样，本服务每次返回文本限 36,000 UTF-8 字节，超出改为首尾文本，截断不补发。";
+      "对象结果在 structuredContent，文本在 content；与 exec/wait 一样，本服务每次返回文本限 36,000 UTF-8 字节，超出改为首尾文本，截断不补发。用户补充另计，合计最多 37,000 UTF-8 字节。";
   return {
     title: NATIVE_TOOL_TITLES[contract.name],
     schema,
@@ -416,8 +416,8 @@ ALL_TOOLS 是本次已绑定本机和下游工具的 {name,description}[]，含 
 store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未命中为 undefined；key 为字符串，依赖宿主的对话标识 openai/session。每次 exec 读启动快照，结束时合并写入，脚本报错也可能提交；修改 load 的副本后需再次 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启后存储可能清空；同一对话可重新 exec，长期数据用文件。
 Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_code 与输出，stderr_bytes 表示管道收到过错误流（不等同于失败）。
 超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
-source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。本服务的 exec/wait 与直接调用均限每次最终文本 36,000 UTF-8 字节，超出保留首尾；exec 内的工具结果不受该出口限额提前裁剪。跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。
+source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。本服务的 exec/wait 与直接调用均限每次最终文本 36,000 UTF-8 字节，超出保留首尾；exec 内的工具结果不受该出口限额提前裁剪。跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。用户补充另计，合计最多 37,000 UTF-8 字节。
 cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回，terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 write_stdin 续取。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回，terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；普通文本仍限 36,000 UTF-8 字节，媒体与状态保留。用户补充另计，合计最多 37,000 UTF-8 字节。终端 session_id 用 write_stdin 续取。";

@@ -56,6 +56,9 @@ export interface CallSummary {
 
 export interface SessionSummary {
   id: string;
+  label?: string;
+  pendingNotes?: number;
+  canMessage?: boolean;
   callCount: number;
   errorCount: number;
   firstSeen: string;

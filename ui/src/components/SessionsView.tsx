@@ -18,6 +18,7 @@ interface SessionsViewProps {
   onSelectSession: (sessionId: string) => void;
   onPageChange: (page: number) => void;
   onSearchChange: (search: string) => void;
+  onMessageSession: (sessionId: string) => void;
 }
 
 export function SessionsView({
@@ -25,6 +26,7 @@ export function SessionsView({
   onSelectSession,
   onPageChange,
   onSearchChange,
+  onMessageSession,
 }: SessionsViewProps) {
   const [query, setQuery] = useState("");
   const [nativeMap, setNativeMap] = useState<Record<string, NativeSessionItem>>(
@@ -59,7 +61,7 @@ export function SessionsView({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
             type="text"
-            placeholder="搜索会话关联摘要或最近调用..."
+            placeholder="搜索会话哈希、备注名或最近调用..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
@@ -81,6 +83,7 @@ export function SessionsView({
           sessionsData.items.map((session) => (
             <div
               key={session.id}
+              data-session-id={session.id}
               onClick={() => onSelectSession(session.id)}
               className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs hover:border-zinc-400 dark:hover:border-zinc-600 transition-all cursor-pointer flex flex-col justify-between group"
             >
@@ -92,9 +95,9 @@ export function SessionsView({
                     </div>
                     <h3
                       className="font-mono text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate"
-                      title={session.id}
+                      title={session.label || session.id}
                     >
-                      {session.id}
+                      {session.label || session.id}
                     </h3>
                   </div>
                   <span className="text-[10px] text-zinc-500 whitespace-nowrap">
@@ -103,6 +106,15 @@ export function SessionsView({
                       : "可继续使用"}
                   </span>
                 </div>
+
+                {session.label && (
+                  <p
+                    className="font-mono text-[10px] text-zinc-500 truncate mb-2"
+                    title={session.id}
+                  >
+                    {session.id}
+                  </p>
+                )}
 
                 {nativeMap[session.id] && !nativeMap[session.id]!.retired && (
                   <div className="mb-2.5 px-2 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/80 text-[11px] font-mono flex items-center justify-between text-zinc-700 dark:text-zinc-300">
@@ -162,8 +174,26 @@ export function SessionsView({
               </div>
 
               <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 font-medium">
-                <span>查看会话调用流</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                <span className="flex items-center gap-1">
+                  查看会话调用流
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </span>
+                <button
+                  disabled={!session.canMessage}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMessageSession(session.id);
+                  }}
+                  title={
+                    session.canMessage
+                      ? "给此对话发送补充或设置备注名"
+                      : "缺少可用的对话标识"
+                  }
+                  className="px-2 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  发送补充
+                  {session.pendingNotes ? ` · ${session.pendingNotes}` : ""}
+                </button>
               </div>
             </div>
           ))

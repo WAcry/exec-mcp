@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -407,10 +408,32 @@ enabled = true
     ),
     { complete: true },
   );
+  const notesScope = createHash("sha256")
+    .update("package-smoke-conversation")
+    .digest("base64url");
+  const notesUrl = new URL(`/api/sessions/${notesScope}/notes`, started.web);
+  const queuedNote = await fetch(notesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-exec-web": "1" },
+    body: JSON.stringify({
+      id: "installed-note",
+      text: "PACKAGED_SESSION_NOTE",
+    }),
+  });
+  assert.equal(queuedNote.status, 200, await queuedNote.text());
   const toolSurface = await scopedCall(
     "text({create:typeof tools.request_user_input_async,read:typeof tools.get_user_input});",
   );
   assert.ok(!toolSurface.isError, JSON.stringify(toolSurface));
+  assert.ok(
+    toolSurface.content.some(
+      (block) =>
+        block.type === "text" && block.text.includes("PACKAGED_SESSION_NOTE"),
+    ),
+  );
+  const notesPage = await (await fetch(notesUrl)).json();
+  assert.equal(notesPage.pendingCount, 0);
+  assert.equal(notesPage.items[0].status, "attached");
   assert.deepEqual(
     JSON.parse(
       toolSurface.content.find(

@@ -39,6 +39,7 @@ import { MEMORY_SCHEMA, MiB } from "./memory.js";
 import { boundModelOutput } from "./code-mode/model-output.js";
 import { ActivityStore } from "./web/activity.js";
 import type { CallRecord } from "./web/types.js";
+import { SessionNotes } from "./session-notes.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -84,6 +85,7 @@ export class ExecRuntime {
   readonly discovery: ToolDiscovery;
   readonly artifacts: ArtifactStore;
   readonly activity: ActivityStore;
+  readonly notes: SessionNotes;
   private initialization: Promise<void> | undefined;
   private initialized = false;
   private closing: Promise<void> | undefined;
@@ -98,6 +100,7 @@ export class ExecRuntime {
     config: Config,
     artifacts?: ArtifactStore,
     activity?: ActivityStore,
+    notes?: SessionNotes,
   ) {
     this.securitySchemes =
       config.access === "openai-tunnel"
@@ -128,6 +131,7 @@ export class ExecRuntime {
     // startServer() can be embedded without a Web console. Only an explicit
     // observer enables capture, so a hidden audit trail is never the default.
     this.activity = activity ?? new ActivityStore({ enabled: false });
+    this.notes = notes ?? new SessionNotes();
   }
   get ready(): boolean {
     return this.initialized && this.closing === undefined;
@@ -252,7 +256,7 @@ export class ExecRuntime {
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。等待长任务用较长窗口减少轮询；需及时交互时缩短。",
+          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。等待长任务用较长窗口减少轮询；需及时交互时缩短。工具响应可能附带用户从 Web 发给本对话的补充，按时间和序号调整后续工作；随正常调用接收，无需专门查询或等待。",
       },
     );
     const annotations = {
@@ -292,6 +296,7 @@ export class ExecRuntime {
           async (raw, context) => {
             const args = raw as Record<string, unknown>;
             const scope = sessionScope(context);
+            this.notes.observe(sessionScopeKey(scope));
             // Host-bound signed URLs stay out of the Web audit, just as with exec.files.
             const auditArgs = { ...args };
             if (contract.name === "import_file") {
@@ -339,13 +344,18 @@ export class ExecRuntime {
                   this.searchTools(query, limit, searchSignal),
               });
               const failed = subcallFailed(value);
-              const result = directResult(
-                contract.name,
-                value,
-                failed,
-                attachments.items
-                  .filter((item) => this.artifacts.available(item.id, scope))
-                  .map((item) => item.content),
+              const result = this.notes.attach(
+                directResult(
+                  contract.name,
+                  value,
+                  failed,
+                  attachments.items
+                    .filter((item) => this.artifacts.available(item.id, scope))
+                    .map((item) => item.content),
+                ),
+                sessionScopeKey(scope),
+                tracker.id,
+                context.mcpReq.signal,
               );
               tracker.finish({
                 status:
@@ -372,7 +382,12 @@ export class ExecRuntime {
                   .filter((item) => this.artifacts.available(item.id, scope))
                   .map((item) => item.content),
               );
-              const response = boundModelOutput(result);
+              const response = this.notes.attach(
+                boundModelOutput(result),
+                sessionScopeKey(scope),
+                tracker.id,
+                context.mcpReq.signal,
+              );
               tracker.finish({
                 status: "error",
                 error: error instanceof Error ? error.message : String(error),
@@ -400,6 +415,7 @@ export class ExecRuntime {
       },
       async (args, context) => {
         const scope = sessionScope(context);
+        this.notes.observe(sessionScopeKey(scope));
         const callArgs: CallRecord["args"] = {
           ...(args.source !== undefined ? { source: args.source } : {}),
           ...(args.workdir !== undefined ? { workdir: args.workdir } : {}),
@@ -526,7 +542,12 @@ export class ExecRuntime {
               codeModeState = state;
             },
           });
-          const result = boundModelOutput(execResult);
+          const result = this.notes.attach(
+            boundModelOutput(execResult),
+            sessionScopeKey(scope),
+            callTracker.id,
+            context.mcpReq.signal,
+          );
           callTracker.finish({
             status: execResult.isError
               ? "error"
@@ -541,7 +562,12 @@ export class ExecRuntime {
         } catch (error) {
           const result = toolError(error);
           result.content.push(...takeAttachments());
-          const response = boundModelOutput(result);
+          const response = this.notes.attach(
+            boundModelOutput(result),
+            sessionScopeKey(scope),
+            callTracker.id,
+            context.mcpReq.signal,
+          );
           callTracker.finish({
             status: "error",
             error: error instanceof Error ? error.message : String(error),
@@ -564,6 +590,7 @@ export class ExecRuntime {
       },
       async (args, context) => {
         const scope = sessionScope(context);
+        this.notes.observe(sessionScopeKey(scope));
         const waitArgs: CallRecord["args"] = {
           cell_id: args.cell_id,
           ...(args.yield_time_ms !== undefined
@@ -600,7 +627,12 @@ export class ExecRuntime {
               codeModeState = state;
             },
           });
-          const result = boundModelOutput(waitResult);
+          const result = this.notes.attach(
+            boundModelOutput(waitResult),
+            sessionScopeKey(scope),
+            callTracker.id,
+            context.mcpReq.signal,
+          );
           callTracker.finish({
             status: waitResult.isError
               ? "error"
@@ -613,7 +645,12 @@ export class ExecRuntime {
           });
           return result;
         } catch (error) {
-          const result = boundModelOutput(toolError(error));
+          const result = this.notes.attach(
+            boundModelOutput(toolError(error)),
+            sessionScopeKey(scope),
+            callTracker.id,
+            context.mcpReq.signal,
+          );
           callTracker.finish({
             status: "error",
             error: error instanceof Error ? error.message : String(error),

@@ -60,6 +60,7 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 不实现同步或异步用户问答、Skill 安装/执行管理，
 也不增加 Workspace、子 Agent、持久任务或调度框架。
 需要用户决定时在原 ChatGPT 对话中沟通；不另外维护问题收件箱、答复数据库或浏览器通知。
+操作者主动通过 Web 补充上下文的单向消息见 [ADR-010](adr-010-session-notes.md)，不恢复 Agent 提问流程。
 本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。
 原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
 文件既可直接导入/导出也可由 exec 编排，原生绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。

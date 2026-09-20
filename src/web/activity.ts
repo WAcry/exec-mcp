@@ -272,6 +272,10 @@ export class ActivityStore {
     };
   }
 
+  sessionSummaries(): SessionSummary[] {
+    return [...this.sessions.values()];
+  }
+
   getSessions(
     options: {
       search?: string;

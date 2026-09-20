@@ -56,6 +56,7 @@ export class ServiceController {
     });
     const server = await startServer(next.config, {
       activity,
+      notes: this.current.server.runtime.notes,
       signal: this.abort.signal,
       ...(this.options.onProgress
         ? { onDownstreamProgress: this.options.onProgress }

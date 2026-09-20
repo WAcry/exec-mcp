@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import {
   Client,
   StreamableHTTPClientTransport,
+  type CallToolResult,
 } from "@modelcontextprotocol/client";
 import { startServer } from "../src/server.js";
 import { ArtifactStore } from "../src/files/artifacts.js";
@@ -23,9 +24,18 @@ import { resolveShell, findShellExecutable } from "../src/host/shell.js";
 import { directResult } from "../src/results.js";
 import { MODEL_TEXT_BYTES } from "../src/code-mode/model-output.js";
 import type { TerminalResult } from "../src/host/terminal.js";
-import { jsonOutput, nodeCommand, observeTerminal, texts } from "./helpers.js";
+import {
+  cellId,
+  jsonOutput,
+  nodeCommand,
+  observeTerminal,
+  texts,
+} from "./helpers.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
+// The SDK adds private transport metadata after the runtime prepares its response.
+const visibleResult = ({ _meta: _private, ...result }: CallToolResult) =>
+  result;
 afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();
 });
@@ -444,15 +454,96 @@ describe.each([false, true])(
       };
       expect(list.items).toHaveLength(1);
       expect(list.items[0]!.tool).toBe("apply_patch");
-      expect(list.items[0]!.args.patch).toBe("*** Begin Patch");
+      expect(list.items[0]!.args.patch).toBe("*** Add File: web.md");
       const detail = (await (
         await fetch(new URL("api/calls/" + list.items[0]!.id, web.loopbackUrl))
       ).json()) as { args: { patch: string }; subcalls: unknown[] };
       expect(detail.args.patch).toBe(patch);
       expect(detail.subcalls).toHaveLength(0);
       expect(t.activity.getSessions().items[0]!.lastCall!.preview).toBe(
-        "*** Begin Patch",
+        "*** Add File: web.md",
       );
+    });
+    it("retains search options and the actual direct MCP response in the audit", async () => {
+      const t = await setup(legacy);
+      const result = await t.call("tool_search", {
+        query: "apply_patch",
+        limit: 1,
+      });
+      const call = t.activity.getCalls({ tool: "tool_search" }).items[0]!;
+      expect(call.args).toEqual({ query: "apply_patch", limit: 1 });
+      expect(call.status).toBe("completed");
+      expect(call.output).toEqual(visibleResult(result));
+      expect(call.subcalls).toEqual([]);
+      const tools = (await t.client.listTools()).tools;
+      expect(
+        tools.find((tool) => tool.name === "tool_search")!.description,
+      ).toContain("对象结果在 structuredContent");
+      expect(tools[0]!.description).toContain("本机对象结果直接返回");
+    });
+    it("keeps max_tokens under its actual wait parameter name and retains zero and false", async () => {
+      const t = await setup(legacy);
+      const first = await t.call("exec", {
+        source: "yield_control();await new Promise(()=>{});",
+      });
+      expect(first.isError).not.toBe(true);
+      const id = cellId(first);
+      const args = {
+        cell_id: id,
+        yield_time_ms: 0,
+        max_tokens: 0,
+        terminate: false,
+      };
+      const response = await t.call("wait", args);
+      const call = t.activity.getCalls({ tool: "wait" }).items[0]!;
+      expect(call.args).toEqual(args);
+      expect(call.output).toEqual(visibleResult(response));
+      await t.call("wait", { cell_id: id, terminate: true });
+    });
+    it("keeps safe host file metadata in direct and exec audit inputs without their credentials", async () => {
+      const t = await setup(legacy);
+      const file = {
+        ...t.file,
+        file_name: "report.txt",
+        mime_type: "text/plain",
+      };
+      await t.call("import_file", {
+        file,
+        destination: path.join(t.root, "direct.txt"),
+        overwrite: false,
+      });
+      await t.call("exec", { files: [file], source: "text(42);" });
+      const metadata = {
+        name: "report.txt",
+        type: "text/plain",
+        size: t.bytes.length,
+      };
+      expect(
+        t.activity.getCalls({ tool: "import_file" }).items[0]!.args.file,
+      ).toEqual(metadata);
+      expect(
+        t.activity.getCalls({ tool: "exec" }).items[0]!.args.files,
+      ).toEqual([metadata]);
+      expect(JSON.stringify(t.activity.getCalls())).not.toMatch(
+        /SYNTHETIC_SIGNED_FILE_URL|host-bound-fixture|download_url/,
+      );
+    });
+    it("records an explicit direct termination as terminated, preserving the actual exit result", async () => {
+      const t = await setup(legacy);
+      const first = await t.call("exec_command", {
+        cmd: nodeCommand("setInterval(()=>{},1000);"),
+        workdir: t.root,
+        yield_time_ms: 0,
+      });
+      const id = jsonOutput<TerminalResult>(first).session_id!;
+      const result = await t.call("write_stdin", {
+        session_id: id,
+        terminate: true,
+      });
+      const call = t.activity.getCalls({ tool: "write_stdin" }).items[0]!;
+      expect(call.status).toBe("terminated");
+      expect(call.output).toEqual(visibleResult(result));
+      expect(jsonOutput<TerminalResult>(result).exit_code).toBeDefined();
     });
   },
 );

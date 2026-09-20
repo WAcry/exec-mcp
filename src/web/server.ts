@@ -24,6 +24,7 @@ import { configView, mcpServerView } from "./config-view.js";
 import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
+import { inputPreview } from "../tool-names.js";
 import {
   WEB_ACTION_HEADER,
   WEB_COOKIE,
@@ -485,7 +486,7 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
             "session_id",
           ].flatMap((key) =>
             typeof call.args[key] === "string"
-              ? [[key, call.args[key].split("\n", 1)[0]!.slice(0, 512)]]
+              ? [[key, inputPreview(key, call.args[key])]]
               : [],
           ),
         ),

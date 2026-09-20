@@ -16,6 +16,17 @@ export const TOP_LEVEL_TOOL_NAMES = [
   ...Object.keys(NATIVE_TOOL_TITLES),
 ];
 
+/** A compact preview, not a second copy of the request's full input. */
+export function inputPreview(key: string, value: string): string {
+  for (const line of value.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || (key === "patch" && trimmed === "*** Begin Patch"))
+      continue;
+    return trimmed.slice(0, 240);
+  }
+  return "";
+}
+
 export function callPreview(
   tool: string,
   args: Record<string, unknown>,
@@ -29,8 +40,10 @@ export function callPreview(
     "destination",
     "workdir",
   ]) {
-    if (typeof args[key] === "string")
-      return args[key].split("\n")[0]!.trim().slice(0, 240);
+    if (typeof args[key] === "string") {
+      const preview = inputPreview(key, args[key]);
+      if (preview) return preview;
+    }
   }
   const id = args.cell_id ?? args.session_id;
   return typeof id === "string" ? `${tool}(${id})` : tool;

@@ -370,9 +370,12 @@ export class ActivityStore {
     let truncated = 0;
     for (const [key, value] of Object.entries(args)) {
       if (value === undefined) continue;
-      if (key === "source" && typeof value === "string") {
+      if (
+        ["source", "cmd", "patch"].includes(key) &&
+        typeof value === "string"
+      ) {
         const snapshot = truncateAuditText(value, 16 * 1024);
-        result.source = snapshot.value;
+        result[key] = snapshot.value;
         if (snapshot.truncated) truncated++;
         continue;
       }

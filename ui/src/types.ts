@@ -49,7 +49,7 @@ export interface CallSummary {
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
-  args: { source?: string; cell_id?: string };
+  args: Record<string, unknown>;
   subcallCount: number;
   truncated: boolean;
 }

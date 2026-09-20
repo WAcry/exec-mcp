@@ -46,6 +46,15 @@ function sessionScope(context: ServerContext): string | undefined {
   return typeof session === "string" && session.length ? session : undefined;
 }
 
+/** Only display metadata from host bindings; signed URLs and opaque credentials stay private. */
+function fileAuditMetadata(file: HostFile) {
+  return {
+    ...(typeof file.file_name === "string" ? { name: file.file_name } : {}),
+    ...(typeof file.mime_type === "string" ? { type: file.mime_type } : {}),
+    ...(typeof file.size === "number" ? { size: file.size } : {}),
+  };
+}
+
 function subcallFailed(result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const value = result as Record<string, unknown>;
@@ -286,12 +295,7 @@ export class ExecRuntime {
             // Host-bound signed URLs stay out of the Web audit, just as with exec.files.
             const auditArgs = { ...args };
             if (contract.name === "import_file") {
-              const file = args.file as HostFile;
-              auditArgs.file = {
-                name: file.file_name,
-                type: file.mime_type,
-                size: file.size,
-              };
+              auditArgs.file = fileAuditMetadata(args.file as HostFile);
             }
             const tracker = this.activity.startCall({
               tool: contract.name,
@@ -344,12 +348,21 @@ export class ExecRuntime {
                   .map((item) => item.content),
               );
               tracker.finish({
-                status: failed
-                  ? "error"
-                  : value && typeof value === "object" && "session_id" in value
-                    ? "yielding"
-                    : "completed",
-                output: value,
+                status:
+                  contract.name === "write_stdin" &&
+                  args.terminate === true &&
+                  value &&
+                  typeof value === "object" &&
+                  "exit_code" in value
+                    ? "terminated"
+                    : failed
+                      ? "error"
+                      : value &&
+                          typeof value === "object" &&
+                          "session_id" in value
+                        ? "yielding"
+                        : "completed",
+                output: result,
               });
               return result;
             } catch (error) {
@@ -359,12 +372,13 @@ export class ExecRuntime {
                   .filter((item) => this.artifacts.available(item.id, scope))
                   .map((item) => item.content),
               );
+              const response = boundModelOutput(result);
               tracker.finish({
                 status: "error",
                 error: error instanceof Error ? error.message : String(error),
-                output: result,
+                output: response,
               });
-              return boundModelOutput(result);
+              return response;
             }
           },
         );
@@ -397,11 +411,7 @@ export class ExecRuntime {
             : {}),
           ...(args.files !== undefined
             ? {
-                files: args.files.map((f) => ({
-                  ...(typeof f.name === "string" ? { name: f.name } : {}),
-                  ...(typeof f.size === "number" ? { size: f.size } : {}),
-                  ...(typeof f.type === "string" ? { type: f.type } : {}),
-                })),
+                files: args.files.map(fileAuditMetadata),
               }
             : {}),
         };
@@ -516,6 +526,7 @@ export class ExecRuntime {
               codeModeState = state;
             },
           });
+          const result = boundModelOutput(execResult);
           callTracker.finish({
             status: execResult.isError
               ? "error"
@@ -524,18 +535,19 @@ export class ExecRuntime {
                 : codeModeState === "terminated"
                   ? "terminated"
                   : "completed",
-            output: execResult,
+            output: result,
           });
-          return boundModelOutput(execResult);
+          return result;
         } catch (error) {
           const result = toolError(error);
           result.content.push(...takeAttachments());
+          const response = boundModelOutput(result);
           callTracker.finish({
             status: "error",
             error: error instanceof Error ? error.message : String(error),
-            output: result,
+            output: response,
           });
-          return boundModelOutput(result);
+          return response;
         }
       },
     );
@@ -558,7 +570,7 @@ export class ExecRuntime {
             ? { yield_time_ms: args.yield_time_ms }
             : {}),
           ...(args.max_tokens !== undefined
-            ? { max_output_tokens: args.max_tokens }
+            ? { max_tokens: args.max_tokens }
             : {}),
           ...(args.terminate !== undefined
             ? { terminate: args.terminate }
@@ -588,6 +600,7 @@ export class ExecRuntime {
               codeModeState = state;
             },
           });
+          const result = boundModelOutput(waitResult);
           callTracker.finish({
             status: waitResult.isError
               ? "error"
@@ -596,17 +609,17 @@ export class ExecRuntime {
                 : codeModeState === "terminated"
                   ? "terminated"
                   : "completed",
-            output: waitResult,
+            output: result,
           });
-          return boundModelOutput(waitResult);
+          return result;
         } catch (error) {
-          const result = toolError(error);
+          const result = boundModelOutput(toolError(error));
           callTracker.finish({
             status: "error",
             error: error instanceof Error ? error.message : String(error),
             output: result,
           });
-          return boundModelOutput(result);
+          return result;
         }
       },
     );

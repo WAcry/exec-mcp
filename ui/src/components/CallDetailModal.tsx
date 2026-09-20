@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CallRecord } from "../types";
 import { CodeBlock } from "./CodeBlock";
+import {
+  callInput,
+  callStatusLabel,
+  hasSubcalls,
+} from "../lib/call-presentation";
 import {
   X,
   Clock,
@@ -8,56 +13,65 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  FolderOpen,
   ArrowRight,
   Square,
-  FileCode,
   Zap,
 } from "lucide-react";
 
 interface CallDetailModalProps {
   call: CallRecord;
   onClose: () => void;
+  refreshError?: string | null;
+  onRefresh?: () => void;
 }
 
-export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
-  const code =
-    typeof call.args.source === "string"
-      ? call.args.source
-      : typeof call.args.cmd === "string"
-        ? call.args.cmd
-        : typeof call.args.patch === "string"
-          ? call.args.patch
-          : undefined;
-  const language =
-    call.tool === "exec"
-      ? "javascript"
-      : call.tool === "apply_patch"
-        ? "diff"
-        : "text";
-  const [activeTab, setActiveTab] = useState<
-    "overview" | "source" | "subcalls" | "output"
+export function CallDetailModal({
+  call,
+  onClose,
+  refreshError,
+  onRefresh,
+}: CallDetailModalProps) {
+  const [selectedTab, setActiveTab] = useState<
+    "overview" | "input" | "subcalls" | "output"
   >("overview");
+  const showSubcalls = hasSubcalls(call);
+  const activeTab =
+    selectedTab === "subcalls" && !showSubcalls ? "input" : selectedTab;
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="w-full max-w-4xl max-h-[90vh] bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="call-detail-title"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+    >
+      <div className="w-full min-w-0 max-w-4xl max-h-[90vh] bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap min-w-0 items-center gap-2.5">
             <span className="px-2 py-0.5 rounded text-xs font-mono font-bold uppercase bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
               {call.tool}
             </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 font-mono">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3
+                  id="call-detail-title"
+                  className="text-sm break-all font-bold text-zinc-900 dark:text-zinc-100 font-mono"
+                >
                   {call.id}
                 </h3>
-                <StatusBadge status={call.status} />
+                <StatusBadge call={call} />
               </div>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
                 会话:{" "}
-                <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                <span className="font-mono break-all text-zinc-700 dark:text-zinc-300">
                   {call.sessionId}
                 </span>{" "}
                 • 开始于: {new Date(call.startedAt).toLocaleString("zh-CN")}
@@ -66,6 +80,7 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
           </div>
           <button
             onClick={onClose}
+            aria-label="关闭详情"
             className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -73,10 +88,11 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
         </div>
 
         {/* Tab switcher */}
-        <div className="flex items-center gap-1 px-5 pt-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#121215]">
+        <div className="flex items-center gap-1 overflow-x-auto shrink-0 px-5 pt-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#121215]">
           <button
             onClick={() => setActiveTab("overview")}
-            className={`pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
+            aria-pressed={activeTab === "overview"}
+            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
               activeTab === "overview"
                 ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -84,35 +100,38 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
           >
             总览元数据
           </button>
-          {code && (
-            <button
-              onClick={() => setActiveTab("source")}
-              className={`pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
-                activeTab === "source"
-                  ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
-                  : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-              }`}
-            >
-              输入原文
-            </button>
-          )}
           <button
-            onClick={() => setActiveTab("subcalls")}
-            className={`flex items-center gap-1.5 pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
-              activeTab === "subcalls"
+            onClick={() => setActiveTab("input")}
+            aria-pressed={activeTab === "input"}
+            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
+              activeTab === "input"
                 ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
             }`}
           >
-            <span>工具内部调用流</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 font-mono text-zinc-600 dark:text-zinc-400">
-              {call.subcalls.length}
-              {call.omittedSubcalls ? `+${call.omittedSubcalls}` : ""}
-            </span>
+            输入参数
           </button>
+          {showSubcalls && (
+            <button
+              onClick={() => setActiveTab("subcalls")}
+              aria-pressed={activeTab === "subcalls"}
+              className={`flex items-center shrink-0 whitespace-nowrap gap-1.5 pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
+                activeTab === "subcalls"
+                  ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
+                  : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+              }`}
+            >
+              <span>工具内部调用流</span>
+              <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 font-mono text-zinc-600 dark:text-zinc-400">
+                {call.subcalls.length}
+                {call.omittedSubcalls ? `+${call.omittedSubcalls}` : ""}
+              </span>
+            </button>
+          )}
           <button
             onClick={() => setActiveTab("output")}
-            className={`pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
+            aria-pressed={activeTab === "output"}
+            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
               activeTab === "output"
                 ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -124,6 +143,28 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
 
         {/* Tab Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {refreshError && (
+            <div
+              role="alert"
+              className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
+            >
+              详情刷新失败，当前显示上次记录：{refreshError}
+              <button
+                onClick={onRefresh}
+                className="ml-2 underline cursor-pointer"
+              >
+                重新读取
+              </button>
+            </div>
+          )}
+          {(call.truncatedFields ?? 0) > 0 && (
+            <div
+              role="note"
+              className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
+            >
+              审计副本部分内容已裁剪，复制内容可能不完整；实际调用不受审计裁剪影响。
+            </div>
+          )}
           {activeTab === "overview" && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -147,77 +188,22 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                 </div>
                 <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
                   <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Zap className="w-3.5 h-3.5" /> 底层子调用
+                    <Zap className="w-3.5 h-3.5" /> 调用入口
                   </span>
-                  <span className="text-base font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                    {call.subcalls.length} 次执行
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                    {call.tool === "exec"
+                      ? "Code Mode 编排"
+                      : call.tool === "wait"
+                        ? "Code Mode 等待"
+                        : "直接工具调用"}
                   </span>
                 </div>
               </div>
-
-              {call.args.workdir && (
-                <div className="flex items-center gap-2 p-3 text-xs bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg">
-                  <FolderOpen className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                  <span className="text-zinc-500">工作目录 (workdir):</span>
-                  <span className="font-mono text-zinc-800 dark:text-zinc-200 select-all">
-                    {call.args.workdir}
-                  </span>
-                </div>
-              )}
-
-              {call.args.files && call.args.files.length > 0 && (
-                <div className="p-3.5 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg space-y-2">
-                  <span className="text-xs font-semibold text-zinc-500 flex items-center gap-1.5">
-                    <FileCode className="w-3.5 h-3.5 text-zinc-400" />
-                    携带的原生文件引用 (files)
-                  </span>
-                  <div className="space-y-1">
-                    {call.args.files.map((f, i) => (
-                      <div
-                        key={i}
-                        className="text-xs font-mono flex items-center justify-between p-2 rounded bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800"
-                      >
-                        <span>{f.name ?? `文件索引 #${i}`}</span>
-                        <span className="text-zinc-400">
-                          {f.size ? `${(f.size / 1024).toFixed(1)} KB` : ""}{" "}
-                          {f.type ? `(${f.type})` : ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {code ? (
-                <div>
-                  <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-                    输入原文预览
-                  </h4>
-                  <CodeBlock
-                    code={code}
-                    language={language}
-                    maxHeight="max-h-60"
-                  />
-                </div>
-              ) : (
-                <CodeBlock
-                  code={JSON.stringify(call.args, null, 2)}
-                  language="json"
-                  maxHeight="max-h-60"
-                />
-              )}
+              <InputParameters call={call} />
             </div>
           )}
 
-          {activeTab === "source" && code && (
-            <div className="space-y-2">
-              <CodeBlock
-                code={code}
-                language={language}
-                maxHeight="max-h-[500px]"
-              />
-            </div>
-          )}
+          {activeTab === "input" && <InputParameters call={call} />}
 
           {activeTab === "subcalls" && (
             <div className="space-y-3">
@@ -308,12 +294,6 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
 
           {activeTab === "output" && (
             <div className="space-y-3">
-              {(call.truncatedFields ?? 0) > 0 && (
-                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
-                  审计视图有 {call.truncatedFields}{" "}
-                  个字段因体积过大被保留首尾；原工具结果不受影响。
-                </div>
-              )}
               {call.error && (
                 <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
                   <h5 className="font-semibold text-xs flex items-center gap-1 mb-1">
@@ -328,7 +308,7 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
               {call.output !== undefined ? (
                 <div>
                   <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-                    MCP 响应体
+                    MCP 返回（审计副本）
                   </h5>
                   <CodeBlock
                     code={JSON.stringify(call.output, null, 2)}
@@ -353,12 +333,50 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
   );
 }
 
-function StatusBadge({ status }: { status: CallRecord["status"] }) {
+function InputParameters({ call }: { call: CallRecord }) {
+  const { code, parameters } = callInput(call);
+  return (
+    <div className="space-y-3">
+      <div>
+        <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+          {code ? "其余输入参数" : "输入参数"}（显式传入值）
+        </h4>
+        {(Object.hasOwn(call.args, "file") ||
+          (Array.isArray(call.args.files) && call.args.files.length > 0)) && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+            附件引用只显示名称、类型和大小，下载凭据已省略。
+          </p>
+        )}
+        <CodeBlock
+          code={JSON.stringify(parameters, null, 2)}
+          language="json"
+          maxHeight="max-h-60"
+        />
+      </div>
+      {code && (
+        <div>
+          <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+            {code.field} 原文
+          </h4>
+          <CodeBlock
+            code={code.value}
+            language={code.language}
+            maxHeight="max-h-[450px]"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ call }: { call: CallRecord }) {
+  const { status } = call;
+  const label = callStatusLabel(call);
   if (status === "running") {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
         <Loader2 className="w-3 h-3 animate-spin" />
-        运行中
+        {label}
       </span>
     );
   }
@@ -366,7 +384,7 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
         <CheckCircle2 className="w-3 h-3" />
-        调用完成
+        {label}
       </span>
     );
   }
@@ -374,7 +392,7 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
         <ArrowRight className="w-3 h-3" />
-        让出控制权
+        {label}
       </span>
     );
   }
@@ -382,14 +400,14 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
         <Square className="w-3 h-3" />
-        已终止
+        {label}
       </span>
     );
   }
   return (
     <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
       <AlertCircle className="w-3 h-3" />
-      失败
+      {label}
     </span>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TOP_LEVEL_TOOL_NAMES, callPreview } from "../../../src/tool-names";
 import type { CallRecord, CallSummary, PaginatedResult } from "../types";
 import { CallDetailModal } from "./CallDetailModal";
@@ -39,22 +39,53 @@ export function CallsView({
   onSelectSession,
 }: CallsViewProps) {
   const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRefresh, setDetailRefresh] = useState(0);
+  const detailAbort = useRef<AbortController | null>(null);
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [toolFilter, setToolFilter] = useState("all");
 
-  const openDetail = async (call: CallSummary) => {
+  // A single observer follows the selected request; late fetches cannot reopen another call.
+  useEffect(() => {
+    if (!detailId) return;
+    const controller = new AbortController();
+    detailAbort.current = controller;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const call = await apiFetch<CallRecord>(
+          `/api/calls/${encodeURIComponent(detailId)}`,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setSelectedCall(call);
+        setDetailError(null);
+        if (call.status === "running")
+          timer = setTimeout(() => void load(), 1500);
+      } catch (error) {
+        if (!controller.signal.aborted) setDetailError(String(error));
+      } finally {
+        if (!controller.signal.aborted) setDetailLoading(null);
+      }
+    };
+    void load();
+    return () => {
+      controller.abort();
+      if (detailAbort.current === controller) detailAbort.current = null;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [detailId, detailRefresh]);
+
+  const openDetail = (call: CallSummary) => {
+    detailAbort.current?.abort();
+    setSelectedCall(null);
+    setDetailError(null);
     setDetailLoading(call.id);
-    try {
-      setSelectedCall(
-        await apiFetch<CallRecord>(`/api/calls/${encodeURIComponent(call.id)}`),
-      );
-    } catch (error) {
-      alert("读取调用详情失败: " + String(error));
-    } finally {
-      setDetailLoading(null);
-    }
+    setDetailId(call.id);
+    setDetailRefresh((value) => value + 1);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -89,6 +120,20 @@ export function CallsView({
 
   return (
     <div className="space-y-3.5">
+      {detailError && !selectedCall && (
+        <div
+          role="alert"
+          className="p-3 text-xs text-rose-600 dark:text-rose-400"
+        >
+          读取调用详情失败：{detailError}
+          <button
+            onClick={() => setDetailRefresh((value) => value + 1)}
+            className="ml-2 underline cursor-pointer"
+          >
+            重试
+          </button>
+        </div>
+      )}
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
         <form onSubmit={handleSearchSubmit} className="relative flex-1">
@@ -185,6 +230,7 @@ export function CallsView({
                 callsData.items.map((call) => (
                   <tr
                     key={call.id}
+                    data-call-id={call.id}
                     onClick={() => void openDetail(call)}
                     className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
                   >
@@ -230,9 +276,16 @@ export function CallsView({
                       {new Date(call.startedAt).toLocaleTimeString("zh-CN")}
                     </td>
                     <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
-                      <span className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 group-hover:underline text-[11px] font-sans">
+                      <button
+                        aria-label={`查看 ${call.tool} 调用详情`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDetail(call);
+                        }}
+                        className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 group-hover:underline text-[11px] font-sans cursor-pointer"
+                      >
                         {detailLoading === call.id ? "读取中…" : "详情 →"}
-                      </span>
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -270,8 +323,16 @@ export function CallsView({
 
       {selectedCall && (
         <CallDetailModal
+          key={selectedCall.id}
           call={selectedCall}
-          onClose={() => setSelectedCall(null)}
+          refreshError={detailError}
+          onRefresh={() => setDetailRefresh((value) => value + 1)}
+          onClose={() => {
+            detailAbort.current?.abort();
+            setDetailId(null);
+            setSelectedCall(null);
+            setDetailError(null);
+          }}
         />
       )}
     </div>

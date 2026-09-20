@@ -385,7 +385,8 @@ export function directContract(contract: NativeContract) {
     description +=
       "创建和修改文本文件优先使用 apply_patch，避免命令行参数长度限制。";
   if (contract.name !== "view_image")
-    description += "顶层文本超出 36,000 UTF-8 字节时改为首尾预览，截断不补发。";
+    description +=
+      "对象结果在 structuredContent，文本在 content；顶层超出 36,000 UTF-8 字节时改为首尾文本，截断不补发。";
   return {
     title: NATIVE_TOOL_TITLES[contract.name],
     schema,
@@ -403,7 +404,7 @@ export function execDescription(
 ): string {
   return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。本机任务使用这里的工具；ChatGPT 容器不共享本机的文件和网络环境。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
-本机工具 ${contracts.map((contract) => contract.name).join("、")} 同时可直接调用或通过 tools.* 调用。exec 内沿用同名工具参数与返回语义；apply_patch 接收补丁字符串并使用 exec.workdir，import_file 使用 {index,destination,overwrite?} 选择 exec.files。exec/wait 仅为外层工具。
+本机工具 ${contracts.map((contract) => contract.name).join("、")} 同时可直接调用或通过 tools.* 调用。exec 内沿用同名参数；apply_patch 接收补丁字符串并使用 exec.workdir，import_file 使用 {index,destination,overwrite?} 选择 exec.files。本机对象结果直接返回，view_image 返回 CallToolResult；exec/wait 仅为外层工具。
 用 await tools.<name>(args) 调用；独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。
 多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 \${"\`"}、围栏用 \${"\`".repeat(3)}、字面量 \${name} 用 \${"\${name}"} 插入；String.raw 也保留转义用的反斜杠。

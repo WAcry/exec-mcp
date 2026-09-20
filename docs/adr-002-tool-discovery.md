@@ -89,6 +89,8 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 顶层 MCP 输入都是对象；exec 内补丁接收字符串，其他工具接收对象。
 顶层 import_file 用 file 宿主绑定，exec 内用 exec.files 的 index；其余差异只涉及明确的路径基准。
 不为了整齐把所有返回值包成同一种 envelope。
+直接工具按 MCP 返回 content/structuredContent；exec 内本机结构化函数直接返回对象，图片函数保留 CallToolResult。
+共享执行实现不意味着这两层的返回包装相同；工具说明区分包装，不让 Agent 对本机原始对象查 structuredContent。
 下游完整 schema 要保留，不能只用有损 TypeScript 摘要替代约束。
 工具绑定与校验使用同一契约；Code Mode host 不替应用层完成输入校验。
 

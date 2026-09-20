@@ -7,7 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { STDIN_SCHEMA } from "../src/catalog.js";
 import * as timing from "../src/util.js";
 import { TerminalManager, type TerminalResult } from "../src/host/terminal.js";
-import { cellId, connect, jsonOutput, nodeCommand } from "./helpers.js";
+import {
+  cellId,
+  connect,
+  jsonOutput,
+  nodeCommand,
+  observeTerminal,
+} from "./helpers.js";
 
 const managers: TerminalManager[] = [];
 const connections: Awaited<ReturnType<typeof connect>>[] = [];
@@ -54,9 +60,12 @@ async function fixture() {
 }
 async function start(value: TerminalManager, tty = false) {
   const f = await fixture();
-  const first = await value.execCommand(
-    { cmd: f.cmd, tty, yield_time_ms: 0 },
-    f.root,
+  // ConPTY can emit title/cursor frames before PowerShell starts Node. Wait for
+  // application progress, not arbitrary bytes, before measuring a short window.
+  const first = await observeTerminal(
+    await value.execCommand({ cmd: f.cmd, tty, yield_time_ms: 0 }, f.root),
+    (input) => value.writeStdin(input),
+    (result) => plain(result.output).includes("progress😀"),
   );
   const id = first.session_id!;
   expect(id).toBeDefined();
@@ -117,7 +126,7 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
       expect(result.wall_time_seconds).toBeGreaterThanOrEqual(0.125);
       expect(result.session_id).toBe(t.id);
       expect(result.exit_code).toBeUndefined();
-      expect(plain(result.output)).toContain("progress😀");
+      expect(result.output.length).toBeGreaterThan(0);
       expect(t.session.outputReady).toBeUndefined();
       await t.release();
       const final = await value.writeStdin({
@@ -143,7 +152,8 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
       session_id: t.id,
       wait_for: "output",
     });
-    expect(plain(next.output)).toContain("progress😀");
+    // A single output notification can carry only part of a line or a VT frame.
+    expect(next.output.length).toBeGreaterThan(0);
     expect(next.session_id).toBe(t.id);
   });
 
@@ -166,8 +176,9 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
     expect(t.session.observers).toBe(0);
     expect(t.session.exitCode).toBeUndefined();
     expect(t.session.buffer.bytes).toBeGreaterThanOrEqual(before);
+    const unreadBytes = t.session.buffer.bytes;
     const read = await value.writeStdin({ session_id: t.id, yield_time_ms: 0 });
-    expect(plain(read.output)).toContain("progress😀");
+    expect(Buffer.byteLength(read.output)).toBeGreaterThanOrEqual(unreadBytes);
     await t.release();
     expect(
       (await value.writeStdin({ session_id: t.id, wait_for: "exit" }))

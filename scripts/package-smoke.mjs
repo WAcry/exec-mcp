@@ -300,7 +300,6 @@ enabled = true
       name: "write_stdin",
       arguments: {
         session_id: nativeResult.structuredContent.session_id,
-        wait_for: "exit",
         yield_time_ms: 1000,
       },
     });
@@ -469,7 +468,7 @@ enabled = true
     }
     assert.ok(part.session_id);
     part = await terminalCall(
-      `text(await tools.write_stdin({session_id:${JSON.stringify(part.session_id)},chars:${JSON.stringify(tty ? "smoke\r" : "smoke\n")},wait_for:"exit",yield_time_ms:1000}));`,
+      `text(await tools.write_stdin({session_id:${JSON.stringify(part.session_id)},chars:${JSON.stringify(tty ? "smoke\r" : "smoke\n")},yield_time_ms:1000}));`,
     );
     output += part.output;
     while (part.session_id) {

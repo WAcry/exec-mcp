@@ -77,38 +77,48 @@ async function start(value: TerminalManager, tty = false) {
   return { ...f, first, id, session };
 }
 
-describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
-  it("keeps the default output mode and ignores existing/new output in exit mode until actual completion", async () => {
-    const value = manager();
-    const t = await start(value, tty);
-    const initial = await value.writeStdin({
-      session_id: t.id,
-      yield_time_ms: 110_000,
-    });
-    expect(initial.output.length).toBeGreaterThan(0);
-    expect(initial.session_id).toBe(t.id);
-    await vi.waitFor(() => expect(t.session.buffer.pending).toBe(true));
-    const before = t.session.buffer.bytes;
-    let settled = false;
-    const waiting = value
-      .writeStdin({ session_id: t.id, wait_for: "exit" })
-      .finally(() => {
-        settled = true;
+describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
+  it.each([undefined, ""])(
+    "ignores existing/new output by default until actual completion (chars=%s)",
+    async (chars) => {
+      const value = manager();
+      const t = await start(value, tty);
+      const initial = await value.writeStdin({
+        session_id: t.id,
+        yield_time_ms: 0,
       });
-    await vi.waitFor(() =>
-      expect(t.session.buffer.bytes).toBeGreaterThan(before),
-    );
-    expect(settled).toBe(false);
-    await t.release();
-    const final = await waiting; // Finishes early despite the default 110-second window.
-    expect(final.exit_code).toBe(0);
-    expect(final.session_id).toBeUndefined();
-    expect(plain(final.output)).toContain("DONE\n");
-    expect(plain(final.output)).toContain("FINAL_STDERR\n");
-    if (!tty)
-      expect(final.stderr_bytes).toBe(Buffer.byteLength("FINAL_STDERR\n"));
-    expect(t.session.outputReady).toBeUndefined();
-  });
+      expect(initial.output.length).toBeGreaterThan(0);
+      expect(initial.session_id).toBe(t.id);
+      await vi.waitFor(() => expect(t.session.buffer.pending).toBe(true));
+      const before = t.session.buffer.bytes;
+      const waits = vi.spyOn(timing, "waitUntil");
+      let settled = false;
+      const waiting = value
+        .writeStdin({
+          session_id: t.id,
+          ...(chars === undefined ? {} : { chars }),
+        })
+        .finally(() => {
+          settled = true;
+        });
+      await vi.waitFor(() =>
+        expect(t.session.buffer.bytes).toBeGreaterThan(before),
+      );
+      expect(settled).toBe(false);
+      expect(waits).toHaveBeenCalledTimes(1);
+      expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
+      expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
+      await t.release();
+      const final = await waiting; // Finishes early despite the default 110-second window.
+      expect(final.exit_code).toBe(0);
+      expect(final.session_id).toBeUndefined();
+      expect(plain(final.output)).toContain("DONE\n");
+      expect(plain(final.output)).toContain("FINAL_STDERR\n");
+      if (!tty)
+        expect(final.stderr_bytes).toBe(Buffer.byteLength("FINAL_STDERR\n"));
+      expect(t.session.exitReady).toBeUndefined();
+    },
+  );
 
   it.each([undefined, ""])(
     "returns at a fixed deadline despite continuous output (chars=%s), without killing the process",
@@ -118,7 +128,6 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
       const began = performance.now();
       const result = await value.writeStdin({
         session_id: t.id,
-        wait_for: "exit",
         yield_time_ms: 150,
         ...(chars === undefined ? {} : { chars }),
       });
@@ -127,34 +136,63 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
       expect(result.session_id).toBe(t.id);
       expect(result.exit_code).toBeUndefined();
       expect(result.output.length).toBeGreaterThan(0);
-      expect(t.session.outputReady).toBeUndefined();
+      expect(t.session.exitReady).toBeUndefined();
       await t.release();
       const final = await value.writeStdin({
         session_id: t.id,
-        wait_for: "exit",
       });
       expect(final.exit_code).toBe(0);
       expect(final.output).not.toContain("READY");
     },
   );
 
-  it("allows zero-time polling and can switch from exit waiting back to output waiting", async () => {
+  it("uses zero or short windows for interactive progress without another wait mode", async () => {
     const value = manager();
     const t = await start(value, tty);
     const immediate = await value.writeStdin({
       session_id: t.id,
-      wait_for: "exit",
       yield_time_ms: 0,
     });
     expect(immediate.output.length).toBeGreaterThan(0);
     expect(immediate.session_id).toBe(t.id);
+    await vi.waitFor(() => expect(t.session.buffer.pending).toBe(true));
+    const began = performance.now();
     const next = await value.writeStdin({
       session_id: t.id,
-      wait_for: "output",
+      yield_time_ms: 100,
     });
-    // A single output notification can carry only part of a line or a VT frame.
+    expect(performance.now() - began).toBeGreaterThanOrEqual(80);
+    // PTY output can include a partial line or a VT frame, not just complete progress lines.
     expect(next.output.length).toBeGreaterThan(0);
     expect(next.session_id).toBe(t.id);
+  });
+
+  it("uses the same long default after writing input or resizing a PTY", async () => {
+    const value = manager();
+    const t = await start(value, tty);
+    const waits = vi.spyOn(timing, "waitUntil");
+    let settled = false;
+    const waiting = value
+      .writeStdin({
+        session_id: t.id,
+        chars: tty ? "input\r" : "input\n",
+        ...(tty ? { cols: 80, rows: 30 } : {}),
+      })
+      .finally(() => {
+        settled = true;
+      });
+    await vi.waitFor(() => expect(t.session.exitReady).toBeTypeOf("function"));
+    expect(waits).toHaveBeenCalledTimes(1);
+    expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
+    expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
+    const before = t.session.buffer.bytes;
+    await vi.waitFor(() =>
+      expect(t.session.buffer.bytes).toBeGreaterThan(before),
+    );
+    expect(settled).toBe(false);
+    await t.release();
+    expect((await waiting).exit_code).toBe(0);
+    expect(t.session.exitReady).toBeUndefined();
   });
 
   it("cancels only the observer and preserves unread output for a subsequent call", async () => {
@@ -162,17 +200,14 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
     const t = await start(value, tty);
     const controller = new AbortController();
     const before = t.session.buffer.bytes;
-    const pending = value.writeStdin(
-      { session_id: t.id, wait_for: "exit" },
-      controller.signal,
-    );
+    const pending = value.writeStdin({ session_id: t.id }, controller.signal);
     const rejected = expect(pending).rejects.toThrow();
     await vi.waitFor(() =>
       expect(t.session.buffer.bytes).toBeGreaterThan(before),
     );
     controller.abort();
     await rejected;
-    expect(t.session.outputReady).toBeUndefined();
+    expect(t.session.exitReady).toBeUndefined();
     expect(t.session.observers).toBe(0);
     expect(t.session.exitCode).toBeUndefined();
     expect(t.session.buffer.bytes).toBeGreaterThanOrEqual(before);
@@ -180,21 +215,16 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
     const read = await value.writeStdin({ session_id: t.id, yield_time_ms: 0 });
     expect(Buffer.byteLength(read.output)).toBeGreaterThanOrEqual(unreadBytes);
     await t.release();
-    expect(
-      (await value.writeStdin({ session_id: t.id, wait_for: "exit" }))
-        .exit_code,
-    ).toBe(0);
+    expect((await value.writeStdin({ session_id: t.id })).exit_code).toBe(0);
   });
 
   it("keeps other sessions usable and releases a long observer when the manager closes", async () => {
     const value = manager();
     const t = await start(value, tty);
     let settled = false;
-    const pending = value
-      .writeStdin({ session_id: t.id, wait_for: "exit" })
-      .finally(() => {
-        settled = true;
-      });
+    const pending = value.writeStdin({ session_id: t.id }).finally(() => {
+      settled = true;
+    });
     const other = await value.execCommand(
       { cmd: nodeCommand('console.log("OTHER_READY")'), tty, yield_time_ms: 0 },
       t.root,
@@ -202,7 +232,6 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
     const final = other.session_id
       ? await value.writeStdin({
           session_id: other.session_id,
-          wait_for: "exit",
         })
       : other;
     expect(final.exit_code).toBe(0);
@@ -210,13 +239,13 @@ describe.each([false, true])("terminal wait mode (PTY=%s)", (tty) => {
     expect(settled).toBe(false);
     await value.close();
     await pending;
-    expect(t.session.outputReady).toBeUndefined();
+    expect(t.session.exitReady).toBeUndefined();
     expect(t.session.observers).toBe(0);
     expect(value.getActiveSessions()).toHaveLength(0);
   });
 });
 
-it("writes input and closes stdin before waiting for exit, rather than returning on the first log", async () => {
+it("uses the same 110-second default after writing and closing stdin, rather than a short write timeout", async () => {
   const value = manager();
   const first = await value.execCommand(
     {
@@ -229,19 +258,22 @@ it("writes input and closes stdin before waiting for exit, rather than returning
     },
     tmpdir(),
   );
+  const waits = vi.spyOn(timing, "waitUntil");
   const result = await value.writeStdin({
     session_id: first.session_id!,
     chars: "payload",
     close_stdin: true,
-    wait_for: "exit",
   });
+  expect(waits).toHaveBeenCalledTimes(1);
+  expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
+  expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
   expect(result.exit_code).toBe(7);
   expect(result.session_id).toBeUndefined();
   expect(result.output).toContain("PROGRESS");
   expect(result.output).toContain("INPUT:payload");
 });
 
-it("leaves the rolling buffer bounded during an exit wait and drains an already-ended process immediately", async () => {
+it("leaves the rolling buffer bounded during a default wait and drains an already-ended process immediately", async () => {
   const value = manager(4096);
   const first = await value.execCommand(
     {
@@ -254,7 +286,6 @@ it("leaves the rolling buffer bounded during an exit wait and drains an already-
   );
   const result = await value.writeStdin({
     session_id: first.session_id!,
-    wait_for: "exit",
   });
   expect(result.exit_code).toBe(0);
   expect(result.truncated).toBe(true);
@@ -271,26 +302,59 @@ it("leaves the rolling buffer bounded during an exit wait and drains an already-
     (
       await value.writeStdin({
         session_id: finished.session_id!,
-        wait_for: "exit",
       })
     ).exit_code,
   ).toBe(0);
 });
 
 describe.each([false, true])(
-  "exit waiting over actual MCP (legacy=%s)",
+  "default deadline waiting over actual MCP (legacy=%s)",
   (legacy) => {
-    it("shares the optional enum contract and raw terminal state across direct and nested calls", async () => {
+    it("shares one parameter-free waiting behavior across direct and nested calls", async () => {
       const t = await connect({}, legacy);
       connections.push(t);
-      const listed = (await t.client.listTools()).tools.find(
-        (tool) => tool.name === "write_stdin",
-      )!;
-      expect(listed.inputSchema.properties?.wait_for).toMatchObject({
-        enum: ["output", "exit"],
+      const advertised = (await t.client.listTools()).tools;
+      const listed = advertised.find((tool) => tool.name === "write_stdin")!;
+      expect(JSON.stringify(advertised)).not.toContain("wait_for");
+      expect(listed.inputSchema.properties?.yield_time_ms).toMatchObject({
+        type: "integer",
+        minimum: 0,
+        maximum: 110_000,
       });
       expect(listed.inputSchema.required).not.toContain("wait_for");
-      expect(listed.description).toContain("wait_for=exit");
+      expect(listed.description).toContain("默认等进程结束或 110 秒");
+      expect(listed.description).toContain("日志不提前唤醒");
+      expect(listed.description).toContain("长等待减少轮询");
+      expect(listed.description).toContain("0 立即读取");
+      const catalogResult = await t.client.callTool({
+        name: "exec",
+        arguments: {
+          source: 'text(ALL_TOOLS.find(tool=>tool.name==="write_stdin"));',
+        },
+      });
+      const catalog = jsonOutput<{ description: string }>(catalogResult);
+      expect(catalog.description).not.toContain("wait_for");
+      expect(catalog.description).toContain("日志不提前唤醒");
+      for (const wait_for of ["output", "exit"]) {
+        const oldArguments = {
+          session_id: "retired-mode",
+          yield_time_ms: 0,
+          wait_for,
+        };
+        const direct = await t.client.callTool({
+          name: "write_stdin",
+          arguments: oldArguments,
+        });
+        expect(direct.isError).toBe(true);
+        const nested = await t.client.callTool({
+          name: "exec",
+          arguments: {
+            source: `text(await tools.write_stdin(${JSON.stringify(oldArguments)}));`,
+          },
+        });
+        expect(nested.isError).toBe(true);
+        expect(JSON.stringify(nested)).toContain("参数无效");
+      }
       for (const nested of [false, true]) {
         const f = await fixture();
         const first = jsonOutput<TerminalResult>(
@@ -301,8 +365,6 @@ describe.each([false, true])(
         );
         const args = {
           session_id: first.session_id!,
-          wait_for: "exit",
-          yield_time_ms: 110_000,
         };
         const session = t.runtime.terminal["sessions"].get(first.session_id!)!;
         const pending = t.client.callTool(
@@ -317,7 +379,7 @@ describe.each([false, true])(
             : { name: "write_stdin", arguments: args },
         );
         await vi.waitFor(
-          () => expect(session.outputReady).toBeTypeOf("function"),
+          () => expect(session.exitReady).toBeTypeOf("function"),
           { timeout: 10_000, interval: 10 },
         );
         await vi.waitFor(() => expect(session.buffer.pending).toBe(true), {
@@ -352,23 +414,21 @@ it("does not restart a queued read's expired wait budget after another observer 
   const waits = vi.spyOn(timing, "waitUntil");
   const first = value.writeStdin({
     session_id: t.id,
-    wait_for: "exit",
     yield_time_ms: 150,
   });
   const second = value.writeStdin({
     session_id: t.id,
-    wait_for: "exit",
     yield_time_ms: 25,
   });
   const results = await Promise.all([first, second]);
   expect(waits).toHaveBeenCalledTimes(2);
   expect(waits.mock.calls[1]![1]).toBe(0);
   expect(results.every((result) => result.session_id === t.id)).toBe(true);
-  expect(t.session.outputReady).toBeUndefined();
+  expect(t.session.exitReady).toBeUndefined();
   expect(t.session.observers).toBe(0);
 });
 
-it("continues draining an ended process with the same handle when one exit response cannot fit all output", async () => {
+it("continues draining an ended process with the same handle when one response cannot fit all output", async () => {
   const value = manager(6 * 1024 * 1024);
   const first = await value.execCommand(
     {
@@ -381,13 +441,11 @@ it("continues draining an ended process with the same handle when one exit respo
   );
   const next = await value.writeStdin({
     session_id: first.session_id!,
-    wait_for: "exit",
   });
   expect(next.session_id).toBe(first.session_id);
   expect(next.truncated).toBeUndefined();
   const last = await value.writeStdin({
     session_id: next.session_id!,
-    wait_for: "exit",
   });
   expect(last.exit_code).toBe(0);
   expect(last.session_id).toBeUndefined();
@@ -396,20 +454,18 @@ it("continues draining an ended process with the same handle when one exit respo
   );
 });
 
-it("rejects unsupported wait modes and keeps the existing 110-second parameter bound", () => {
-  for (const wait_for of ["output", "exit", undefined])
-    expect(STDIN_SCHEMA.safeParse({ session_id: "id", wait_for }).success).toBe(
-      true,
-    );
-  for (const wait_for of ["sleep", "done", true, 1, null])
+it("removes the old wait-mode field and keeps a single bounded wait duration", () => {
+  expect(STDIN_SCHEMA.safeParse({ session_id: "id" }).success).toBe(true);
+  for (const yield_time_ms of [0, 1000, 110_000])
+    expect(
+      STDIN_SCHEMA.safeParse({ session_id: "id", yield_time_ms }).success,
+    ).toBe(true);
+  for (const wait_for of ["output", "exit", undefined, null])
     expect(STDIN_SCHEMA.safeParse({ session_id: "id", wait_for }).success).toBe(
       false,
     );
-  expect(
-    STDIN_SCHEMA.safeParse({
-      session_id: "id",
-      wait_for: "exit",
-      yield_time_ms: 110_001,
-    }).success,
-  ).toBe(false);
+  for (const yield_time_ms of [-1, 0.5, 110_001, "110000", null])
+    expect(
+      STDIN_SCHEMA.safeParse({ session_id: "id", yield_time_ms }).success,
+    ).toBe(false);
 });

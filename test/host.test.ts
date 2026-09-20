@@ -32,27 +32,32 @@ afterEach(async () => {
   );
 });
 describe("real local processes", () => {
-  it("returns newly produced output while a pipe is still waiting for more input", async () => {
+  it("returns interactive progress at the requested deadline while the pipe awaits more input", async () => {
     const value = terminal();
     const first = await value.execCommand(
       {
         cmd: nodeCommand(
-          'process.stdin.on("data",()=>process.stdout.write("progress"));process.stdin.on("end",()=>process.stdout.write("done"));',
+          'console.log("READY");process.stdin.on("data",()=>process.stdout.write("progress"));process.stdin.on("end",()=>process.stdout.write("done"));',
         ),
         yield_time_ms: 0,
       },
       await directory(),
     );
+    const ready = await observeTerminal(
+      first,
+      (input) => value.writeStdin(input),
+      (result) => result.output.includes("READY"),
+    );
     const start = performance.now();
     const progress = await value.writeStdin({
-      session_id: first.session_id!,
+      session_id: ready.session_id!,
       chars: "go",
-      yield_time_ms: 10_000,
+      yield_time_ms: 1000,
     });
     expect(progress.output).toBe("progress");
     expect(progress.session_id).toBe(first.session_id);
     expect(progress.exit_code).toBeUndefined();
-    expect(performance.now() - start).toBeLessThan(8000);
+    expect(performance.now() - start).toBeGreaterThanOrEqual(850);
     const part = await value.writeStdin({
       session_id: progress.session_id!,
       close_stdin: true,

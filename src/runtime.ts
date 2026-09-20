@@ -252,7 +252,7 @@ export class ExecRuntime {
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。",
+          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。等待长任务用较长窗口减少轮询；需及时交互时缩短。",
       },
     );
     const annotations = {

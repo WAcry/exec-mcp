@@ -41,24 +41,23 @@ text({
 ```json
 {
   "session_id": "exec_command 返回的句柄",
-  "wait_for": "exit",
   "yield_time_ms": 110000
 }
 ```
 
-`exit` 模式在进程结束或等待到期时返回，已有和新增输出不提前唤醒；省略等待时间同样默认 110 秒。
+进程结束或等待到期时返回，已有和新增输出不提前唤醒；省略等待时间同样默认 110 秒，以减少反复轮询。
 超时不终止进程；还有 `session_id` 时可继续等待或读取。进程结束但剩余输出超过单次读取上限时，也需继续读取。
-省略 `wait_for` 或设为 `output` 保持原来的有输出即返回行为；`yield_time_ms: 0` 立即读取。
+写入 `chars` 后也使用相同等待规则。需要及时查看交互提示时，可设较短窗口（如 `yield_time_ms: 1000`）；`0` 立即读取。
 
 exec 内使用相同参数，仍可在返回模型前筛选结果：
 
 ```js
-const result = await tools.write_stdin({ session_id: "之前的句柄", wait_for: "exit" });
+const result = await tools.write_stdin({ session_id: "之前的句柄" });
 text(result);
 ```
 
-这是终端的等待模式，不是新的 cell；exec 本身仍可能先交回 `cell_id`，由外层 `wait` 续取。
-退出等待不扩大日志或模型输出预算，也不会把交互提示自动回答掉。
+这是对现有终端的等待，不是新的 cell；exec 本身仍可能先交回 `cell_id`，由外层 `wait` 续取。
+等待不扩大日志或模型输出预算，也不会把交互提示自动回答掉。
 
 ## 脚本完成与命令成功是两件事
 

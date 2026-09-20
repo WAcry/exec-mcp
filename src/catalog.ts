@@ -104,15 +104,9 @@ export const STDIN_SCHEMA = z
       .boolean()
       .describe("普通管道可在写入后关闭 stdin；PTY 不支持。")
       .optional(),
-    wait_for: z
-      .enum(["output", "exit"])
-      .describe(
-        "默认 output：已有/新输出或进程结束即返回；exit：等进程结束或等待时限，输出不提前唤醒。",
-      )
-      .optional(),
     yield_time_ms: ms(
       110_000,
-      "最长等待毫秒数；纯读取或 wait_for=exit 默认 110000，普通写入默认 250。到期返回当前输出，不终止进程。",
+      "最长等待毫秒数，默认且推荐 110000，减少轮询；进程结束时提前返回，已有或新增输出不提前唤醒。0 立即读取。",
     ),
     cols: z
       .number()
@@ -271,7 +265,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "写入、等待、调整 PTY 或终止终端；默认有输出即返回，wait_for=exit 等进程结束或超时。返回与 exec_command 相同的对象，只含未读输出。",
+      "写入、等待、调整 PTY 或终止终端；写入后或仅读取都默认等进程结束或 110 秒，日志不提前唤醒。长等待减少轮询；需及时交互时缩短 yield_time_ms，0 立即读取。只返回未读输出，超时不终止进程。",
   },
   {
     name: "apply_patch",
@@ -426,4 +420,4 @@ source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}�
 cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 write_stdin 续取。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回，terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 write_stdin 续取。";

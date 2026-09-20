@@ -518,7 +518,7 @@ describe.each([false, true])(
       expect(call.output).toEqual(visibleResult(response));
       await t.call("wait", { cell_id: id, terminate: true });
     });
-    it("keeps terminal exit-wait arguments available in the Web audit without changing the result envelope", async () => {
+    it("keeps terminal wait arguments available in the Web audit without changing the result envelope", async () => {
       const t = await setup(legacy);
       const first = jsonOutput<TerminalResult>(
         await t.call("exec_command", {
@@ -529,7 +529,6 @@ describe.each([false, true])(
       const args = {
         session_id: first.session_id!,
         chars: "",
-        wait_for: "exit",
         yield_time_ms: 0,
       };
       const response = await t.call("write_stdin", args);

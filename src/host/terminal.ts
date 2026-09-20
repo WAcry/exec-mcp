@@ -32,7 +32,6 @@ export interface WriteStdinInput {
   session_id: string;
   chars?: string;
   close_stdin?: boolean;
-  wait_for?: "output" | "exit";
   yield_time_ms?: number;
   cols?: number;
   rows?: number;
@@ -60,7 +59,7 @@ interface Session {
   mutex: AsyncMutex;
   done: Promise<number>;
   finish(code: number): void;
-  outputReady?: () => void;
+  exitReady?: () => void;
   exitCode?: number;
   terminating?: Promise<void>;
   stderrBytes: number;
@@ -174,7 +173,7 @@ export class TerminalManager {
       session.exitCode = code;
       session.touched = Date.now();
       session.finish(code);
-      session.outputReady?.();
+      session.exitReady?.();
     };
     if (backend.kind === "pipe") {
       const child = backend.process;
@@ -225,10 +224,7 @@ export class TerminalManager {
     if (!session)
       throw new Error(`未知或已读完的终端会话：${input.session_id}`);
     const started = performance.now();
-    const waitForExit = input.wait_for === "exit";
-    const timeoutMs =
-      input.yield_time_ms ??
-      (waitForExit || !(input.chars || input.close_stdin) ? 110_000 : 250);
+    const timeoutMs = input.yield_time_ms ?? 110_000;
     session.touched = Date.now();
     session.observers++;
     try {
@@ -261,24 +257,19 @@ export class TerminalManager {
             });
           }
         }
-        if (
-          session.exitCode === undefined &&
-          (waitForExit || !session.buffer.pending)
-        ) {
+        if (session.exitCode === undefined) {
           try {
-            // One removable observer: progress cannot restart the deadline or resolve an exit wait.
+            // Only process exit wakes this removable observer; logs just enter the bounded buffer.
             // Avoid attaching to session.done on every timed poll of a long-lived process.
             await waitUntil(
               new Promise<void>((resolve) => {
-                session.outputReady = () => {
-                  if (!waitForExit || session.exitCode !== undefined) resolve();
-                };
+                session.exitReady = resolve;
               }),
               Math.max(0, timeoutMs - (performance.now() - started)),
               signal,
             );
           } finally {
-            delete session.outputReady;
+            delete session.exitReady;
           }
         }
         throwIfAborted(signal);
@@ -307,7 +298,6 @@ export class TerminalManager {
   private append(session: Session, text: string): void {
     if (!this.sessions.has(session.id)) return;
     session.buffer.append(text);
-    session.outputReady?.();
   }
   private collect(session: Session, started: number): TerminalResult {
     session.touched = Date.now();

@@ -279,8 +279,8 @@ tunnel-client run --profile exec-mcp
 直接 apply_patch 接收 `{patch,workdir?}`，exec 内仍用 `tools.apply_patch(patch)` 字符串；
 直接 cmd/patch 字段是原文，不经 JavaScript 模板解析，正常 JSON 编码仍然必要。
 顶层相对路径基于服务用户主目录，exec 内基于 exec.workdir；终端 session_id 可在两种入口之间继续使用。
-`write_stdin` 默认有输出即返回；`wait_for="exit"` 等进程结束或等待窗口到期（默认 110 秒），日志不提前唤醒。
-两种模式均保留现有输出预算，超时不终止进程；用原 session_id 继续读取。示例见 [终端等待](docs/code-mode-examples.md#等待终端结束而不是每行日志都返回)。
+`write_stdin` 无论写入还是仅读取，都默认等进程结束或 110 秒，日志不提前唤醒，以减少轮询。
+需要及时交互时缩短 `yield_time_ms`，`0` 立即读取；超时不终止进程，仍用原 session_id 续取。输出预算不变。示例见 [终端等待](docs/code-mode-examples.md#等待终端结束而不是每行日志都返回)。
 
 在 ChatGPT 中附上文件并告诉助手保存位置，助手可将它导入机器后继续处理。
 未使用的附件不会自动下载，默认不会覆盖已有文件；下载链接只由服务端使用。

@@ -187,7 +187,9 @@ describe.each([false, true])(
         }),
       );
       const tools = await client.listTools();
-      expect(tools.tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+      expect(tools.tools.map((tool) => tool.name)).toEqual(
+        TOP_LEVEL_TOOL_NAMES,
+      );
       expect(JSON.stringify(tools)).not.toContain(token);
       expect(JSON.stringify(tools)).not.toContain(file);
       const newer = token + "-rotated";
@@ -228,7 +230,10 @@ describe.each([false, true])(
           requestInit: { headers: { Authorization: `Bearer ${newer}` } },
         }),
       );
-      expect((await next.listTools()).tools).toHaveLength(2);
+      expect((await next.listTools()).tools).toHaveLength(
+        TOP_LEVEL_TOOL_NAMES.length,
+      );
     });
   },
 );
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

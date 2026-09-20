@@ -472,10 +472,23 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
         startedAt: call.startedAt,
         endedAt: call.endedAt,
         durationMs: call.durationMs,
-        args:
-          call.tool === "exec"
-            ? { source: call.args.source?.split("\n", 1)[0]?.slice(0, 512) }
-            : { cell_id: call.args.cell_id },
+        args: Object.fromEntries(
+          [
+            "source",
+            "cmd",
+            "patch",
+            "query",
+            "path",
+            "destination",
+            "workdir",
+            "cell_id",
+            "session_id",
+          ].flatMap((key) =>
+            typeof call.args[key] === "string"
+              ? [[key, call.args[key].split("\n", 1)[0]!.slice(0, 512)]]
+              : [],
+          ),
+        ),
         subcallCount: call.subcalls.length + (call.omittedSubcalls ?? 0),
         truncated: !!call.truncatedFields || !!call.omittedSubcalls,
       })),

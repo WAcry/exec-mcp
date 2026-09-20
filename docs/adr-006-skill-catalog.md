@@ -4,20 +4,20 @@
 
 ## 发现文档，不建设 Skill 平台
 
-顶层仍只有 exec/wait；增加 exec 内的 list_skills，只返回名称、调用描述和全文位置。
+list_skills 支持直接调用和 exec 内同名调用，只返回名称、调用描述和全文位置。
 首次使用实例或进入尚未发现的项目时，Agent 先显式输出这份目录，再按任务选择全文。
 读取正文、参考资料和脚本继续用现有 Shell，不增加 Skill read/search/activate/run 或安装管理。
 不把每个 Skill 伪装成 ALL_TOOLS 方法，不加入 UI、用户输入、子 Agent 或 stdio 入口。
 
 服务启动不扫描、不注入全文，每次 list_skills 实时发现；不维护“模型已加载”标记、缓存或 watcher。
 服务知道曾返回过目录，不代表压缩上下文后的模型仍记得它，因此不拦截重复发现。
-exec 的说明负责提示先发现；这是模型行为指引，不通过检查调用顺序来锁住 Shell。
+实例说明和 list_skills 契约提示先发现；这是模型行为指引，不通过检查调用顺序来锁住 Shell。
 
 ## 路径与范围
 
 始终扫描运行服务账户的 ~/.agents/skills 和 ~/.codex/skills。
 list_skills.workdir 优先；省略时只继承显式提供的 exec.workdir，否则只扫描用户目录。
-相对路径与本机工具一致，以本次 exec 的默认目录解析。
+相对路径直接调用时基于服务用户主目录，exec 内基于本次 exec.workdir。
 项目范围从工作目录向上到最近的 .git 文件/目录，逐级扫描 .agents/skills，不向兄弟项目遍历；
 没有 Git 边界时只扫描明确工作目录自己的 .agents/skills。
 

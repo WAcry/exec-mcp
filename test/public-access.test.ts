@@ -418,7 +418,7 @@ describe.each([false, true])(
       const service = await setup();
       const connection = await client(service.url, await service.jwt(), legacy);
       const tools = (await connection.listTools()).tools;
-      expect(tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+      expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       expect(
         tools.every((tool) =>
           JSON.stringify(tool._meta).includes('"type":"oauth2"'),
@@ -508,3 +508,4 @@ describe.each([false, true])(
     });
   },
 );
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

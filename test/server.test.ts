@@ -72,7 +72,7 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
   it("exposes exactly two Chinese tools without UI or duplicated payloads", async () => {
     const { client } = await connection({}, legacy);
     const tools = (await client.listTools()).tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+    expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
     expect(tools[0]!.description).toContain("apply_patch");
     expect(tools[1]!.description).toContain("110");
     const result = await exec(client, "text({n:3});");
@@ -288,3 +288,4 @@ describe("ingress boundaries", () => {
     expect(texts(result).join("\n")).toContain("finished");
   });
 });
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

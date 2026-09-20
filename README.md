@@ -5,6 +5,8 @@
 
 助手可以在一次调用里组合独立操作、并发执行并整理结果，减少机械性的往返。
 工具说明使用中文；支持 ChatGPT 文件导入和产物交付，并提供可关闭的本机 Web 管理控制台。
+本机工具 list_skills、import_file、export_file、exec_command、write_stdin、apply_patch、view_image、tool_search
+既可直接调用，也可在 exec 中编排；exec/wait 负责 JavaScript 与其执行 cell。各入口共享原生工具实现。
 控制台用于观察和管理当前实例，不是另一套聊天界面，也不增加模型或子 Agent。
 
 > **当前是可从源码运行的首版，尚未发布 npm 包或正式安装器。**
@@ -56,7 +58,7 @@ host = "127.0.0.1"
 port = 8893
 ```
 
-控制台提供 Light/Dark 模式、`exec`/`wait` 调用摘要与详情、子调用耗时、原生 session 和内存状态、
+控制台提供 Light/Dark 模式、全部工具调用摘要与详情、子调用耗时、原生 session 和内存状态、
 终端滚动缓冲、Skills、下游 MCP 检索诊断，以及导出产物查看与撤销。对话使用与原生 session 相同的
 不可逆摘要归组，不在浏览器中展示原始 `_meta["openai/session"]`。
 控制台可切换已有 MCP、已发现 Skill、默认 login 与 Web 开关；保存后点击“重启执行服务”生效。
@@ -272,6 +274,11 @@ tunnel-client run --profile exec-mcp
 
 ## 文件传输
 
+直接 import_file 接收宿主绑定的 file 和 destination；exec 内使用 exec.files 绑定及零基 index。
+直接 apply_patch 接收 `{patch,workdir?}`，exec 内仍用 `tools.apply_patch(patch)` 字符串；
+直接 cmd/patch 字段是原文，不经 JavaScript 模板解析，正常 JSON 编码仍然必要。
+顶层相对路径基于服务用户主目录，exec 内基于 exec.workdir；终端 session_id 可在两种入口之间继续使用。
+
 在 ChatGPT 中附上文件并告诉助手保存位置，助手可将它导入机器后继续处理。
 未使用的附件不会自动下载，默认不会覆盖已有文件；下载链接只由服务端使用。
 也可让助手把机器上的报告或其他文件导出：默认通过私有 MCP 资源交付，不生成公网链接。
@@ -338,7 +345,7 @@ terminal_buffer_mib = 16
 现有入口认证、同源边界、参数校验和资源回收仍保留。
 
 代码、日志和结果可能被交给 ChatGPT 或所调用的外部服务；自托管不等于数据绝不离开机器。
-一般工具大结果不自动转成下载文件；终端日志采用上述有界首尾缓冲。exec/wait 最终返回文本合计最多 36,000 UTF-8 字节，
+一般工具大结果不自动转成下载文件；终端日志采用上述有界首尾缓冲。顶层工具最终文本合计最多 36,000 UTF-8 字节，
 超量保留首尾；这不是精确 token 限额。嵌套结果仍交给 Code Mode，优先在 JS 中筛选或先 store 再分段 load。
 助手可显式指定更小的模型输出预算或明确写文件。示例见 [Code Mode 与 PowerShell](docs/code-mode-examples.md)。
 支持同一 ChatGPT 对话内暂存和复用中间数据，减少重复查询；这不是持久存储，空闲/压力回收或服务重启后会丢失。

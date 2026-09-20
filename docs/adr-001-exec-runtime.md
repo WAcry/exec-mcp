@@ -16,9 +16,15 @@ tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先�
 
 ## 决定
 
-顶层 MCP 只提供 `exec` 和 `wait`。文件、命令和外部 MCP 操作都进入 `exec`，
-不保留“偶尔方便”的直接 Shell、补丁或图片入口，也不把等待伪装成一段特殊 JavaScript。
-`exec` 的价值不只是隐藏工具：它是外层 tool-call 预算的复用层。相互独立的调用可以用
+顶层 MCP 提供 `exec`、`wait` 及八个本机/发现工具：list_skills、import_file、export_file、
+exec_command、write_stdin、apply_patch、view_image、tool_search。本机工具也保留在 exec 内；
+下游工具继续通过 exec 绑定调用，不把整个下游目录注册成顶层工具。
+直接调用不生成 JavaScript，不经过 V8；两种入口共用命令、补丁、文件和发现实现。
+理由是 PowerShell 反引号、嵌套脚本模板和 Markdown 围栏反复撞上外层 JS 语法，
+只追加转义提醒无法消除这层构造风险。单个命令/补丁本身也能批量工作，不能假定 exec 永远更省调用。
+描述中只告知可用方式，不指定入口优先级，不改写用户正文或引入自创 raw literal 语法。
+
+`exec` 仍是组合与结果处理入口。相互独立的调用可以用
 `Promise.all` 并发；有数据依赖、顺序要求或副作用冲突的调用仍按语义串行，不能为了减少
 外层调用次数而改变正确的执行顺序、错误处理或重试边界。
 
@@ -29,7 +35,9 @@ tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先�
 `exec` 的 `source` 是 JavaScript，外层仍是 MCP 对象参数。
 `exec.workdir` 决定本次执行中本机工具的默认目录：省略时为服务用户主目录，
 相对值也以主目录解析；本机工具中的相对路径以本次目录解析。
-`apply_patch` 接收单个完整补丁字符串，不再接收 `{patch, workdir}`。
+exec 内 `tools.apply_patch` 继续接收单个完整补丁字符串；顶层 MCP 按对象 schema 接收 `{patch, workdir?}`。
+顶层 cmd/patch 是原文字符串，只有 JSON 传输编码，不解释 JS 模板；补丁通过 stdin 进入相同的固定引擎。
+顶层补丁的 workdir 及命令目录省略/相对时以服务用户主目录解析，不共享某次 exec 的隐式当前目录。
 命令可以显式指定自己的目录；Shell 中的 `cd` 不会改变下一次工具调用的默认目录。
 这些规则不改写下游 MCP 的路径、参数或配置。
 
@@ -54,12 +62,13 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 需要用户决定时在原 ChatGPT 对话中沟通；不另外维护问题收件箱、答复数据库或浏览器通知。
 本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。
 原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
-文件传输也由 exec 编排，原生文件绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。
+文件既可直接导入/导出也可由 exec 编排，原生绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。
 
 ## 接受的代价
 
-简单操作也要经过一层 JavaScript，且 Code Mode host 是必经依赖。
-因此修复 host 的启动与恢复，而不是增加第二条直接工具路径。
+工具表面比两个顶层入口更大，但本机完整描述只放在各自工具，exec 不再镜像它们。
+MCP 对象契约与 Code Mode 字符串补丁/附件索引有少量明确的参数适配，不能把它扩大成两套行为。
+原生 host 仍是 exec 的依赖；其故障不应阻止直接命令、补丁或目录读取。
 复用二进制减少重造成本，却仍有协议、包装方式和版本兼容成本；
 旧 codex-mcp 已验证的取消、结果保真和连接机制可以选择性复用，旧产品约束不能整体继承。
 

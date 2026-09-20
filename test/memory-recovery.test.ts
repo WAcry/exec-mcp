@@ -516,7 +516,8 @@ describe.each([false, true])(
       expect(jsonOutput(await call('text(load("new"));'))).toBe(7);
       expect(
         (await connection.client.listTools()).tools.map((tool) => tool.name),
-      ).toEqual(["exec", "wait"]);
+      ).toEqual(TOP_LEVEL_TOOL_NAMES);
     });
   },
 );
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

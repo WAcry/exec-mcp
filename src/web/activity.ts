@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { callPreview } from "../tool-names.js";
 import type {
   CallRecord,
   CallStatus,
@@ -75,7 +76,7 @@ export class ActivityStore {
   }
 
   startCall(params: {
-    tool: "exec" | "wait";
+    tool: string;
     sessionId: string;
     args: CallRecord["args"];
   }): ActiveCallController {
@@ -231,9 +232,12 @@ export class ActivityStore {
         if (c.id.toLowerCase().includes(q)) return true;
         if (c.sessionId.toLowerCase().includes(q)) return true;
         if (c.tool.toLowerCase().includes(q)) return true;
-        if (c.args.source && c.args.source.toLowerCase().includes(q))
-          return true;
-        if (c.args.cell_id && c.args.cell_id.toLowerCase().includes(q))
+        if (
+          Object.values(c.args).some(
+            (value) =>
+              typeof value === "string" && value.toLowerCase().includes(q),
+          )
+        )
           return true;
         if (c.error && c.error.toLowerCase().includes(q)) return true;
         if (
@@ -355,14 +359,7 @@ export class ActivityStore {
   }
 
   private extractPreview(tool: string, args: CallRecord["args"]): string {
-    if (tool === "exec" && args.source) {
-      const line = args.source.split("\n")[0]?.trim() ?? "";
-      return line.slice(0, 80);
-    }
-    if (tool === "wait") {
-      return `wait(${args.cell_id ?? "unknown"})`;
-    }
-    return `${tool}()`;
+    return callPreview(tool, args).slice(0, 80);
   }
 
   private snapshotArgs(args: CallRecord["args"]): {
@@ -426,7 +423,7 @@ export class ActivityStore {
 }
 
 function disabledCall(params: {
-  tool: "exec" | "wait";
+  tool: string;
   sessionId: string;
   args: CallRecord["args"];
 }): ActiveCallController {

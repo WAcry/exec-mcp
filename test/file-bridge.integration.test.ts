@@ -115,7 +115,7 @@ describe.each([false, true])(
     it("declares native top-level file binding and imports/exports without binary text or duplicate JSON", async () => {
       const t = await setup(legacy);
       const tools = (await t.client.listTools()).tools;
-      expect(tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+      expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       expect(tools[0]!._meta).toMatchObject({ "openai/fileParams": ["files"] });
       expect(tools[0]!.inputSchema).toMatchObject({
         properties: {
@@ -392,3 +392,4 @@ describe("isolated downloadable files endpoint", () => {
     );
   });
 });
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

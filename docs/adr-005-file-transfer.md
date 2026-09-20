@@ -4,13 +4,14 @@
 
 ## 决定与原因
 
-顶层仍只有 exec/wait。ChatGPT 文件绑定放在可选的 `exec.files`，通过
-`openai/fileParams` 标记；内部 import_file/export_file 编排导入与交付。
-这样导入、处理、导出能共享一次外层调用，不为简单传输额外引入任务或 UI。
+import_file/export_file 同时支持直接调用和 exec 编排。
+ChatGPT 文件绑定放在直接 import_file.file 或可选的 exec.files，通过 openai/fileParams 标记；
+两种入口共用流式导入与交付逻辑，不为传输额外引入任务或 UI。
 完整字节不穿过 V8、模型文本或 store；不让 Agent 手工搬运 Base64。
 
 文件输入绑定必须在顶层，不能解析 source 字符串后猜测文件引用。
-机器端持有临时下载凭据，脚本只用本次文件数组的零基索引，未使用的文件不自动下载。
+机器端持有临时下载凭据；exec 脚本只用本次文件数组的零基索引，直接入口使用宿主绑定对象。
+未使用的文件不自动下载，Web 审计不记录任何入口的签名下载 URL。
 普通执行不依赖附件；无文件或索引不符时明确失败，不猜测其他消息中的附件。
 文件 schema 声明四个官方字段，仅 download_url/file_id 必填；工具说明与原始宿主数据区分。
 输入依据：[OpenAI 文件参数](https://developers.openai.com/plugins/reference#define-file-inputs)。
@@ -34,7 +35,7 @@
 
 参考 [WebCodex 文件桥](https://github.com/yyjeqhc/webcodex/blob/main/docs/MCP.md#chatgpt-file-bridge)，
 默认返回原生 ResourceLink，宿主通过 resources/read 取文件；不要把链接对象 text() 后冒充原生交付。
-固定 host 只负责 JS、文本和媒体；文件链接由本服务的每个 cell 独立待返回队列追加到 exec/wait，
+固定 host 只负责 JS、文本和媒体；exec 的文件链接由每个 cell 独立队列追加到 exec/wait，直接导出随本次工具响应返回。
 不修改上游协议，不解析特殊文本标记。文本预算不能删除文件引用；撤销的待返回引用不再交付。
 
 导出创建私有、短期文件快照，源文件后续变化不影响内容；复制期间检测到变化则不发布。

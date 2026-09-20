@@ -15,6 +15,7 @@ import {
   WAIT_SCHEMA,
   execDescription,
   WAIT_DESCRIPTION,
+  directContract,
 } from "./catalog.js";
 import type { Config } from "./config.js";
 import { DownstreamMcpRegistry } from "./downstream/registry.js";
@@ -26,10 +27,11 @@ import {
 } from "./host/terminal.js";
 import { PatchRunner } from "./host/patch.js";
 import { viewImage } from "./host/image.js";
-import { toolError } from "./results.js";
+import { toolError, directResult } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
+import type { HostFile } from "./files/contracts.js";
 import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
 import { resolveShell } from "./host/shell.js";
@@ -52,6 +54,18 @@ function subcallFailed(result: unknown): boolean {
     value.success === false ||
     (typeof value.exit_code === "number" && value.exit_code !== 0)
   );
+}
+interface NativeContext {
+  cwd: string;
+  explicitWorkdir: boolean;
+  scope: string | undefined;
+  files: readonly HostFile[] | undefined;
+  signal: AbortSignal | undefined;
+  attachments: {
+    items: { id: string; content: ResourceLink }[];
+    bytes: number;
+  };
+  search: ReturnType<ToolDiscovery["searchFor"]>;
 }
 export class ExecRuntime {
   readonly codeMode: CodeModeService;
@@ -124,12 +138,112 @@ export class ExecRuntime {
     });
     return this.initialization;
   }
+  /** Shared behavior for direct MCP and Code Mode; direct calls never generate JavaScript. */
+  private async callNative(
+    name: string,
+    input: unknown,
+    ctx: NativeContext,
+  ): Promise<unknown> {
+    throwIfAborted(ctx.signal);
+    switch (name) {
+      case "list_skills": {
+        const requested = (input as { workdir?: string }).workdir;
+        const workdir =
+          requested === undefined
+            ? ctx.explicitWorkdir
+              ? ctx.cwd
+              : undefined
+            : resolveUserPath(requested, ctx.cwd);
+        return listSkills({
+          ...(workdir === undefined ? {} : { workdir }),
+          maxChars: this.skillMaxChars,
+          config: this.skillConfig,
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        });
+      }
+      case "import_file": {
+        const value = input as {
+          index: number;
+          destination: string;
+          overwrite?: boolean;
+        };
+        const file = ctx.files?.[value.index];
+        if (!file)
+          throw new Error(
+            "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
+          );
+        return this.artifacts.importFile(
+          file,
+          value.destination,
+          ctx.cwd,
+          value.overwrite,
+          ctx.signal,
+        );
+      }
+      case "export_file": {
+        if (ctx.attachments.bytes + 4096 > 1024 * 1024)
+          throw new Error(
+            "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
+          );
+        const file = input as {
+          path: string;
+          name?: string;
+          delivery?: "resource" | "url";
+        };
+        const exported = await this.artifacts.exportFile(
+          file.path,
+          ctx.cwd,
+          ctx.scope,
+          file.delivery,
+          file.name,
+          ctx.signal,
+        );
+        const bytes = Buffer.byteLength(JSON.stringify(exported.content));
+        if (ctx.attachments.bytes + bytes > 1024 * 1024) {
+          await this.artifacts.revoke(exported.info.id, ctx.scope);
+          throw new Error("文件链接元数据超出单次响应预算；本次导出已撤销。");
+        }
+        ctx.attachments.items.push({
+          id: exported.info.id,
+          content: exported.content,
+        });
+        ctx.attachments.bytes += bytes;
+        return exported.info;
+      }
+      case "exec_command":
+        return this.terminal.execCommand(
+          input as ExecCommandInput,
+          ctx.cwd,
+          ctx.signal,
+        );
+      case "write_stdin":
+        return this.terminal.writeStdin(input as WriteStdinInput, ctx.signal);
+      case "apply_patch":
+        return this.patch.apply(input as string, ctx.cwd, ctx.signal);
+      case "view_image": {
+        const value = input as { path: string; detail?: string };
+        return viewImage(resolveUserPath(value.path, ctx.cwd), value.detail);
+      }
+      case "tool_search": {
+        const value = input as { query: string; limit?: number };
+        return ctx.search(value.query, value.limit ?? 8, ctx.signal);
+      }
+      default:
+        throw new Error("未知本机工具。");
+    }
+  }
+  private async workdir(value?: string): Promise<string> {
+    const cwd = await realpath(resolveUserPath(value ?? homedir()));
+    if (!(await stat(cwd)).isDirectory())
+      throw new Error("workdir 必须是目录。");
+    return cwd;
+  }
   server(): McpServer {
     const server = new McpServer(
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "所有操作通过 exec 内的工具完成；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。",
+          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。",
       },
     );
     const annotations = {
@@ -137,6 +251,124 @@ export class ExecRuntime {
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
+    };
+    // Register the same eight native operations alongside exec/wait. No V8 boot or source interpolation.
+    const registerNativeTools = () => {
+      for (const contract of this.native) {
+        const direct = directContract(contract);
+        const readOnly = ["list_skills", "view_image", "tool_search"].includes(
+          contract.name,
+        );
+        server.registerTool(
+          contract.name,
+          {
+            title: direct.title,
+            description: direct.description,
+            inputSchema: direct.schema,
+            annotations: {
+              readOnlyHint: readOnly,
+              destructiveHint: !readOnly,
+              idempotentHint: readOnly,
+              openWorldHint: !readOnly,
+            },
+            _meta: {
+              ...(this.securitySchemes
+                ? { securitySchemes: this.securitySchemes }
+                : {}),
+              ...(contract.name === "import_file"
+                ? { "openai/fileParams": ["file"] }
+                : {}),
+            },
+          },
+          async (raw, context) => {
+            const args = raw as Record<string, unknown>;
+            const scope = sessionScope(context);
+            // Host-bound signed URLs stay out of the Web audit, just as with exec.files.
+            const auditArgs = { ...args };
+            if (contract.name === "import_file") {
+              const file = args.file as HostFile;
+              auditArgs.file = {
+                name: file.file_name,
+                type: file.mime_type,
+                size: file.size,
+              };
+            }
+            const tracker = this.activity.startCall({
+              tool: contract.name,
+              sessionId: sessionScopeKey(scope) ?? "unscoped",
+              args: auditArgs,
+            });
+            const attachments: NativeContext["attachments"] = {
+              items: [],
+              bytes: 0,
+            };
+            try {
+              if (!this.ready) throw new Error("服务正在关闭。");
+              const signal = context.mcpReq.signal;
+              throwIfAborted(signal);
+              const cwd = await this.workdir(
+                contract.name === "apply_patch"
+                  ? (args.workdir as string | undefined)
+                  : undefined,
+              );
+              const input =
+                contract.name === "apply_patch"
+                  ? args.patch
+                  : contract.name === "import_file"
+                    ? {
+                        index: 0,
+                        destination: args.destination,
+                        overwrite: args.overwrite,
+                      }
+                    : args;
+              const value = await this.callNative(contract.name, input, {
+                cwd,
+                explicitWorkdir: false,
+                scope,
+                signal,
+                attachments,
+                files:
+                  contract.name === "import_file"
+                    ? [args.file as HostFile]
+                    : undefined,
+                search: (query, limit, searchSignal) =>
+                  this.searchTools(query, limit, searchSignal),
+              });
+              const failed = subcallFailed(value);
+              const result = directResult(
+                contract.name,
+                value,
+                failed,
+                attachments.items
+                  .filter((item) => this.artifacts.available(item.id, scope))
+                  .map((item) => item.content),
+              );
+              tracker.finish({
+                status: failed
+                  ? "error"
+                  : value && typeof value === "object" && "session_id" in value
+                    ? "yielding"
+                    : "completed",
+                output: value,
+              });
+              return result;
+            } catch (error) {
+              const result = toolError(error);
+              result.content.push(
+                ...attachments.items
+                  .filter((item) => this.artifacts.available(item.id, scope))
+                  .map((item) => item.content),
+              );
+              tracker.finish({
+                status: "error",
+                error: error instanceof Error ? error.message : String(error),
+                output: result,
+              });
+              return boundModelOutput(result);
+            }
+          },
+        );
+      }
     };
     server.registerTool(
       "exec",
@@ -178,145 +410,40 @@ export class ExecRuntime {
           sessionId: sessionScopeKey(scope) ?? "unscoped",
           args: callArgs,
         });
-        let pending: { id: string; content: ResourceLink }[] = [];
-        let pendingBytes = 0;
+        const attachments: NativeContext["attachments"] = {
+          items: [],
+          bytes: 0,
+        };
         const takeAttachments = () => {
-          const items = pending
+          const items = attachments.items
             .filter((item) => this.artifacts.available(item.id, scope))
             .map((item) => item.content);
-          pending = [];
-          pendingBytes = 0;
+          attachments.items = [];
+          attachments.bytes = 0;
           return items;
         };
         try {
           if (!this.ready) throw new Error("服务正在关闭。");
           const signal = context.mcpReq.signal;
           throwIfAborted(signal);
-          const cwd = await realpath(
-            resolveUserPath(args.workdir ?? homedir()),
-          );
-          if (!(await stat(cwd)).isDirectory())
-            throw new Error("workdir 必须是目录。");
+          const cwd = await this.workdir(args.workdir);
           const tools = this.native.map((contract) =>
             bindNative(contract, async (input, nested) => {
               const subcallStart = Date.now();
               try {
-                let subcallResult: unknown;
-                switch (contract.name) {
-                  case "list_skills": {
-                    const requested = (input as { workdir?: string }).workdir;
-                    const workdir =
-                      requested === undefined
-                        ? args.workdir === undefined
-                          ? undefined
-                          : cwd
-                        : resolveUserPath(requested, cwd);
-                    subcallResult = await listSkills({
-                      ...(workdir === undefined ? {} : { workdir }),
-                      maxChars: this.skillMaxChars,
-                      config: this.skillConfig,
-                      signal: nested.signal,
-                    });
-                    break;
-                  }
-                  case "import_file": {
-                    const inputFile = input as {
-                      index: number;
-                      destination: string;
-                      overwrite?: boolean;
-                    };
-                    const file = args.files?.[inputFile.index];
-                    if (!file)
-                      throw new Error(
-                        "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
-                      );
-                    subcallResult = await this.artifacts.importFile(
-                      file,
-                      inputFile.destination,
-                      cwd,
-                      inputFile.overwrite,
-                      nested.signal,
-                    );
-                    break;
-                  }
-                  case "export_file": {
-                    if (pendingBytes + 4096 > 1024 * 1024)
-                      throw new Error(
-                        "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
-                      );
-                    const file = input as {
-                      path: string;
-                      name?: string;
-                      delivery?: "resource" | "url";
-                    };
-                    const exported = await this.artifacts.exportFile(
-                      file.path,
-                      cwd,
-                      scope,
-                      file.delivery,
-                      file.name,
-                      nested.signal,
-                    );
-                    const bytes = Buffer.byteLength(
-                      JSON.stringify(exported.content),
-                    );
-                    if (pendingBytes + bytes > 1024 * 1024) {
-                      await this.artifacts.revoke(exported.info.id, scope);
-                      throw new Error(
-                        "文件链接元数据超出单次响应预算；本次导出已撤销。",
-                      );
-                    }
-                    pending.push({
-                      id: exported.info.id,
-                      content: exported.content,
-                    });
-                    pendingBytes += bytes;
-                    subcallResult = exported.info;
-                    break;
-                  }
-                  case "exec_command":
-                    subcallResult = await this.terminal.execCommand(
-                      input as ExecCommandInput,
-                      cwd,
-                      nested.signal,
-                    );
-                    break;
-                  case "write_stdin":
-                    subcallResult = await this.terminal.writeStdin(
-                      input as WriteStdinInput,
-                      nested.signal,
-                    );
-                    break;
-                  case "apply_patch":
-                    subcallResult = await this.patch.apply(
-                      input as string,
-                      cwd,
-                      nested.signal,
-                    );
-                    break;
-                  case "view_image": {
-                    const imgArgs = input as { path: string; detail?: string };
-                    subcallResult = await viewImage(
-                      resolveUserPath(imgArgs.path, cwd),
-                      imgArgs.detail,
-                    );
-                    break;
-                  }
-                  case "tool_search": {
-                    const searchArgs = input as {
-                      query: string;
-                      limit?: number;
-                    };
-                    subcallResult = search(
-                      searchArgs.query,
-                      searchArgs.limit ?? 8,
-                      nested.signal,
-                    );
-                    break;
-                  }
-                  default:
-                    throw new Error("未知本机工具。");
-                }
+                const subcallResult = await this.callNative(
+                  contract.name,
+                  input,
+                  {
+                    cwd,
+                    explicitWorkdir: args.workdir !== undefined,
+                    scope,
+                    files: args.files,
+                    signal: nested.signal,
+                    attachments,
+                    search,
+                  },
+                );
                 callTracker.recordSubcall({
                   name: contract.name,
                   durationMs: Date.now() - subcallStart,
@@ -483,6 +610,7 @@ export class ExecRuntime {
         }
       },
     );
+    registerNativeTools();
     server.registerResource(
       "exported-file",
       new ResourceTemplate(`${ARTIFACT_URI_PREFIX}{id}`, { list: undefined }),

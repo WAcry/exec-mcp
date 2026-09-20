@@ -58,7 +58,29 @@ text(await tools.exec_command({
 
 服务不擅自修改错误策略。原生程序的退出码可用 `exit $LASTEXITCODE` 显式传回。
 
-## 含 Markdown 的多行补丁
+## 原文参数与 JavaScript 源码
+
+八个本机/发现工具同时支持顶层调用和 exec 内的 tools.*。顶层 exec_command 的 cmd 是 Shell 原文；
+apply_patch 接收 `{patch,workdir?}`，patch 是补丁原文。传输仍需正常 JSON 编码，但不再增加一层 JavaScript 模板求值。
+因此 PowerShell 的反引号、here-string 中嵌套 JavaScript 的模板及 Markdown 围栏可保留原样。
+
+例如，把下面原文放入顶层 apply_patch 的 patch 字段，workdir 指向目标项目即可：
+
+````diff
+*** Begin Patch
+*** Add File: literal-example.md
++# 原文示例
++Inline: `review`，字面量 ${name}，路径 C:\work\new\file.txt。
++```powershell
++Write-Output "`tname`nnext"
++```
+*** End Patch
+````
+
+exec 的 source 始终是 JavaScript；Shell 的单引号、here-string、嵌套脚本中的注释都不能改变外层 JS 的分隔符语法。
+下面的 String.raw 写法只用于在 JavaScript 中构造字符串；已经取得的字符串值直接传递即可，不需要重新插入源码。
+
+## 在 exec 内构造含 Markdown 的多行补丁
 
 `String.raw` 保留反斜杠，但模板正文中的反引号仍结束模板，`${...}` 仍执行插值。
 Markdown 的内联代码和围栏使用字符串值插入，字面量 `${name}` 也这样处理；

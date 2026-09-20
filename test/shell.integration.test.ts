@@ -282,7 +282,7 @@ describe.each(variants())(
       const connection = await connect({ execution: config.execution! });
       connections.push(connection);
       const tools = (await connection.client.listTools()).tools;
-      expect(tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+      expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       const output = await connection.client.callTool({
         name: "exec",
         arguments: {
@@ -292,7 +292,10 @@ describe.each(variants())(
       });
       const entry = jsonOutput<{ description: string }>(output);
       expect(entry.description).toContain(shellDescription(selected));
-      expect(tools[0]!.description).toContain(entry.description);
+      expect(tools[0]!.description).not.toContain(entry.description);
+      expect(
+        tools.find((tool) => tool.name === "exec_command")!.description,
+      ).toContain(shellDescription(selected));
       expect(entry.description).toContain('"shell"');
       expect(entry.description).toContain('"login"');
       if (ps(selected)) {
@@ -557,3 +560,4 @@ describe("fixed executable identity and native startup rules", () => {
     },
   );
 });
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

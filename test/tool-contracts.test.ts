@@ -10,7 +10,9 @@ import {
   nativeContracts,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
+  directContract,
 } from "../src/catalog.js";
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { resolveShell } from "../src/host/shell.js";
 import { TerminalManager } from "../src/host/terminal.js";
 import {
@@ -29,7 +31,7 @@ const SKILL_RULE =
 const FILE_EDIT_RULE =
   "创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。";
 const MULTILINE_RULE =
-  '多行字符串优先用模板字面量；需保留反斜杠时用 String.raw。模板正文的反引号用 ${"`"} 插入，代码围栏用 ${"`".repeat(3)}，字面量 ${name} 用 ${"${"}name}；String.raw 会保留转义用的反斜杠。补丁以 *** Begin Patch 起始，标记顶格、正文缩进保留。';
+  '多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 ${"`"}、围栏用 ${"`".repeat(3)}、字面量 ${name} 用 ${"${name}"} 插入；String.raw 也保留转义用的反斜杠。';
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -91,7 +93,6 @@ describe("self-contained model-visible contracts", () => {
     );
     expect(description).toContain("本机任务使用这里的工具");
     expect(description).toContain("ChatGPT 容器不共享本机的文件和网络环境");
-    expect(description).toContain("通常组合独立调用以节省每轮工具次数");
     expect(description).toContain("仅在确认未执行后重试");
     expect(description).toContain(
       "若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本",
@@ -101,8 +102,10 @@ describe("self-contained model-visible contracts", () => {
     expect(description).not.toMatch(
       /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|notify 不支持/,
     );
-    for (const contract of contracts)
-      expect(description).toContain(describeContract(contract));
+    for (const contract of contracts) {
+      expect(description).toContain(contract.name);
+      expect(description).not.toContain(describeContract(contract));
+    }
     const patch = contracts.find(
       (contract) => contract.name === "apply_patch",
     )!;
@@ -193,7 +196,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     const directory = await mkdtemp(path.join(tmpdir(), "exec-contract-"));
     directories.push(directory);
     const listed = (await connection.client.listTools()).tools;
-    expect(listed.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+    expect(listed.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
     expect(listed[0]!.description).not.toContain("revoke_file");
     expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
       FILE_EDIT_RULE,
@@ -231,8 +234,15 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     expect(
       value.catalog.find((tool) => tool.name === "list_skills")!.description,
     ).toContain(SKILL_RULE);
-    for (const tool of value.catalog)
-      expect(listed[0]!.description).toContain(tool.description);
+    for (const contract of nativeContracts(resolveShell())) {
+      expect(
+        value.catalog.find((tool) => tool.name === contract.name)!.description,
+      ).toBe(describeContract(contract));
+      expect(
+        listed.find((tool) => tool.name === contract.name)!.description,
+      ).toBe(directContract(contract).description);
+      expect(listed[0]!.description).not.toContain(describeContract(contract));
+    }
   });
   it("creates and edits files with multiline templates while preserving raw backslashes and content indentation", async () => {
     const connection = await connect({}, legacy);
@@ -331,7 +341,9 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       new URL("../docs/code-mode-examples.md", import.meta.url),
       "utf8",
     );
-    const section = doc.slice(doc.indexOf("## 含 Markdown 的多行补丁"));
+    const section = doc.slice(
+      doc.indexOf("## 在 exec 内构造含 Markdown 的多行补丁"),
+    );
     const source = /```js\n([\s\S]*?)\n```/.exec(section)?.[1];
     expect(source).toBeDefined();
     const result = await connection.client.callTool({

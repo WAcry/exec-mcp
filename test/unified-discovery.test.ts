@@ -82,11 +82,12 @@ describe.each([false, true])(
       async (web) => {
         const s = await setup(legacy, web, true);
         const advertised = (await s.client.listTools()).tools;
-        expect(advertised.map((tool) => tool.name)).toEqual(["exec", "wait"]);
-        const description = advertised[0]!.description!;
-        const headings = [...description.matchAll(/^### (\w+)$/gm)].map(
-          (match) => match[1]!,
+        expect(advertised.map((tool) => tool.name)).toEqual(
+          TOP_LEVEL_TOOL_NAMES,
         );
+        const description = advertised[0]!.description!;
+        const headings = advertised.slice(2).map((tool) => tool.name);
+        expect(description).not.toContain("输入 JSON Schema");
         const result = await s.call(allSearches);
         expect(result.isError, JSON.stringify(result)).not.toBe(true);
         const value = jsonOutput<{
@@ -97,10 +98,7 @@ describe.each([false, true])(
         expect(headings).toEqual(
           value.names.filter((name) => !name.startsWith("mcp__")),
         );
-        for (const name of headings)
-          expect(description).toContain(
-            s.server.runtime.searchTools(name, 1).tools[0]!.description,
-          );
+        for (const name of headings) expect(description).toContain(name);
         expect(value.rows).toHaveLength(10);
         expect(
           value.rows.every((row) => row.matched && row.same),
@@ -213,3 +211,4 @@ describe.each([false, true])(
     });
   },
 );
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

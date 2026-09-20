@@ -243,10 +243,70 @@ enabled = true
   assert.equal((await webStatus.json()).status, "ready");
   assert.deepEqual(
     (await client.listTools()).tools.map((tool) => tool.name),
-    ["exec", "wait"],
+    [
+      "exec",
+      "wait",
+      "list_skills",
+      "import_file",
+      "export_file",
+      "exec_command",
+      "write_stdin",
+      "apply_patch",
+      "view_image",
+      "tool_search",
+    ],
   );
   const project = path.join(temporary, "project with spaces");
   await mkdir(project);
+  const nativeText =
+    "Inline `code`, ${value}, and C:\\work\\new.\n```bash\nprintf done\n```\n";
+  const nativePatch =
+    "*** Begin Patch\n*** Add File: direct.md\n" +
+    nativeText
+      .trimEnd()
+      .split("\n")
+      .map((line) => "+" + line)
+      .join("\n") +
+    "\n*** End Patch\n";
+  const nativeWritten = await client.callTool({
+    name: "apply_patch",
+    arguments: { patch: nativePatch, workdir: project },
+  });
+  assert.ok(!nativeWritten.isError, JSON.stringify(nativeWritten));
+  assert.equal(nativeWritten.structuredContent.success, true);
+  assert.deepEqual(nativeWritten.content, []);
+  assert.equal(
+    await readFile(path.join(project, "direct.md"), "utf8"),
+    nativeText,
+  );
+  let nativeResult = await client.callTool({
+    name: "exec_command",
+    arguments: {
+      cmd:
+        process.platform === "win32"
+          ? '[Console]::WriteLine("PACKAGED_NATIVE_TOOL")'
+          : "printf '%s\\n' PACKAGED_NATIVE_TOOL",
+      workdir: project,
+      yield_time_ms: 0,
+    },
+  });
+  let nativeOutput = nativeResult.structuredContent.output;
+  const nativeDeadline = Date.now() + 30000;
+  while (
+    nativeResult.structuredContent.session_id &&
+    Date.now() < nativeDeadline
+  ) {
+    nativeResult = await client.callTool({
+      name: "write_stdin",
+      arguments: {
+        session_id: nativeResult.structuredContent.session_id,
+        yield_time_ms: 1000,
+      },
+    });
+    nativeOutput += nativeResult.structuredContent.output;
+  }
+  assert.equal(nativeResult.structuredContent.exit_code, 0);
+  assert.match(nativeOutput, /PACKAGED_NATIVE_TOOL/);
   const skillDirectory = path.join(
     project,
     ".agents",

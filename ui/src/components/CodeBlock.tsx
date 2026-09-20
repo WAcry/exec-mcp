@@ -4,6 +4,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-javascript";
 import "prismjs/components/prism-json";
 import "prismjs/components/prism-bash";
+import "prismjs/components/prism-diff";
 
 interface CodeBlockProps {
   code: string;
@@ -33,7 +34,8 @@ export function CodeBlock({
   };
 
   const highlighted = React.useMemo(() => {
-    const grammar = Prism.languages[language] || Prism.languages.javascript;
+    const grammar = Prism.languages[language];
+    if (!grammar) return Prism.util.encode(code) as string;
     return Prism.highlight(code, grammar, language);
   }, [code, language]);
 

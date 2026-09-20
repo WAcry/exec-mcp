@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
+import { NATIVE_TOOL_TITLES, type NativeToolName } from "./tool-names.js";
 import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
@@ -66,11 +67,13 @@ export const WAIT_SCHEMA = z
   .strict();
 export const COMMAND_SCHEMA = z
   .object({
-    cmd: z.string().min(1).describe("交给所选 Shell 的命令代码。"),
+    cmd: z.string().min(1).describe("交给所选 Shell 的命令原文。"),
     workdir: z
       .string()
       .min(1)
-      .describe("本次命令目录；相对路径基于 exec.workdir。")
+      .describe(
+        "命令目录；省略或相对路径基于服务用户主目录，exec 内基于 exec.workdir。",
+      )
       .optional(),
     shell: z
       .string()
@@ -135,7 +138,7 @@ export const IMAGE_SCHEMA = z
       .string()
       .min(1)
       .describe(
-        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对 exec.workdir，支持 ~/。",
+        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对服务用户主目录，exec 内相对 exec.workdir，支持 ~/。",
       ),
     detail: z
       .enum(["high", "original"])
@@ -156,6 +159,27 @@ export const SEARCH_SCHEMA = z
   })
   .strict();
 const PATCH_SCHEMA = z.string().min(1);
+export const DIRECT_PATCH_SCHEMA = z
+  .object({
+    patch: PATCH_SCHEMA.describe(
+      "完整 Codex 补丁原文，保留换行；从 *** Begin Patch 开始。",
+    ),
+    workdir: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "补丁相对路径的基准目录；省略或相对路径基于服务用户主目录，支持 ~/。",
+      ),
+  })
+  .strict();
+export const DIRECT_IMPORT_SCHEMA = IMPORT_FILE_SCHEMA.omit({ index: true })
+  .extend({
+    file: HOST_FILE_SCHEMA.describe(
+      "ChatGPT 原生文件引用；宿主绑定为文件对象，按原值传入。",
+    ),
+  })
+  .strict();
 const SKILL_INVOCATION_RULE =
   "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 const SKILL_SCHEMA = z
@@ -165,7 +189,7 @@ const SKILL_SCHEMA = z
       .min(1)
       .optional()
       .describe(
-        "项目发现起点；相对 exec.workdir 解析。省略时继承显式的 exec.workdir，否则只列用户级 Skills。",
+        "项目发现起点；相对服务用户主目录，exec 内相对 exec.workdir。省略时只列用户级 Skills，exec 内继承显式的 exec.workdir。",
       ),
   })
   .strict();
@@ -203,8 +227,8 @@ change_context: ("@@" | "@@ " /(.+)/) LF
 change_line: ("+" | "-" | " ") /(.*)/ LF
 eof_line: "*** End of File" LF
 %import common.LF`;
-interface NativeContract {
-  name: string;
+export interface NativeContract {
+  name: NativeToolName;
   description: string;
   schema: z.ZodType;
   output?: Record<string, unknown>;
@@ -215,7 +239,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
-    description: `返回可用 Skill 的名称、用途和 SKILL.md 真实路径，以 text(result) 输出目录。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md。`,
+    description: `返回可用 Skill 的名称、用途和 SKILL.md 真实路径。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md。`,
   },
   {
     name: "import_file",
@@ -321,16 +345,69 @@ export function nativeContracts(
   );
 }
 
+/** MCP requires object inputs. Only patch context and host file binding differ from Code Mode. */
+export function directContract(contract: NativeContract) {
+  let schema = contract.schema;
+  let description = contract.description;
+  switch (contract.name) {
+    case "apply_patch":
+      schema = DIRECT_PATCH_SCHEMA;
+      description =
+        description.replace(
+          "相对路径基于 exec.workdir",
+          "相对路径基于 workdir",
+        ) +
+        "\npatch 直接填写补丁原文，Markdown 围栏、反引号和 ${...} 按原样保留；仅按 JSON 字符串编码，不包 JavaScript。";
+      break;
+    case "import_file":
+      schema = DIRECT_IMPORT_SCHEMA;
+      description = description.replace(
+        "本次 exec.files[index]",
+        "宿主绑定的 file",
+      );
+      break;
+    case "export_file":
+      description = description.replace("exec/wait 自动附带", "本次响应附带");
+      break;
+    case "exec_command":
+      description +=
+        "cmd 直接填写 Shell 原文，保留多行与 Shell 自身的引号/反引号，仅按 JSON 字符串编码。";
+      break;
+    case "view_image":
+      description = "读取本机已有图片用于视觉检查，直接返回原生 MCP 图片。";
+      break;
+    case "tool_search":
+      description =
+        "在当前全部本机及下游工具中进行 BM25 搜索，返回 {tools:[{name,description}],errors}。命中项含 exec 内的完整契约；下游工具通过 exec 中的 tools[name](args) 调用。";
+      break;
+  }
+  if (contract.name === "exec_command")
+    description +=
+      "创建和修改文本文件优先使用 apply_patch，避免命令行参数长度限制。";
+  if (contract.name !== "view_image")
+    description += "顶层文本超出 36,000 UTF-8 字节时改为首尾预览，截断不补发。";
+  return {
+    title: NATIVE_TOOL_TITLES[contract.name],
+    schema,
+    description:
+      description +
+      (contract.output
+        ? `\n正常返回值形状：${JSON.stringify(contract.output)}`
+        : ""),
+  };
+}
+
 export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
   return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。本机任务使用这里的工具；ChatGPT 容器不共享本机的文件和网络环境。
 首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
-用 await tools.<name>(args) 调用；apply_patch 接收字符串，其他工具接收对象。独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
+本机工具 ${contracts.map((contract) => contract.name).join("、")} 同时可直接调用或通过 tools.* 调用。exec 内沿用同名工具参数与返回语义；apply_patch 接收补丁字符串并使用 exec.workdir，import_file 使用 {index,destination,overwrite?} 选择 exec.files。exec/wait 仅为外层工具。
+用 await tools.<name>(args) 调用；独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。
-多行字符串优先用模板字面量；需保留反斜杠时用 String.raw。模板正文的反引号用 \${"\`"} 插入，代码围栏用 \${"\`".repeat(3)}，字面量 \${name} 用 \${"\${"}name}；String.raw 会保留转义用的反斜杠。补丁以 *** Begin Patch 起始，标记顶格、正文缩进保留。
-ALL_TOOLS 是本次已绑定工具的 {name,description}[]；find/filter 读取完整契约，tools.tool_search 检索同一目录的全部工具。已知工具可直接 tools[name](args)；搜索不是调用前置步骤，目录更新从下一次 exec 生效。
+多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 \${"\`"}、围栏用 \${"\`".repeat(3)}、字面量 \${name} 用 \${"\${name}"} 插入；String.raw 也保留转义用的反斜杠。
+ALL_TOOLS 是本次已绑定本机和下游工具的 {name,description}[]，含 exec 内的完整调用契约；find/filter 或 tools.tool_search 按需读取。数组本身不自动输出。已知工具可直接 tools[name](args)，目录更新从下一次 exec 生效。
 本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
 通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
 文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。
@@ -338,9 +415,7 @@ store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未�
 Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_code 与输出，stderr_bytes 表示管道收到过错误流（不等同于失败）。
 超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
 source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。最终文本合计最多 36,000 UTF-8 字节，超出保留首尾。先在 JS 内筛选/汇总大结果，跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。
-cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 exec 内 write_stdin 操作。通常组合独立调用以节省每轮工具次数。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。
-
-本机及发现契约：\n${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
+cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 exec 内的 write_stdin 续取。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，完成、主动 yield 或终止时提前返回；terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；最终文本仍限 36,000 UTF-8 字节，媒体与状态保留。终端 session_id 用 write_stdin 续取。";

@@ -28,7 +28,7 @@ export function StatsOverview({ stats }: StatsOverviewProps) {
       activeColor: "bg-amber-500",
     },
     {
-      label: "脚本报错记录",
+      label: "调用报错记录",
       value: stats.errorCalls,
       unit: "次",
       icon: AlertCircle,

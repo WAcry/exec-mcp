@@ -246,7 +246,7 @@ enabled = true
     it("keeps only exec/wait at the top level and returns a single directory string through the internal tool", async () => {
       const c = await connection(legacy);
       const tools = (await c.client.listTools()).tools;
-      expect(tools.map((tool) => tool.name)).toEqual(["exec", "wait"]);
+      expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       expect(tools[0]!.description).toContain(
         "先 text(await tools.list_skills({}))",
       );
@@ -426,3 +426,4 @@ enabled = true
     });
   },
 );
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

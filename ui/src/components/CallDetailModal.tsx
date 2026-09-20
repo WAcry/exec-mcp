@@ -21,6 +21,20 @@ interface CallDetailModalProps {
 }
 
 export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
+  const code =
+    typeof call.args.source === "string"
+      ? call.args.source
+      : typeof call.args.cmd === "string"
+        ? call.args.cmd
+        : typeof call.args.patch === "string"
+          ? call.args.patch
+          : undefined;
+  const language =
+    call.tool === "exec"
+      ? "javascript"
+      : call.tool === "apply_patch"
+        ? "diff"
+        : "text";
   const [activeTab, setActiveTab] = useState<
     "overview" | "source" | "subcalls" | "output"
   >("overview");
@@ -70,7 +84,7 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
           >
             总览元数据
           </button>
-          {call.args.source && (
+          {code && (
             <button
               onClick={() => setActiveTab("source")}
               className={`pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
@@ -79,7 +93,7 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                   : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
               }`}
             >
-              执行脚本 (Source)
+              输入原文
             </button>
           )}
           <button
@@ -174,26 +188,32 @@ export function CallDetailModal({ call, onClose }: CallDetailModalProps) {
                 </div>
               )}
 
-              {call.args.source && (
+              {code ? (
                 <div>
                   <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-                    JavaScript 源代码预览
+                    输入原文预览
                   </h4>
                   <CodeBlock
-                    code={call.args.source}
-                    language="javascript"
+                    code={code}
+                    language={language}
                     maxHeight="max-h-60"
                   />
                 </div>
+              ) : (
+                <CodeBlock
+                  code={JSON.stringify(call.args, null, 2)}
+                  language="json"
+                  maxHeight="max-h-60"
+                />
               )}
             </div>
           )}
 
-          {activeTab === "source" && call.args.source && (
+          {activeTab === "source" && code && (
             <div className="space-y-2">
               <CodeBlock
-                code={call.args.source}
-                language="javascript"
+                code={code}
+                language={language}
                 maxHeight="max-h-[500px]"
               />
             </div>
@@ -346,7 +366,7 @@ function StatusBadge({ status }: { status: CallRecord["status"] }) {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
         <CheckCircle2 className="w-3 h-3" />
-        脚本完成
+        调用完成
       </span>
     );
   }

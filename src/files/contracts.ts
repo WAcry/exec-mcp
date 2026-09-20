@@ -84,7 +84,9 @@ export const IMPORT_FILE_SCHEMA = z
     destination: z
       .string()
       .min(1)
-      .describe("目标文件路径；相对 exec.workdir，支持 ~/。"),
+      .describe(
+        "目标文件路径；相对服务用户主目录，exec 内相对 exec.workdir，支持 ~/。",
+      ),
     overwrite: z
       .boolean()
       .optional()
@@ -96,7 +98,9 @@ export const EXPORT_FILE_SCHEMA = z
     path: z
       .string()
       .min(1)
-      .describe("要交付的普通文件；相对 exec.workdir，支持 ~/。"),
+      .describe(
+        "要交付的普通文件；相对服务用户主目录，exec 内相对 exec.workdir，支持 ~/。",
+      ),
     name: z
       .string()
       .min(1)

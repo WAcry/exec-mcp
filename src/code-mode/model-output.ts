@@ -20,7 +20,7 @@ export function boundModelOutput(result: CallToolResult): CallToolResult {
   const first = result.content[0];
   const preserveStatus =
     first?.type === "text" &&
-    first.text.startsWith("Script ") &&
+    (first.text.startsWith("Script ") || first.text.startsWith("Tool ")) &&
     Buffer.byteLength(first.text) < 4096;
   const status = preserveStatus ? first.text : "";
   const remaining = MODEL_TEXT_BYTES - Buffer.byteLength(status + NOTICE) - 32;

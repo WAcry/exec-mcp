@@ -45,6 +45,8 @@ export function texts(result: CallToolResult): string[] {
 export function jsonOutput<T = Record<string, unknown>>(
   result: CallToolResult,
 ): T {
+  if (result.structuredContent !== undefined)
+    return result.structuredContent as T;
   for (const text of texts(result).toReversed()) {
     try {
       return JSON.parse(text) as T;

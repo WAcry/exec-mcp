@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TOP_LEVEL_TOOL_NAMES, callPreview } from "../../../src/tool-names";
 import type { CallRecord, CallSummary, PaginatedResult } from "../types";
 import { CallDetailModal } from "./CallDetailModal";
 import { apiFetch } from "../lib/api";
@@ -122,9 +123,9 @@ export function CallsView({
             className="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">所有状态</option>
-            <option value="completed">脚本完成</option>
+            <option value="completed">调用完成</option>
             <option value="running">运行中</option>
-            <option value="yielding">已交回 cell</option>
+            <option value="yielding">执行／输出待续取</option>
             <option value="terminated">已终止</option>
             <option value="error">错误</option>
           </select>
@@ -135,8 +136,11 @@ export function CallsView({
             className="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">所有入口</option>
-            <option value="exec">exec</option>
-            <option value="wait">wait</option>
+            {TOP_LEVEL_TOOL_NAMES.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
           </select>
 
           <button
@@ -193,19 +197,9 @@ export function CallsView({
                       </div>
                     </td>
                     <td className="py-2.5 px-3.5 max-w-xs sm:max-w-md truncate text-zinc-800 dark:text-zinc-200 font-mono text-[11px]">
-                      {call.tool === "exec" ? (
-                        call.args.source ? (
-                          <span className="truncate block">
-                            {call.args.source.split("\n")[0]?.trim()}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400 italic">
-                            （无代码输入）
-                          </span>
-                        )
-                      ) : (
-                        <span>wait({call.args.cell_id})</span>
-                      )}
+                      <span className="truncate block">
+                        {callPreview(call.tool, call.args)}
+                      </span>
                     </td>
                     <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-500 dark:text-zinc-400 text-[11px]">
                       <span

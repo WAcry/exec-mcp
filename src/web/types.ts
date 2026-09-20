@@ -19,7 +19,7 @@ export interface SubCallRecord {
 export interface CallRecord {
   id: string;
   sessionId: string;
-  tool: "exec" | "wait";
+  tool: string;
   status: CallStatus;
   startedAt: string;
   endedAt?: string | undefined;

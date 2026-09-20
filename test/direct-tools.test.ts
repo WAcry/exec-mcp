@@ -121,12 +121,30 @@ describe.each([false, true])(
       expect(exec.description).not.toContain("Lark grammar");
       expect(exec.description).not.toContain("优先使用顶层");
       expect(exec.description).not.toContain("必须通过 exec");
+      expect(exec.description).toContain(
+        "exec 可合并、并发调用并用 JS 筛选/汇总结果，减少外层往返",
+      );
+      expect(exec.description).toContain("多处理一层 JS 字符串语法");
+      expect(exec.description).toContain("直接调用省去该层嵌套");
+      expect(exec.description).toContain("Shell 或补丁本身也可组合多个操作");
+      expect(exec.description).toContain(
+        "exec/wait 与直接调用均限每次最终文本 36,000 UTF-8 字节",
+      );
+      expect(exec.description).toContain(
+        "exec 内的工具结果不受该出口限额提前裁剪",
+      );
       for (const contract of nativeContracts(resolveShell())) {
         const direct = tools.find((tool) => tool.name === contract.name)!;
         expect(direct.inputSchema).toMatchObject(
           jsonSchema(directContract(contract).schema),
         );
         expect(direct.description).toBe(directContract(contract).description);
+        if (contract.name !== "view_image") {
+          expect(direct.description).toContain(
+            "与 exec/wait 一样，本服务每次返回文本限 36,000 UTF-8 字节",
+          );
+          expect(direct.description).toContain("截断不补发");
+        }
         expect(direct.inputSchema.type).toBe("object");
         expect(exec.description).toContain(contract.name);
       }
@@ -608,40 +626,43 @@ it("requires public authentication before dispatching any of the new direct tool
 });
 
 describe("direct response budget", () => {
-  it("retains large-output handles and status, with one representation, no spill and a bounded text fallback", () => {
-    const result = directResult("exec_command", {
-      output: "first" + "x".repeat(100000) + "last",
-      wall_time_seconds: 0.2,
-      session_id: "term-known",
-      stderr_bytes: 3,
-    });
-    expect(result.structuredContent).toBeUndefined();
-    expect(
-      texts(result).reduce(
-        (size, text) => size + Buffer.byteLength(text) + 2,
-        0,
-      ),
-    ).toBeLessThanOrEqual(MODEL_TEXT_BYTES);
-    expect(result.content[0]).toMatchObject({ type: "text" });
-    expect(texts(result)[0]).toContain("term-known");
-    expect(texts(result).join("\n")).toContain("first");
-    expect(texts(result).join("\n")).toContain("last");
-    expect(texts(result).join("\n")).not.toContain("outputFile");
-    const failed = directResult(
-      "exec_command",
-      { output: "expected failure", exit_code: 1, wall_time_seconds: 0 },
-      true,
-    );
-    expect(failed).toEqual({
-      content: [],
-      isError: true,
-      structuredContent: {
-        output: "expected failure",
-        exit_code: 1,
-        wall_time_seconds: 0,
-      },
-    });
-  });
+  it.each(["x".repeat(100000), "汉".repeat(13000)])(
+    "retains large-output handles and status under the UTF-8 byte ceiling, without a mirror or spill",
+    (body) => {
+      const result = directResult("exec_command", {
+        output: "first" + body + "last",
+        wall_time_seconds: 0.2,
+        session_id: "term-known",
+        stderr_bytes: 3,
+      });
+      expect(result.structuredContent).toBeUndefined();
+      expect(
+        texts(result).reduce(
+          (size, text) => size + Buffer.byteLength(text) + 2,
+          0,
+        ),
+      ).toBeLessThanOrEqual(MODEL_TEXT_BYTES);
+      expect(result.content[0]).toMatchObject({ type: "text" });
+      expect(texts(result)[0]).toContain("term-known");
+      expect(texts(result).join("\n")).toContain("first");
+      expect(texts(result).join("\n")).toContain("last");
+      expect(texts(result).join("\n")).not.toContain("outputFile");
+      const failed = directResult(
+        "exec_command",
+        { output: "expected failure", exit_code: 1, wall_time_seconds: 0 },
+        true,
+      );
+      expect(failed).toEqual({
+        content: [],
+        isError: true,
+        structuredContent: {
+          output: "expected failure",
+          exit_code: 1,
+          wall_time_seconds: 0,
+        },
+      });
+    },
+  );
 });
 
 const powershell = findShellExecutable(

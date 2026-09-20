@@ -104,9 +104,15 @@ export const STDIN_SCHEMA = z
       .boolean()
       .describe("普通管道可在写入后关闭 stdin；PTY 不支持。")
       .optional(),
+    wait_for: z
+      .enum(["output", "exit"])
+      .describe(
+        "默认 output：已有/新输出或进程结束即返回；exit：等进程结束或等待时限，输出不提前唤醒。",
+      )
+      .optional(),
     yield_time_ms: ms(
       110_000,
-      "无未读输出时的最长等待；新输出或进程结束时提前返回。写入默认 250 毫秒，纯轮询默认 110000 毫秒。",
+      "最长等待毫秒数；纯读取或 wait_for=exit 默认 110000，普通写入默认 250。到期返回当前输出，不终止进程。",
     ),
     cols: z
       .number()
@@ -265,7 +271,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "写入、轮询、调整 PTY 或终止终端；返回与 exec_command 相同的对象，只包含尚未读取的输出。",
+      "写入、等待、调整 PTY 或终止终端；默认有输出即返回，wait_for=exit 等进程结束或超时。返回与 exec_command 相同的对象，只含未读输出。",
   },
   {
     name: "apply_patch",

@@ -518,6 +518,28 @@ describe.each([false, true])(
       expect(call.output).toEqual(visibleResult(response));
       await t.call("wait", { cell_id: id, terminate: true });
     });
+    it("keeps terminal exit-wait arguments available in the Web audit without changing the result envelope", async () => {
+      const t = await setup(legacy);
+      const first = jsonOutput<TerminalResult>(
+        await t.call("exec_command", {
+          cmd: nodeCommand("setInterval(()=>{},1000);"),
+          yield_time_ms: 0,
+        }),
+      );
+      const args = {
+        session_id: first.session_id!,
+        chars: "",
+        wait_for: "exit",
+        yield_time_ms: 0,
+      };
+      const response = await t.call("write_stdin", args);
+      const call = t.activity.getCalls({ tool: "write_stdin" }).items[0]!;
+      expect(call.args).toEqual(args);
+      expect(call.output).toEqual(visibleResult(response));
+      expect(jsonOutput<TerminalResult>(response).session_id).toBe(
+        first.session_id,
+      );
+    });
     it("keeps safe host file metadata in direct and exec audit inputs without their credentials", async () => {
       const t = await setup(legacy);
       const file = {

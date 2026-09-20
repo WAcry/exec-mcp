@@ -34,6 +34,32 @@ text({
 超过缓冲后中间日志会丢弃并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
 确需完整原始日志时由调用方显式重定向文件；服务不替所有工具自动落盘。
 
+## 等待终端结束，而不是每行日志都返回
+
+顶层 `write_stdin` 可以使用以下参数；省略 `chars` 或传空字符串都是只读：
+
+```json
+{
+  "session_id": "exec_command 返回的句柄",
+  "wait_for": "exit",
+  "yield_time_ms": 110000
+}
+```
+
+`exit` 模式在进程结束或等待到期时返回，已有和新增输出不提前唤醒；省略等待时间同样默认 110 秒。
+超时不终止进程；还有 `session_id` 时可继续等待或读取。进程结束但剩余输出超过单次读取上限时，也需继续读取。
+省略 `wait_for` 或设为 `output` 保持原来的有输出即返回行为；`yield_time_ms: 0` 立即读取。
+
+exec 内使用相同参数，仍可在返回模型前筛选结果：
+
+```js
+const result = await tools.write_stdin({ session_id: "之前的句柄", wait_for: "exit" });
+text(result);
+```
+
+这是终端的等待模式，不是新的 cell；exec 本身仍可能先交回 `cell_id`，由外层 `wait` 续取。
+退出等待不扩大日志或模型输出预算，也不会把交互提示自动回答掉。
+
 ## 脚本完成与命令成功是两件事
 
 `Script completed` 只表示 JavaScript 已结束；嵌套命令仍可能返回 `exit_code: 1`。

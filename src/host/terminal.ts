@@ -32,6 +32,7 @@ export interface WriteStdinInput {
   session_id: string;
   chars?: string;
   close_stdin?: boolean;
+  wait_for?: "output" | "exit";
   yield_time_ms?: number;
   cols?: number;
   rows?: number;
@@ -223,6 +224,11 @@ export class TerminalManager {
     const session = this.sessions.get(input.session_id);
     if (!session)
       throw new Error(`未知或已读完的终端会话：${input.session_id}`);
+    const started = performance.now();
+    const waitForExit = input.wait_for === "exit";
+    const timeoutMs =
+      input.yield_time_ms ??
+      (waitForExit || !(input.chars || input.close_stdin) ? 110_000 : 250);
     session.touched = Date.now();
     session.observers++;
     try {
@@ -231,7 +237,6 @@ export class TerminalManager {
         throwIfAborted(signal);
         if (!this.sessions.has(session.id))
           throw new Error("终端输出已经由另一次调用读完。");
-        const started = performance.now();
         const { backend } = session;
         if (input.cols !== undefined && input.rows !== undefined) {
           if (backend.kind !== "pty")
@@ -256,22 +261,27 @@ export class TerminalManager {
             });
           }
         }
-        // Existing unread output is useful immediately, even for a long requested wait.
-        if (!session.buffer.pending && session.exitCode === undefined) {
+        if (
+          session.exitCode === undefined &&
+          (waitForExit || !session.buffer.pending)
+        ) {
           try {
-            // Progress is useful before a live process exits or asks for more input.
+            // One removable observer: progress cannot restart the deadline or resolve an exit wait.
+            // Avoid attaching to session.done on every timed poll of a long-lived process.
             await waitUntil(
               new Promise<void>((resolve) => {
-                session.outputReady = resolve;
+                session.outputReady = () => {
+                  if (!waitForExit || session.exitCode !== undefined) resolve();
+                };
               }),
-              input.yield_time_ms ??
-                (input.chars || input.close_stdin ? 250 : 110_000),
+              Math.max(0, timeoutMs - (performance.now() - started)),
               signal,
             );
           } finally {
             delete session.outputReady;
           }
         }
+        throwIfAborted(signal);
         return this.collect(session, started);
       });
     } finally {

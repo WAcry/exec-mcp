@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { MAX_PAYLOAD_BYTES } from "./limits.js";
+import { normalizeResult } from "./results.js";
 import type { PaginatedResult, SessionSummary } from "./web/types.js";
 import {
   NOTE_LABEL_BYTES,
@@ -251,22 +252,46 @@ export class SessionNotes {
     if (!id || signal?.aborted) return result;
     this.sweep();
     const conversation = this.conversations.get(id);
-    if (!conversation) return result;
+    if (!conversation?.notes.some((note) => note.status === "pending"))
+      return result;
     try {
-      let remaining = NOTES_RESPONSE_BYTES - modelTextBytes(result);
+      // Keep user notes in the same textual channel as the tool result. Some
+      // consumers prefer structuredContent and never inspect content text.
+      const structured = result.structuredContent !== undefined;
+      const userNotes: string[] = [];
+      const originalContent = structured
+        ? (normalizeResult(result) as CallToolResult).content
+        : result.content;
+      const resultText = originalContent.filter((item) => item.type === "text");
+      const response: CallToolResult = structured
+        ? {
+            ...result,
+            structuredContent: {
+              result: result.structuredContent,
+              ...(resultText.length ? { result_content: resultText } : {}),
+              user_notes: userNotes,
+            },
+            content: originalContent.filter((item) => item.type !== "text"),
+          }
+        : { ...result, content: [...result.content] };
+      let remaining = NOTES_RESPONSE_BYTES - modelTextBytes(response);
       const selected: SessionNote[] = [];
-      const content: CallToolResult["content"] = [];
       for (const note of conversation.notes) {
         if (note.status !== "pending") continue;
-        const text = `用户补充（来源：本对话的 Web 操作者）｜#${note.sequence}｜${note.id}｜${note.createdAt}\n${note.text}`;
-        const bytes = Buffer.byteLength(text) + 2;
+        const text = `用户额外补充：\n${note.text}`;
+        // JSON escaping and array separators count too; do not estimate a
+        // structured note using only the UTF-8 length of its unescaped text.
+        const bytes = structured
+          ? Buffer.byteLength(JSON.stringify(note.text)) +
+            (selected.length ? 1 : 0)
+          : Buffer.byteLength(text) + 2;
         if (bytes > remaining) break;
         selected.push(note);
-        content.push({ type: "text", text });
+        if (structured) userNotes.push(note.text);
+        else response.content.push({ type: "text", text });
         remaining -= bytes;
       }
       if (!selected.length) return result;
-      const response = { ...result, content: [...result.content, ...content] };
       // The media/transport boundary remains independent of the model text budget.
       if (
         Buffer.byteLength(JSON.stringify(response)) > MAX_PAYLOAD_BYTES ||

@@ -57,7 +57,15 @@ export function callStatusLabel(
         call.output && typeof call.output === "object"
           ? (call.output as Record<string, unknown>)
           : undefined;
-      const value = output?.structuredContent ?? output;
+      const structured = output?.structuredContent ?? output;
+      const value =
+        structured &&
+        typeof structured === "object" &&
+        "user_notes" in structured &&
+        Array.isArray(structured.user_notes) &&
+        "result" in structured
+          ? structured.result
+          : structured;
       return value && typeof value === "object" && "exit_code" in value
         ? "进程已退出，输出待取"
         : "终端运行或输出待取";

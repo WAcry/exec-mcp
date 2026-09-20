@@ -99,8 +99,8 @@ describe("ephemeral session notes", () => {
     );
     const response = store.attach(result("small"), "a", "fits");
     expect(response.content.slice(1)).toEqual([
-      expect.objectContaining({ text: expect.stringContaining("#1｜long｜") }),
-      expect.objectContaining({ text: expect.stringContaining("#2｜short｜") }),
+      { type: "text", text: "用户额外补充：\n" + "L".repeat(5000) },
+      { type: "text", text: "用户额外补充：\nshort" },
     ]);
     expect(store.page("a").items.every((n) => n.callId === "fits")).toBe(true);
     const next = result();
@@ -116,12 +116,244 @@ describe("ephemeral session notes", () => {
     };
     const original = JSON.stringify(ordinary);
     const response = store.attach(ordinary, "a", "call");
-    expect(response.structuredContent).toBe(ordinary.structuredContent);
-    expect(response.content).toHaveLength(1);
+    expect(response.structuredContent).toEqual({
+      result: ordinary.structuredContent,
+      user_notes: ["s".repeat(700)],
+    });
+    expect(response.content).toEqual([]);
     expect(JSON.stringify(ordinary)).toBe(original);
     expect(modelTextBytes(response)).toBeLessThanOrEqual(37_000);
     store.enqueue("a", "blocked", "y".repeat(2000));
     expect(store.attach(ordinary, "a", "too-full")).toBe(ordinary);
+  });
+
+  it("keeps a structured-first consumer's tool result and user notes together, with metadata only in Web history", () => {
+    const { store } = fixture();
+    store.rename("a", "PRIVATE_WEB_LABEL");
+    const text = "补充：先保留原文件。\n  Keep this note verbatim.  ";
+    const saved = store.enqueue("a", "PRIVATE_MESSAGE_ID", text);
+    const tool = {
+      output: "sleep 1/10\r\nsleep 2/10\r\n",
+      wall_time_seconds: 30.00413789999997,
+      session_id: "term-running",
+    };
+    const response = store.attach(
+      { content: [], structuredContent: tool },
+      "a",
+      "PRIVATE_CALL_ID",
+    );
+    // This is deliberately how a consumer that ignores content text would read.
+    const visible = response.structuredContent ?? response.content;
+    expect(visible).toEqual({ result: tool, user_notes: [text] });
+    expect(response.content).toEqual([]);
+    expect(JSON.stringify(response)).not.toMatch(
+      /PRIVATE_|Web 操作者|createdAt|sequence/,
+    );
+    expect(JSON.stringify(response)).not.toContain(saved.createdAt);
+    expect(store.page("a").items[0]).toMatchObject({
+      id: "PRIVATE_MESSAGE_ID",
+      sequence: 1,
+      createdAt: saved.createdAt,
+      status: "attached",
+      callId: "PRIVATE_CALL_ID",
+    });
+  });
+
+  it.each([
+    null,
+    false,
+    0,
+    "",
+    [],
+    { result: "original field", user_notes: ["tool data"] },
+  ])(
+    "wraps structured values without overwriting or flattening the original data (%j)",
+    (value) => {
+      const { store } = fixture();
+      store.enqueue("a", "one", "first");
+      store.enqueue("a", "two", "second");
+      const ordinary: CallToolResult = {
+        content: [],
+        structuredContent: value,
+      };
+      const response = store.attach(ordinary, "a", "call");
+      expect(response.structuredContent).toEqual({
+        result: value,
+        user_notes: ["first", "second"],
+      });
+      expect(ordinary.structuredContent).toBe(value);
+      expect(response.content).toEqual([]);
+      expect(store.attach(ordinary, "a", "again")).toBe(ordinary);
+    },
+  );
+
+  it("unifies distinct text with structured data and preserves error, media, links and content metadata", () => {
+    const { store } = fixture();
+    store.enqueue("a", "id", "do not repeat the failed operation");
+    const structured = { failed: true };
+    const explanation = {
+      type: "text" as const,
+      text: "Partial changes occurred.",
+      annotations: { priority: 1 },
+    };
+    const annotatedMirror = {
+      type: "text" as const,
+      text: JSON.stringify(structured),
+      _meta: { original: true },
+    };
+    const media: CallToolResult["content"] = [
+      { type: "image", data: "fixture", mimeType: "image/png" },
+      { type: "audio", data: "fixture", mimeType: "audio/wav" },
+      { type: "resource_link", uri: "fixture://file", name: "result.txt" },
+      {
+        type: "resource",
+        resource: { uri: "fixture://embedded", text: "embedded text" },
+      },
+    ];
+    const ordinary: CallToolResult = {
+      content: [
+        media[0]!,
+        { type: "text", text: JSON.stringify(structured) },
+        explanation,
+        annotatedMirror,
+        ...media.slice(1),
+      ],
+      structuredContent: structured,
+      isError: true,
+      _meta: { retained: "private metadata" },
+    };
+    const snapshot = JSON.stringify(ordinary);
+    const response = store.attach(ordinary, "a", "call");
+    expect(response.structuredContent).toEqual({
+      result: structured,
+      result_content: [explanation, annotatedMirror],
+      user_notes: ["do not repeat the failed operation"],
+    });
+    expect(response.content).toEqual(media);
+    expect(response.isError).toBe(true);
+    expect(response._meta).toBe(ordinary._meta);
+    expect(JSON.stringify(ordinary)).toBe(snapshot);
+  });
+
+  it("counts the structured envelope, JSON escapes and commas exactly at the delivery boundary", () => {
+    const { store } = fixture();
+    const ordinary: CallToolResult = {
+      content: [],
+      structuredContent: { output: "x".repeat(35_900) },
+    };
+    const envelopeBytes = modelTextBytes({
+      content: [],
+      structuredContent: { result: ordinary.structuredContent, user_notes: [] },
+    });
+    const room = NOTES_RESPONSE_BYTES - envelopeBytes;
+    const body =
+      "\0".repeat(Math.floor((room - 2) / 6)) + "x".repeat((room - 2) % 6);
+    expect(Buffer.byteLength(JSON.stringify(body))).toBe(room);
+    store.enqueue("a", "exact", body);
+    store.enqueue("a", "later", "next");
+    const response = store.attach(ordinary, "a", "exact-call");
+    expect(modelTextBytes(response)).toBe(NOTES_RESPONSE_BYTES);
+    expect(response.structuredContent).toEqual({
+      result: ordinary.structuredContent,
+      user_notes: [body],
+    });
+    expect(store.page("a").pendingCount).toBe(1);
+    const small: CallToolResult = { content: [], structuredContent: {} };
+    expect(store.attach(small, "a", "next-call").structuredContent).toEqual({
+      result: {},
+      user_notes: ["next"],
+    });
+
+    store.enqueue("b", "one-too-many", body + "x");
+    store.enqueue("b", "blocked", "short");
+    expect(store.attach(ordinary, "b", "no-room")).toBe(ordinary);
+    expect(store.page("b").pendingCount).toBe(2);
+    const smaller = store.attach(small, "b", "both-fit");
+    expect(smaller.structuredContent).toEqual({
+      result: {},
+      user_notes: [body + "x", "short"],
+    });
+    expect(modelTextBytes(smaller)).toBeLessThanOrEqual(NOTES_RESPONSE_BYTES);
+  });
+
+  it("uses only a short text heading without adding structured content to text-only responses", () => {
+    const { store } = fixture();
+    store.enqueue("a", "PRIVATE_MESSAGE_ID", "  原文\n保留缩进与换行。  ");
+    const response = store.attach(
+      result("Script completed"),
+      "a",
+      "PRIVATE_CALL_ID",
+    );
+    expect(response).toEqual({
+      content: [
+        { type: "text", text: "Script completed" },
+        { type: "text", text: "用户额外补充：\n  原文\n保留缩进与换行。  " },
+      ],
+    });
+    expect(response.structuredContent).toBeUndefined();
+  });
+
+  it("counts the separator between structured notes at an exact 37 KB boundary", () => {
+    const { store } = fixture();
+    const text = 'a"\\\n汉😀'.repeat(100);
+    const notes = [text, text];
+    const overhead = modelTextBytes({
+      content: [],
+      structuredContent: { result: { output: "" }, user_notes: notes },
+    });
+    const ordinary: CallToolResult = {
+      content: [],
+      structuredContent: {
+        output: "x".repeat(NOTES_RESPONSE_BYTES - overhead),
+      },
+    };
+    expect(modelTextBytes(ordinary)).toBeLessThanOrEqual(36_000);
+    store.enqueue("a", "one", text);
+    store.enqueue("a", "two", text);
+    store.enqueue("a", "three", "later");
+    const response = store.attach(ordinary, "a", "exact-multiple");
+    expect(modelTextBytes(response)).toBe(NOTES_RESPONSE_BYTES);
+    expect(response.structuredContent).toEqual({
+      result: ordinary.structuredContent,
+      user_notes: notes,
+    });
+    expect(store.page("a").pendingCount).toBe(1);
+
+    store.enqueue("b", "one", text);
+    store.enqueue("b", "two", text);
+    const slightlyLarger: CallToolResult = {
+      content: [],
+      structuredContent: {
+        output: "x".repeat(NOTES_RESPONSE_BYTES - overhead + 1),
+      },
+    };
+    const partial = store.attach(slightlyLarger, "b", "only-first");
+    expect(partial.structuredContent).toEqual({
+      result: slightlyLarger.structuredContent,
+      user_notes: [text],
+    });
+    expect(modelTextBytes(partial)).toBeLessThanOrEqual(NOTES_RESPONSE_BYTES);
+    expect(store.page("b").pendingCount).toBe(1);
+  });
+
+  it("leaves mixed results completely unchanged when moving their text would leave no room for a note", () => {
+    const { store } = fixture();
+    store.enqueue("a", "pending", "message");
+    // Original text fits; JSON encoding this distinct text needs more space.
+    const ordinary: CallToolResult = {
+      structuredContent: { success: false },
+      content: [{ type: "text", text: "\0".repeat(7000) }],
+      isError: true,
+    };
+    expect(modelTextBytes(ordinary)).toBeLessThan(36_000);
+    const original = JSON.stringify(ordinary);
+    expect(store.attach(ordinary, "a", "too-big")).toBe(ordinary);
+    expect(JSON.stringify(ordinary)).toBe(original);
+    expect(store.page("a").pendingCount).toBe(1);
+    expect(store.attach(result("small"), "a", "later").content).toEqual([
+      { type: "text", text: "small" },
+      { type: "text", text: "用户额外补充：\nmessage" },
+    ]);
   });
 
   it("supports normal errors, media and no output; cancellation or missing scope consumes nothing", () => {

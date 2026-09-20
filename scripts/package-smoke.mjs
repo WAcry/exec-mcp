@@ -434,6 +434,31 @@ enabled = true
   const notesPage = await (await fetch(notesUrl)).json();
   assert.equal(notesPage.pendingCount, 0);
   assert.equal(notesPage.items[0].status, "attached");
+  const directNote = await fetch(notesUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-exec-web": "1" },
+    body: JSON.stringify({
+      id: "installed-structured-note",
+      text: "PACKAGED_STRUCTURED_NOTE",
+    }),
+  });
+  assert.equal(directNote.status, 200, await directNote.text());
+  const structuredNote = await client.callTool({
+    name: "tool_search",
+    arguments: { query: "apply_patch", limit: 1 },
+    _meta: { "openai/session": "package-smoke-conversation" },
+  });
+  assert.deepEqual(structuredNote.content, []);
+  assert.deepEqual(structuredNote.structuredContent.user_notes, [
+    "PACKAGED_STRUCTURED_NOTE",
+  ]);
+  assert.equal(
+    structuredNote.structuredContent.result.tools[0].name,
+    "apply_patch",
+  );
+  assert.ok(
+    !JSON.stringify(structuredNote).includes("installed-structured-note"),
+  );
   assert.deepEqual(
     JSON.parse(
       toolSurface.content.find(

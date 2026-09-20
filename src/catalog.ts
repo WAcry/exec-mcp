@@ -386,7 +386,7 @@ export function directContract(contract: NativeContract) {
       "创建和修改文本文件优先使用 apply_patch，避免命令行参数长度限制。";
   if (contract.name !== "view_image")
     description +=
-      "对象结果在 structuredContent，文本在 content；与 exec/wait 一样，本服务每次返回文本限 36,000 UTF-8 字节，超出改为首尾文本，截断不补发。用户补充另计，合计最多 37,000 UTF-8 字节。";
+      "对象结果在 structuredContent，文本在 content；有用户补充时，structuredContent 为 {result:原结果,user_notes:[补充原文]}，文本用「用户额外补充：」附带。与 exec/wait 一样，普通结果限 36,000 UTF-8 字节，超出保留首尾，截断不补发；含用户补充合计最多 37,000 字节。";
   return {
     title: NATIVE_TOOL_TITLES[contract.name],
     schema,

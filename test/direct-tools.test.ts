@@ -141,9 +141,13 @@ describe.each([false, true])(
         expect(direct.description).toBe(directContract(contract).description);
         if (contract.name !== "view_image") {
           expect(direct.description).toContain(
-            "与 exec/wait 一样，本服务每次返回文本限 36,000 UTF-8 字节",
+            "与 exec/wait 一样，普通结果限 36,000 UTF-8 字节",
           );
           expect(direct.description).toContain("截断不补发");
+          expect(direct.description).toContain(
+            "structuredContent 为 {result:原结果,user_notes:[补充原文]}",
+          );
+          expect(direct.description).toContain("用户额外补充：");
         }
         expect(direct.inputSchema.type).toBe("object");
         expect(exec.description).toContain(contract.name);

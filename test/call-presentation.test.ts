@@ -109,6 +109,10 @@ describe("complete input presentation for every entry point", () => {
     for (const output of [
       { exit_code: 0 },
       { content: [], structuredContent: { exit_code: 0 } },
+      {
+        content: [],
+        structuredContent: { result: { exit_code: 0 }, user_notes: ["补充"] },
+      },
     ])
       expect(
         callStatusLabel({ ...record("exec_command", {}, "yielding"), output }),
@@ -116,6 +120,18 @@ describe("complete input presentation for every entry point", () => {
     expect(callStatusLabel(record("write_stdin", {}, "terminated"))).toBe(
       "已终止",
     );
+    expect(
+      callStatusLabel({
+        ...record("write_stdin", {}, "yielding"),
+        output: {
+          content: [],
+          structuredContent: {
+            result: { session_id: "term_running" },
+            user_notes: ["补充"],
+          },
+        },
+      }),
+    ).toBe("终端运行或输出待取");
   });
 
   it("previews real command and patch content instead of blank first lines and envelope markers", () => {

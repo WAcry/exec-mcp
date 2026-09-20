@@ -59,10 +59,20 @@ function webApi(url: string) {
 const scopeA = "original-chat-A";
 const scopeB = "original-chat-B";
 const hashA = sessionScopeKey(scopeA)!;
-const noteBlocks = (response: CallToolResult) =>
-  response.content.filter(
-    (c) => c.type === "text" && c.text.startsWith("用户补充（来源："),
+const noteBlocks = (response: CallToolResult) => {
+  if (response.structuredContent !== undefined) {
+    // Model consumers may read only structuredContent when it is present.
+    expect(response.content.some((item) => item.type === "text")).toBe(false);
+    const envelope = response.structuredContent as { user_notes?: string[] };
+    return (envelope.user_notes ?? []).map((text) => ({
+      type: "text" as const,
+      text: `用户额外补充：\n${text}`,
+    }));
+  }
+  return response.content.filter(
+    (c) => c.type === "text" && c.text.startsWith("用户额外补充：\n"),
   );
+};
 
 async function fixture(legacy = false) {
   const root = await directory();
@@ -177,10 +187,15 @@ describe.each([false, true])(
         const response = await f.call(name, inputs[name]!);
         expect(response.isError, JSON.stringify(response)).not.toBe(true);
         expect(noteBlocks(response)).toEqual([
-          expect.objectContaining({
-            text: expect.stringContaining(`user supplement for ${name}`),
-          }),
+          { type: "text", text: `用户额外补充：\nuser supplement for ${name}` },
         ]);
+        if (response.structuredContent !== undefined) {
+          expect(response.structuredContent).toHaveProperty("result");
+          expect(response.structuredContent).toHaveProperty("user_notes", [
+            `user supplement for ${name}`,
+          ]);
+        }
+        expect(JSON.stringify(response)).not.toContain(`note-${name}`);
         expect(modelTextBytes(response)).toBeLessThanOrEqual(37_000);
         if (name === "view_image")
           expect(response.content.some((c) => c.type === "image")).toBe(true);
@@ -196,6 +211,91 @@ describe.each([false, true])(
         noteBlocks(await f.call("tool_search", { query: "write_stdin" })),
       ).toHaveLength(0);
     });
+
+    it("keeps a running terminal handle and short user messages in structuredContent without a text mirror", async () => {
+      const f = await fixture(legacy);
+      const first = jsonOutput<{ session_id: string }>(
+        await f.call("exec_command", {
+          cmd: nodeCommand(
+            'setInterval(()=>console.log("sleep progress"),20);',
+          ),
+          yield_time_ms: 0,
+        }),
+      );
+      const session = f.server.runtime.terminal["sessions"].get(
+        first.session_id,
+      )!;
+      await vi.waitFor(() => expect(session.buffer.pending).toBe(true), {
+        timeout: 10_000,
+      });
+      const text = "请说明收到了 side note；这次 sleep 也用于验证投递。";
+      await f.send("private-note-id", text);
+      const response = await f.call("write_stdin", {
+        session_id: first.session_id,
+        yield_time_ms: 0,
+      });
+      expect(response.content).toEqual([]);
+      expect(response.structuredContent).toMatchObject({
+        result: {
+          output: expect.stringContaining("sleep progress"),
+          session_id: first.session_id,
+        },
+        user_notes: [text],
+      });
+      expect(JSON.stringify(response)).not.toMatch(
+        /private-note-id|Web 操作者|用户补充（来源/,
+      );
+      const record = f.activity.getCalls({ tool: "write_stdin" }).items[0]!;
+      expect(record.output).toMatchObject({
+        content: [],
+        structuredContent: response.structuredContent,
+      });
+      expect((await f.page()).items[0]).toMatchObject({
+        id: "private-note-id",
+        sequence: 1,
+        status: "attached",
+        callId: record.id,
+      });
+      const next = await f.call("write_stdin", {
+        session_id: first.session_id,
+        terminate: true,
+      });
+      expect(next.structuredContent).toHaveProperty("exit_code");
+      expect(next.structuredContent).not.toHaveProperty("user_notes");
+    });
+
+    it.each([0, 50_000])(
+      "preserves a failed command with notes in its selected output channel (padding=%s)",
+      async (padding) => {
+        const f = await fixture(legacy);
+        await f.send("oversized-result-note", "用户限制仍需保留。");
+        const response = await f.call("exec_command", {
+          cmd: nodeCommand(
+            `process.stdout.write("BEGIN"+"x".repeat(${padding})+"END",()=>process.exit(3));`,
+          ),
+          yield_time_ms: 10_000,
+        });
+        expect(response.isError).toBe(true);
+        if (padding) {
+          expect(response.structuredContent).toBeUndefined();
+          expect(JSON.stringify(response)).toContain("保留首尾");
+        } else {
+          expect(response.content).toEqual([]);
+          expect(response.structuredContent).toMatchObject({
+            result: { output: "BEGINEND", exit_code: 3 },
+            user_notes: ["用户限制仍需保留。"],
+          });
+        }
+        expect(noteBlocks(response)).toEqual([
+          { type: "text", text: "用户额外补充：\n用户限制仍需保留。" },
+        ]);
+        const encoded = JSON.stringify(response);
+        expect(encoded).toContain("BEGIN");
+        expect(encoded).toContain("END");
+        expect(modelTextBytes(response)).toBeLessThanOrEqual(37_000);
+        expect((await f.page()).pendingCount).toBe(0);
+      },
+    );
 
     it("isolates conversations and missing metadata; discovery/resource reads do not drain pending notes", async () => {
       const f = await fixture(legacy);

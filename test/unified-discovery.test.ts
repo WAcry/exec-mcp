@@ -94,8 +94,10 @@ describe.each([false, true])(
           TOP_LEVEL_TOOL_NAMES,
         );
         const description = advertised[0]!.description!;
-        const headings = advertised.slice(2).map((tool) => tool.name);
-        expect(description).not.toContain("输入 JSON Schema");
+        const headings = nativeContracts(resolveShell()).map(
+          (tool) => tool.name,
+        );
+        expect(description).toContain("输入 JSON Schema");
         const result = await s.call(inspectCatalog);
         expect(result.isError, JSON.stringify(result)).not.toBe(true);
         const value = jsonOutput<{

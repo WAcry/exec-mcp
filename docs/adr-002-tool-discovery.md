@@ -12,8 +12,8 @@
 
 ## 决定
 
-**本机/发现工具分别暴露完整顶层契约，同时保留 exec 内同名调用。**
-exec 描述只列出可用名称、组合语义和补丁/附件参数差异，不再次展开所有本机描述和 schema。
+**只有 exec/wait 暴露到顶层；本机工具的完整契约在 exec 描述中一次性展开。**
+契约、schema、ALL_TOOLS 条目与 tools.* 参数校验共用可执行定义，避免手写镜像漂移。
 下游工具统一通过 `tools.mcp__...(...)` 或 `tools[name](args)` 调用，不另外生成不透明 tool_id 交给模型。
 
 `ALL_TOOLS` 保持 Codex 的普通数组形状 `{name, description}[]`，
@@ -24,7 +24,7 @@ exec 描述只列出可用名称、组合语义和补丁/附件参数差异，�
 **不把本机工具从 ALL_TOOLS 删除。** 数组留在运行时不会自动占用模型上下文，
 只有 Agent 输出条目时才进入上下文。保留完整目录能避免“ALL 不包含全部可调用方法”的例外。
 为避免重复，`exec` 不自动打印目录；完整条目留在 V8，仅在显式 text 返回时进入模型上下文。
-目录条目和直接工具由同一份定义生成；patch 的对象包装、file 的宿主绑定只是 MCP 边界适配。
+目录条目和 exec 内本机章节由同一份定义生成；文件通过 exec.files 在 MCP 边界绑定。
 exec/wait 不在可嵌套目录内，不引入递归执行或另一套等待语义。
 
 Web 下游页面直接筛选已经取得的目录并展示完整契约，不调用模型工具、不保留 BM25 检索探针。
@@ -35,7 +35,7 @@ Web 下游页面直接筛选已经取得的目录并展示完整契约，不调�
 代码生成的 exec 描述和原生绑定共用同一契约；ChatGPT 连接可以仍保留部署前的工具元数据。
 只开新对话不代替连接的元数据刷新。排查时比较服务实际 tools/list、当前 ALL_TOOLS 和宿主显示的描述，
 不把宿主旧描述推断成运行时工具由 ChatGPT 注入。升级/重启并刷新连接是操作者动作，不在每次结果里重发全套 schema。
-新增本机工具时，测试须同时核对顶层完整契约、ALL_TOOLS 和两种实际调用，不只核对静态工具名列表。
+新增本机工具时，测试须同时核对 exec 完整契约、ALL_TOOLS 和实际嵌套调用，不只核对静态工具名列表。
 
 ## 启动完整加载，按需向模型展示
 
@@ -44,7 +44,7 @@ Web 下游页面直接筛选已经取得的目录并展示完整契约，不调�
 关闭已启动的下游与本机资源；不以部分目录继续启动。故意不使用的服务由用户显式 enabled=false。
 启动验证不会实际执行 tools/call：工具本身可能有写入、副作用或额外权限，不能以“全面检查”为理由擅自试调用。
 
-这不等于把所有下游 schema 输出给 ChatGPT。完整目录留在服务和 V8 内，本机契约只在其同名顶层工具展开。
+这不等于把所有下游 schema 输出给 ChatGPT。完整目录留在服务和 V8 内，仅本机契约预先在 exec 展开。
 已知精确名称和参数的 Agent（例如有 Skill 指导）可以在第一次 exec 直接调用；
 按需展示不等于延迟加载、鉴权或连接。JS 筛选和调用使用本次 exec 的同一个快照。
 
@@ -75,16 +75,15 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 
 从一个工具条目应能确定参数形状、必填项、返回值、错误语义以及必要的副作用注意事项。
 顶层 MCP 输入都是对象；exec 内补丁接收字符串，其他工具接收对象。
-顶层 import_file 用 file 宿主绑定，exec 内用 exec.files 的 index；其余差异只涉及明确的路径基准。
+宿主在 exec.files 绑定附件，import_file 用零基 index 选择；文件内容与下载凭据不进入 V8。
 不为了整齐把所有返回值包成同一种 envelope。
-直接工具按 MCP 返回 content/structuredContent；exec 内本机结构化函数直接返回对象，图片函数保留 CallToolResult。
-共享执行实现不意味着这两层的返回包装相同；工具说明区分包装，不让 Agent 对本机原始对象查 structuredContent。
-用户补充只改变实际附带消息的顶层返回：原结构化值在 result、补充原文在 user_notes；见 [ADR-010](adr-010-session-notes.md)。
+exec 内本机结构化函数直接返回对象，图片函数保留 CallToolResult；不要求本机原始对象具有 structuredContent。
+显式 text/image/audio 决定向模型展示的内容；用户补充仅附于外层 exec/wait，不改变嵌套原值，见 [ADR-010](adr-010-session-notes.md)。
 下游完整 schema 要保留，不能只用有损 TypeScript 摘要替代约束。
 工具绑定与校验使用同一契约；Code Mode host 不替应用层完成输入校验。
 
-Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、等待、发现及内层参数差异。
-各顶层工具独立说明自己的原文参数、目录和结果，不要求先读 exec 或 README，也不复制整份其他工具契约。
+Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、等待与发现。
+本机章节分别提供完整参数、返回值和必要语义；首次调用不要求先读 README 或再从 ALL_TOOLS 发现本机契约。
 筛选使用标准 JavaScript，不增加 embedding 服务、目录 DSL 或特殊宿主 helper。
 实际工具说明从可执行定义生成，不在 ADR 维护另一份完整提示词或 schema。
 
@@ -94,7 +93,7 @@ Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、
 设计讨论中的“不要做某事”不是自动追加的提示词；旧项目的参数、未实现的功能、内部回收或压缩算法，
 留在相应 ADR/README。只有自然调用容易踩到且 schema/返回值未说明的区别，才值得额外提醒。
 例如隔离 JS 与实际机器的边界、未 await 的调用被丢弃、cell_id 与终端 session_id 的区别、
-待输出媒体和自动交付的文件链接，均会直接影响调用；不要把两种入口的参数形状混写成历史禁令。
+待输出媒体和自动交付的文件链接，均会直接影响调用；旧入口的参数形状不写成当前提示中的历史禁令。
 
 对照固定 Codex rust-v0.155.1 的 [Code Mode 契约](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/code-mode-protocol/src/description.rs)、
 [命令定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/shell_spec.rs)、
@@ -122,6 +121,12 @@ Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机�
 中 GPT-6 Astra 和 GPT-5.6 系列指定 code_mode_only；组装器在该模式隐藏普通顶层工具，
 且 ToolSearch 类型不绑定为嵌套方法。因此此路径使用 ALL_TOOLS 并非仅靠提示偏好。
 本项目只采用适合自身的 Code Mode 目录路径，不照搬 deferred-tool 展示机制，也不推断某个账户的模型能力标记。
+进一步核对 2026-09-21 的 `ebc05da3bdb76f25861e7cb418bd06d28cadc609` 后，统一采用 Code Mode Only。
+以其 Code Mode 描述、shell/patch 定义和基础提示词作为语义参考；保留中文、MCP source 对象参数、
+宿主文件绑定、110 秒外层 wait、用户补充和有界输出这些 ChatGPT 适配。
+本服务不实现上游模型循环、权限审批、notify 注入或暂停审批计时，不把未接入的能力写入描述。
+内层输出默认不复制上游的每工具 token 裁剪，因为脚本仍需筛选原始值；由外层统一约束模型输出。
+不改变已有 close_stdin、PTY resize、terminate、零等待能力，它们服务进程交互与清理，而不是另一套编排入口。
 固定的 host/patch 版本不因此升级。启动时完成下游加载免去冷启动发现的额外 exec 往返。
 代价是服务启动更慢，启用的故障下游会阻止就绪；换来第一轮已知工具可调用且问题在用户终端尽早暴露。
 不修改固定 host，不伪造动态 JavaScript 绑定，不维持第二套 call API。

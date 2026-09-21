@@ -6,13 +6,18 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { STDIN_SCHEMA } from "../src/catalog.js";
 import * as timing from "../src/util.js";
-import { TerminalManager, type TerminalResult } from "../src/host/terminal.js";
+import {
+  TerminalManager,
+  stdinYieldTime,
+  type TerminalResult,
+} from "../src/host/terminal.js";
 import {
   cellId,
   connect,
   jsonOutput,
   nodeCommand,
   observeTerminal,
+  nativeRequest,
 } from "./helpers.js";
 
 const managers: TerminalManager[] = [];
@@ -106,10 +111,10 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
       );
       expect(settled).toBe(false);
       expect(waits).toHaveBeenCalledTimes(1);
-      expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
-      expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
+      expect(waits.mock.calls[0]![1]).toBeGreaterThan(4500);
+      expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(5000);
       await t.release();
-      const final = await waiting; // Finishes early despite the default 110-second window.
+      const final = await waiting; // Finishes early despite the default collection window.
       expect(final.exit_code).toBe(0);
       expect(final.session_id).toBeUndefined();
       expect(plain(final.output)).toContain("DONE\n");
@@ -167,7 +172,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
     expect(next.session_id).toBe(t.id);
   });
 
-  it("uses the same long default after writing input or resizing a PTY", async () => {
+  it("uses the short interactive default after writing input or resizing a PTY", async () => {
     const value = manager();
     const t = await start(value, tty);
     const waits = vi.spyOn(timing, "waitUntil");
@@ -183,8 +188,8 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
       });
     await vi.waitFor(() => expect(t.session.exitReady).toBeTypeOf("function"));
     expect(waits).toHaveBeenCalledTimes(1);
-    expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
-    expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
+    expect(waits.mock.calls[0]![1]).toBeGreaterThan(150);
+    expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(250);
     const before = t.session.buffer.bytes;
     await vi.waitFor(() =>
       expect(t.session.buffer.bytes).toBeGreaterThan(before),
@@ -222,9 +227,11 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
     const value = manager();
     const t = await start(value, tty);
     let settled = false;
-    const pending = value.writeStdin({ session_id: t.id }).finally(() => {
-      settled = true;
-    });
+    const pending = value
+      .writeStdin({ session_id: t.id, yield_time_ms: 300000 })
+      .finally(() => {
+        settled = true;
+      });
     const other = await value.execCommand(
       { cmd: nodeCommand('console.log("OTHER_READY")'), tty, yield_time_ms: 0 },
       t.root,
@@ -245,7 +252,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
   });
 });
 
-it("uses the same 110-second default after writing and closing stdin, rather than a short write timeout", async () => {
+it("returns after a short input window and lets a later read collect EOF-triggered completion", async () => {
   const value = manager();
   const first = await value.execCommand(
     {
@@ -265,12 +272,15 @@ it("uses the same 110-second default after writing and closing stdin, rather tha
     close_stdin: true,
   });
   expect(waits).toHaveBeenCalledTimes(1);
-  expect(waits.mock.calls[0]![1]).toBeGreaterThan(100_000);
-  expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(110_000);
-  expect(result.exit_code).toBe(7);
-  expect(result.session_id).toBeUndefined();
-  expect(result.output).toContain("PROGRESS");
-  expect(result.output).toContain("INPUT:payload");
+  expect(waits.mock.calls[0]![1]).toBeGreaterThan(150);
+  expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(250);
+  expect(result.session_id).toBe(first.session_id);
+  const final = await observeTerminal(result, (input) =>
+    value.writeStdin(input),
+  );
+  expect(final.exit_code).toBe(7);
+  expect(final.output).toContain("PROGRESS");
+  expect(final.output).toContain("INPUT:payload");
 });
 
 it("leaves the rolling buffer bounded during a default wait and drains an already-ended process immediately", async () => {
@@ -310,22 +320,12 @@ it("leaves the rolling buffer bounded during a default wait and drains an alread
 describe.each([false, true])(
   "default deadline waiting over actual MCP (legacy=%s)",
   (legacy) => {
-    it("shares one parameter-free waiting behavior across direct and nested calls", async () => {
+    it("exposes Codex-style stdin collection inside exec and resumes long waits via the outer cell", async () => {
       const t = await connect({}, legacy);
       connections.push(t);
       const advertised = (await t.client.listTools()).tools;
-      const listed = advertised.find((tool) => tool.name === "write_stdin")!;
+      expect(advertised.map((tool) => tool.name)).toEqual(["exec", "wait"]);
       expect(JSON.stringify(advertised)).not.toContain("wait_for");
-      expect(listed.inputSchema.properties?.yield_time_ms).toMatchObject({
-        type: "integer",
-        minimum: 0,
-        maximum: 110_000,
-      });
-      expect(listed.inputSchema.required).not.toContain("wait_for");
-      expect(listed.description).toContain("默认等进程结束或 110 秒");
-      expect(listed.description).toContain("日志不提前唤醒");
-      expect(listed.description).toContain("长等待减少轮询");
-      expect(listed.description).toContain("0 立即读取");
       const catalogResult = await t.client.callTool({
         name: "exec",
         arguments: {
@@ -334,18 +334,16 @@ describe.each([false, true])(
       });
       const catalog = jsonOutput<{ description: string }>(catalogResult);
       expect(catalog.description).not.toContain("wait_for");
-      expect(catalog.description).toContain("日志不提前唤醒");
+      expect(catalog.description).toContain("日志不结束窗口");
+      expect(catalog.description).toContain("非空输入默认 250");
+      expect(catalog.description).toContain("仅读取默认 5000");
+      expect(advertised[0]!.description).toContain(catalog.description);
       for (const wait_for of ["output", "exit"]) {
         const oldArguments = {
           session_id: "retired-mode",
           yield_time_ms: 0,
           wait_for,
         };
-        const direct = await t.client.callTool({
-          name: "write_stdin",
-          arguments: oldArguments,
-        });
-        expect(direct.isError).toBe(true);
         const nested = await t.client.callTool({
           name: "exec",
           arguments: {
@@ -355,29 +353,29 @@ describe.each([false, true])(
         expect(nested.isError).toBe(true);
         expect(JSON.stringify(nested)).toContain("参数无效");
       }
-      for (const nested of [false, true]) {
+      {
         const f = await fixture();
         const first = jsonOutput<TerminalResult>(
-          await t.client.callTool({
-            name: "exec_command",
-            arguments: { cmd: f.cmd, workdir: f.root, yield_time_ms: 0 },
-          }),
+          await t.client.callTool(
+            nativeRequest("exec_command", {
+              cmd: f.cmd,
+              workdir: f.root,
+              yield_time_ms: 0,
+            }),
+          ),
         );
         const args = {
           session_id: first.session_id!,
+          yield_time_ms: 300000,
         };
         const session = t.runtime.terminal["sessions"].get(first.session_id!)!;
-        const pending = t.client.callTool(
-          nested
-            ? {
-                name: "exec",
-                arguments: {
-                  source: `text(await tools.write_stdin(${JSON.stringify(args)}));`,
-                  yield_time_ms: 0,
-                },
-              }
-            : { name: "write_stdin", arguments: args },
-        );
+        const pending = t.client.callTool({
+          name: "exec",
+          arguments: {
+            source: `text(await tools.write_stdin(${JSON.stringify(args)}));`,
+            yield_time_ms: 0,
+          },
+        });
         await vi.waitFor(
           () => expect(session.exitReady).toBeTypeOf("function"),
           { timeout: 10_000, interval: 10 },
@@ -385,7 +383,7 @@ describe.each([false, true])(
         await vi.waitFor(() => expect(session.buffer.pending).toBe(true), {
           timeout: 10_000,
         });
-        if (nested) {
+        {
           const yielded = await pending;
           const id = cellId(yielded);
           const stillRunning = await t.client.callTool({
@@ -399,9 +397,6 @@ describe.each([false, true])(
             arguments: { cell_id: id, yield_time_ms: 110_000 },
           });
           expect(jsonOutput<TerminalResult>(completed).exit_code).toBe(0);
-        } else {
-          await f.release();
-          expect(jsonOutput<TerminalResult>(await pending).exit_code).toBe(0);
         }
       }
     });
@@ -418,7 +413,7 @@ it("does not restart a queued read's expired wait budget after another observer 
   });
   const second = value.writeStdin({
     session_id: t.id,
-    yield_time_ms: 25,
+    yield_time_ms: 0,
   });
   const results = await Promise.all([first, second]);
   expect(waits).toHaveBeenCalledTimes(2);
@@ -456,7 +451,7 @@ it("continues draining an ended process with the same handle when one response c
 
 it("removes the old wait-mode field and keeps a single bounded wait duration", () => {
   expect(STDIN_SCHEMA.safeParse({ session_id: "id" }).success).toBe(true);
-  for (const yield_time_ms of [0, 1000, 110_000])
+  for (const yield_time_ms of [0, 1000, 110_000, 300_000])
     expect(
       STDIN_SCHEMA.safeParse({ session_id: "id", yield_time_ms }).success,
     ).toBe(true);
@@ -464,8 +459,31 @@ it("removes the old wait-mode field and keeps a single bounded wait duration", (
     expect(STDIN_SCHEMA.safeParse({ session_id: "id", wait_for }).success).toBe(
       false,
     );
-  for (const yield_time_ms of [-1, 0.5, 110_001, "110000", null])
+  for (const yield_time_ms of [-1, 0.5, 300_001, "110000", null])
     expect(
       STDIN_SCHEMA.safeParse({ session_id: "id", yield_time_ms }).success,
     ).toBe(false);
+});
+
+it("uses Codex collection defaults and bounds, retaining explicit zero for immediate observation", () => {
+  const base = { session_id: "id" };
+  expect(stdinYieldTime(base)).toBe(5000);
+  expect(stdinYieldTime({ ...base, chars: "" })).toBe(5000);
+  expect(stdinYieldTime({ ...base, chars: "input" })).toBe(250);
+  expect(stdinYieldTime({ ...base, yield_time_ms: 1 })).toBe(5000);
+  expect(stdinYieldTime({ ...base, chars: "input", yield_time_ms: 1 })).toBe(
+    250,
+  );
+  expect(stdinYieldTime({ ...base, yield_time_ms: 300000 })).toBe(300000);
+  expect(
+    stdinYieldTime({ ...base, chars: "input", yield_time_ms: 300000 }),
+  ).toBe(30000);
+  for (const chars of [undefined, "", "input"])
+    expect(
+      stdinYieldTime({
+        ...base,
+        ...(chars === undefined ? {} : { chars }),
+        yield_time_ms: 0,
+      }),
+    ).toBe(0);
 });

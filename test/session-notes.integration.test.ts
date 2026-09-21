@@ -15,7 +15,7 @@ import { ArtifactStore } from "../src/files/artifacts.js";
 import { sessionScopeKey } from "../src/code-mode/service.js";
 import { ServiceController } from "../src/service-controller.js";
 import { ConfigEditor } from "../src/web/config-edit.js";
-import { cellId, jsonOutput, nodeCommand } from "./helpers.js";
+import { cellId, jsonOutput, nodeCommand, nativeRequest } from "./helpers.js";
 import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { modelTextBytes } from "../src/session-notes.js";
 import type { SessionNotesPage } from "../src/session-notes-types.js";
@@ -106,8 +106,9 @@ async function fixture(legacy = false) {
     scope: string | undefined = scopeA,
   ) =>
     client.callTool({
-      name,
-      arguments: args,
+      ...(name === "exec" || name === "wait"
+        ? { name, arguments: args }
+        : nativeRequest(name, args)),
       ...(scope === undefined ? {} : { _meta: { "openai/session": scope } }),
     });
   const probeArgs = {
@@ -287,13 +288,14 @@ describe.each([false, true])(
       await f.send("after-answer", "其他工作继续");
       expect(noteBlocks(await f.probe(scopeB))).toHaveLength(0);
       const response = await f.probe();
-      expect(response.content).toEqual([]);
-      expect(response.structuredContent).toMatchObject({
-        user_notes: [
-          `问题：Which database?\n选择：SQLite\n补充：${answer.note}`,
-          "其他工作继续",
-        ],
-      });
+      expect(response.structuredContent).toBeUndefined();
+      expect(noteBlocks(response)).toEqual([
+        {
+          type: "text",
+          text: `用户额外补充：\n问题：Which database?\n选择：SQLite\n补充：${answer.note}`,
+        },
+        { type: "text", text: "用户额外补充：\n其他工作继续" },
+      ]);
       expect(JSON.stringify(response)).not.toContain(questions.items[0]!.id);
       expect((await f.api(url, "POST", answer)).status).toBe(200); // Lost Web acknowledgements never enqueue again.
       expect((await f.page()).pendingCount).toBe(0);
@@ -324,8 +326,7 @@ describe.each([false, true])(
       const f = await fixture(legacy);
       const args = { questions: [{ title: "Choose?", options: ["A", "B"] }] };
       const missing = await f.client.callTool({
-        name: "request_user_input_async",
-        arguments: args,
+        ...nativeRequest("request_user_input_async", args),
       });
       expect(missing.isError).toBe(true);
       expect(JSON.stringify(missing)).toContain("对话标识");
@@ -388,15 +389,16 @@ describe.each([false, true])(
       expect(completed).toBe(false);
       await writeFile(gate, "done");
       const result = await pending;
-      expect(result.structuredContent).toMatchObject({
-        result: { exit_code: 0 },
-        user_notes: [
-          "问题：Keep compatibility?\n选择：Keep\n补充：Node 20 too.",
-        ],
-      });
+      expect(jsonOutput(result)).toMatchObject({ exit_code: 0 });
+      expect(noteBlocks(result)).toEqual([
+        {
+          type: "text",
+          text: "用户额外补充：\n问题：Keep compatibility?\n选择：Keep\n补充：Node 20 too.",
+        },
+      ]);
     });
 
-    it("delivers notes via every outer entry, including asynchronous questions, and preserves files/media", async () => {
+    it("delivers notes via exec/wait with every nested capability, preserving files/media", async () => {
       const f = await fixture(legacy);
       const listed = (await f.client.listTools()).tools;
       expect(listed.map((t) => t.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
@@ -453,7 +455,7 @@ describe.each([false, true])(
           ],
         },
       };
-      for (const name of TOP_LEVEL_TOOL_NAMES) {
+      for (const name of Object.keys(inputs)) {
         await f.send(`note-${name}`, `user supplement for ${name}`);
         const response = await f.call(name, inputs[name]!);
         expect(response.isError, JSON.stringify(response)).not.toBe(true);
@@ -477,11 +479,11 @@ describe.each([false, true])(
         expect((await f.page()).pendingCount).toBe(0);
       }
       await f.call("wait", { cell_id: cell, terminate: true });
-      expect((await f.page()).items).toHaveLength(TOP_LEVEL_TOOL_NAMES.length);
+      expect((await f.page()).items).toHaveLength(Object.keys(inputs).length);
       expect(noteBlocks(await f.probe())).toHaveLength(0);
     });
 
-    it("keeps a running terminal handle and short user messages in structuredContent without a text mirror", async () => {
+    it("keeps running terminal output and short user messages together in exec content without a second channel", async () => {
       const f = await fixture(legacy);
       const first = jsonOutput<{ session_id: string }>(
         await f.call("exec_command", {
@@ -503,21 +505,20 @@ describe.each([false, true])(
         session_id: first.session_id,
         yield_time_ms: 0,
       });
-      expect(response.content).toEqual([]);
-      expect(response.structuredContent).toMatchObject({
-        result: {
-          output: expect.stringContaining("sleep progress"),
-          session_id: first.session_id,
-        },
-        user_notes: [text],
+      expect(response.structuredContent).toBeUndefined();
+      expect(jsonOutput(response)).toMatchObject({
+        output: expect.stringContaining("sleep progress"),
+        session_id: first.session_id,
       });
+      expect(noteBlocks(response)).toEqual([
+        { type: "text", text: `用户额外补充：\n${text}` },
+      ]);
       expect(JSON.stringify(response)).not.toMatch(
         /private-note-id|Web 操作者|用户补充（来源/,
       );
-      const record = f.activity.getCalls({ tool: "write_stdin" }).items[0]!;
+      const record = f.activity.getCalls({ tool: "exec" }).items[0]!;
       expect(record.output).toMatchObject({
-        content: [],
-        structuredContent: response.structuredContent,
+        content: response.content,
       });
       expect((await f.page()).items[0]).toMatchObject({
         id: "private-note-id",
@@ -529,8 +530,8 @@ describe.each([false, true])(
         session_id: first.session_id,
         terminate: true,
       });
-      expect(next.structuredContent).toHaveProperty("exit_code");
-      expect(next.structuredContent).not.toHaveProperty("user_notes");
+      expect(jsonOutput(next)).toHaveProperty("exit_code");
+      expect(noteBlocks(next)).toHaveLength(0);
     });
 
     it.each([0, 50_000])(
@@ -544,15 +545,14 @@ describe.each([false, true])(
           ),
           yield_time_ms: 10_000,
         });
-        expect(response.isError).toBe(true);
+        expect(response.isError).not.toBe(true); // The script explicitly prints a command failure.
         if (padding) {
           expect(response.structuredContent).toBeUndefined();
           expect(JSON.stringify(response)).toContain("保留首尾");
         } else {
-          expect(response.content).toEqual([]);
-          expect(response.structuredContent).toMatchObject({
-            result: { output: "BEGINEND", exit_code: 3 },
-            user_notes: ["用户限制仍需保留。"],
+          expect(jsonOutput(response)).toMatchObject({
+            output: "BEGINEND",
+            exit_code: 3,
           });
         }
         expect(noteBlocks(response)).toEqual([
@@ -579,8 +579,7 @@ describe.each([false, true])(
       await f.send("private-a", "ONLY_A");
       expect(noteBlocks(await f.probe(scopeB))).toHaveLength(0);
       const noScope = await f.client.callTool({
-        name: "apply_patch",
-        arguments: f.probeArgs,
+        ...nativeRequest("apply_patch", f.probeArgs),
       });
       expect(noteBlocks(noScope)).toHaveLength(0);
       await f.client.listTools();
@@ -607,8 +606,9 @@ describe.each([false, true])(
       ).toBe(404);
       const second = await clientFor(f.server.url, legacy);
       const response = await second.callTool({
-        name: "view_image",
-        arguments: { path: path.join(f.root, "missing.png") },
+        ...nativeRequest("view_image", {
+          path: path.join(f.root, "missing.png"),
+        }),
         _meta: { "openai/session": scopeA },
       });
       expect(response.isError).toBe(true);
@@ -675,8 +675,7 @@ describe.each([false, true])(
       const controller = new AbortController();
       const pending = f.client.callTool(
         {
-          name: "write_stdin",
-          arguments: { session_id: first.session_id },
+          ...nativeRequest("write_stdin", { session_id: first.session_id }),
           _meta: { "openai/session": scopeA },
         },
         { signal: controller.signal },

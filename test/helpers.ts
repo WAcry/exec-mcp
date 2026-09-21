@@ -31,10 +31,13 @@ export async function observeTerminal(
       );
     current = await read({
       session_id: current.session_id,
-      yield_time_ms: Math.min(1000, remaining),
+      // Readiness probes in tests use the explicit zero; Codex-style empty
+      // collection windows otherwise have a five-second floor.
+      yield_time_ms: until ? 0 : Math.min(1000, remaining),
     });
     output += current.output;
     elapsed += current.wall_time_seconds;
+    if (until) await new Promise((resolve) => setTimeout(resolve, 25));
   }
 }
 export function texts(result: CallToolResult): string[] {
@@ -60,6 +63,39 @@ export function cellId(result: CallToolResult): string {
     .match(/cell_[A-Za-z0-9_-]+/)?.[0];
   if (!id) throw new Error(`Missing cell_id: ${JSON.stringify(result)}`);
   return id;
+}
+/** Test shorthand that builds an actual exec request; it never fabricates a result.
+ * Patch context and host-bound files belong to exec, not the nested function.
+ */
+export function nativeRequest(name: string, args: Record<string, unknown>) {
+  const input =
+    name === "apply_patch"
+      ? args.patch
+      : name === "import_file"
+        ? {
+            index: 0,
+            destination: args.destination,
+            ...(args.overwrite === undefined
+              ? {}
+              : { overwrite: args.overwrite }),
+          }
+        : args;
+  const invocation = `await tools[${JSON.stringify(name)}](${JSON.stringify(input)})`;
+  return {
+    name: "exec",
+    arguments: {
+      source:
+        name === "view_image"
+          ? `image((${invocation}).content[0]);`
+          : `text(${invocation});`,
+      ...(name === "apply_patch" && args.workdir !== undefined
+        ? { workdir: args.workdir }
+        : {}),
+      ...(name === "import_file" && args.file !== undefined
+        ? { files: [args.file] }
+        : {}),
+    },
+  };
 }
 export function nodeCommand(source: string): string {
   const script = `eval(Buffer.from('${Buffer.from(source).toString("base64")}','base64').toString())`;

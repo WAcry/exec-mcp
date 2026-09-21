@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
-import { NATIVE_TOOL_TITLES, type NativeToolName } from "./tool-names.js";
+import type { NativeToolName } from "./tool-names.js";
 import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
 import {
   HOST_FILE_SCHEMA,
@@ -72,9 +72,7 @@ export const COMMAND_SCHEMA = z
     workdir: z
       .string()
       .min(1)
-      .describe(
-        "命令目录；省略或相对路径基于服务用户主目录，exec 内基于 exec.workdir。",
-      )
+      .describe("命令目录；省略或相对路径基于 exec.workdir，支持 ~/。")
       .optional(),
     shell: z
       .string()
@@ -106,8 +104,8 @@ export const STDIN_SCHEMA = z
       .describe("普通管道可在写入后关闭 stdin；PTY 不支持。")
       .optional(),
     yield_time_ms: ms(
-      110_000,
-      "最长等待毫秒数，默认且推荐 110000，减少轮询；进程结束时提前返回，已有或新增输出不提前唤醒。0 立即读取。",
+      300_000,
+      "输出收集窗口：非空输入默认 250 毫秒，有效范围 250–30000；仅读取默认 5000，有效范围 5000–300000。进程结束提前返回，日志不结束窗口；显式 0 立即读取。",
     ),
     cols: z
       .number()
@@ -139,7 +137,7 @@ export const IMAGE_SCHEMA = z
       .string()
       .min(1)
       .describe(
-        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对服务用户主目录，exec 内相对 exec.workdir，支持 ~/。",
+        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对 exec.workdir，支持 ~/。",
       ),
     detail: z
       .enum(["high", "original"])
@@ -148,27 +146,6 @@ export const IMAGE_SCHEMA = z
   })
   .strict();
 const PATCH_SCHEMA = z.string().min(1);
-export const DIRECT_PATCH_SCHEMA = z
-  .object({
-    patch: PATCH_SCHEMA.describe(
-      "完整 Codex 补丁原文，保留换行；从 *** Begin Patch 开始。",
-    ),
-    workdir: z
-      .string()
-      .min(1)
-      .optional()
-      .describe(
-        "补丁相对路径的基准目录；省略或相对路径基于服务用户主目录，支持 ~/。",
-      ),
-  })
-  .strict();
-export const DIRECT_IMPORT_SCHEMA = IMPORT_FILE_SCHEMA.omit({ index: true })
-  .extend({
-    file: HOST_FILE_SCHEMA.describe(
-      "ChatGPT 原生文件引用；宿主绑定为文件对象，按原值传入。",
-    ),
-  })
-  .strict();
 const SKILL_INVOCATION_RULE =
   "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 const SKILL_SCHEMA = z
@@ -178,7 +155,7 @@ const SKILL_SCHEMA = z
       .min(1)
       .optional()
       .describe(
-        "项目发现起点；相对服务用户主目录，exec 内相对 exec.workdir。省略时只列用户级 Skills，exec 内继承显式的 exec.workdir。",
+        "项目发现起点，相对 exec.workdir。省略时继承显式的 exec.workdir；两者均省略则只列用户级 Skills。",
       ),
   })
   .strict();
@@ -254,7 +231,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "写入、等待、调整 PTY 或终止终端；写入后或仅读取都默认等进程结束或 110 秒，日志不提前唤醒。长等待减少轮询；需及时交互时缩短 yield_time_ms，0 立即读取。只返回未读输出，超时不终止进程。",
+      "向 exec_command 的终端写入字符并收集未读输出；chars 省略或为空时只收集输出。可调整 PTY 尺寸、关闭管道 stdin 或终止进程。窗口到期不终止进程，返回的 session_id 可继续使用。",
   },
   {
     name: "apply_patch",
@@ -343,76 +320,38 @@ export function nativeContracts(
   );
 }
 
-/** MCP requires object inputs. Only patch context and host file binding differ from Code Mode. */
-export function directContract(contract: NativeContract) {
-  let schema = contract.schema;
-  let description = contract.description;
-  switch (contract.name) {
-    case "apply_patch":
-      schema = DIRECT_PATCH_SCHEMA;
-      description =
-        description.replace(
-          "相对路径基于 exec.workdir",
-          "相对路径基于 workdir",
-        ) +
-        "\npatch 直接填写补丁原文，Markdown 围栏、反引号和 ${...} 按原样保留；仅按 JSON 字符串编码，不包 JavaScript。";
-      break;
-    case "import_file":
-      schema = DIRECT_IMPORT_SCHEMA;
-      description = description.replace(
-        "本次 exec.files[index]",
-        "宿主绑定的 file",
-      );
-      break;
-    case "export_file":
-      description = description.replace("exec/wait 自动附带", "本次响应附带");
-      break;
-    case "exec_command":
-      description +=
-        "cmd 直接填写 Shell 原文，保留多行与 Shell 自身的引号/反引号，仅按 JSON 字符串编码。";
-      break;
-    case "view_image":
-      description = "读取本机已有图片用于视觉检查，直接返回原生 MCP 图片。";
-      break;
-  }
-  if (contract.name === "exec_command")
-    description +=
-      "创建和修改文本文件优先使用 apply_patch，避免命令行参数长度限制。";
-  if (contract.name !== "view_image")
-    description +=
-      "对象结果在 structuredContent，文本在 content；有用户补充时，structuredContent 为 {result:原结果,user_notes:[补充原文]}，文本用「用户额外补充：」附带。与 exec/wait 一样，普通结果限 36,000 UTF-8 字节，超出保留首尾，截断不补发；含用户补充合计最多 37,000 字节。";
-  return {
-    title: NATIVE_TOOL_TITLES[contract.name],
-    schema,
-    description:
-      description +
-      (contract.output
-        ? `\n正常返回值形状：${JSON.stringify(contract.output)}`
-        : ""),
-  };
-}
-
 export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `执行 JavaScript 异步模块，通过 tools.* 编排本机及下游 MCP 调用。每次使用新的隔离 V8；V8 本身没有 Node.js、console 或模块导入，文件与网络等外部操作由 tools.* 在实际机器执行。本机任务使用这里的工具；ChatGPT 容器不共享本机的文件和网络环境。
-首次使用本实例或进入尚未发现 Skills 的项目时，先 text(await tools.list_skills({})) 输出目录。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md；目录仍在上下文中时可直接使用。
-本机工具 ${contracts.map((contract) => contract.name).join("、")} 同时可直接调用或通过 tools.* 调用。exec 内沿用同名参数；apply_patch 接收补丁字符串并使用 exec.workdir，import_file 使用 {index,destination,overwrite?} 选择 exec.files。本机对象结果直接返回，view_image 返回 CallToolResult；exec/wait 仅为外层工具。
-exec 可合并、并发调用并用 JS 筛选/汇总结果，减少外层往返；命令和补丁需多处理一层 JS 字符串语法。直接调用省去该层嵌套，结果直接进入最终输出限制；Shell 或补丁本身也可组合多个操作。
-用 await tools.<name>(args) 调用；独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
-创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。
-多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 \${"\`"}、围栏用 \${"\`".repeat(3)}、字面量 \${name} 用 \${"\${name}"} 插入；String.raw 也保留转义用的反斜杠。
-下游 MCP 工具已绑定在 tools 上，完整契约未在此展开。ALL_TOOLS 是本次可嵌套本机及下游工具的 {name,description}[]；按 name/description 用 find/filter 筛选，text(条目) 查看完整参数和返回契约，再 await tools[条目.name](args) 调用。已知名称和参数可直接调用；数组不自动输出，目录更新从下一次 exec 生效。
+  return `运行 JavaScript 异步模块，编排、并发调用工具并筛选结果。每次使用新的 V8；没有 Node.js、console 或模块导入，文件和网络操作通过 tools 在实际机器执行。ChatGPT 容器与该机器不共享文件和网络环境。
+source 填写 JavaScript 源码。所有本机及下游工具通过 await tools.<name>(args) 调用；独立调用可用 Promise.all。脚本结束即销毁本次隔离环境，未 await 的 Promise 会被丢弃。
+本机工具的完整契约列于下方；apply_patch 接收字符串，其他工具接收对象。workdir 指定本次默认目录，省略时为服务用户主目录；JS 普通变量不跨 exec 保留，Shell 的 cd 只影响该进程。
+首次使用或进入新项目时用 list_skills 查看目录，按其规则选择并读取完整 SKILL.md；已在上下文中的目录无需重读。
+创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。多行字符串可用模板字面量；String.raw 保留反斜杠，反引号及 \${...} 仍遵循 JS 语法，Shell 引号和 Markdown 围栏不隔离外层模板。
+
+## 工具发现
+ALL_TOOLS 是本次已绑定工具的 {name,description}[]，description 含完整调用契约。下游契约按需查看，已知名称和参数可直接 await tools[name](args)。目录本身不自动输出，更新在下一次 exec 生效。
 目录筛选示例：text(ALL_TOOLS.filter(t => /关键词/i.test(t.name + " " + t.description)))；只列名称可用 text(ALL_TOOLS.map(t => t.name))。
-本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
-通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
-文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。
-store(key,value) 跨 exec 保存可序列化值，load(key) 返回副本，未命中为 undefined；key 为字符串，依赖宿主的对话标识 openai/session。每次 exec 读启动快照，结束时合并写入，脚本报错也可能提交；修改 load 的副本后需再次 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启后存储可能清空；同一对话可重新 exec，长期数据用文件。
-Script completed 仅表示 JavaScript 编排结束；命令还需检查 exit_code 与输出，stderr_bytes 表示管道收到过错误流（不等同于失败）。
-超出等待窗口返回 Script running 与 cell_id，用 wait 续取新增输出；yield_control() 立即交回累计输出并继续运行；exit() 成功结束脚本。setTimeout/clearTimeout 可用，等待定时器需显式 await Promise。
-source 可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}；同名顶层参数优先。本服务的 exec/wait 与直接调用均限每次最终文本 36,000 UTF-8 字节，超出保留首尾；exec 内的工具结果不受该出口限额提前裁剪。跨轮使用可先 store；max_output_tokens/wait.max_tokens 可再缩小本次输出，wait 单独设置，媒体和资源链接保留。被截断的 JSON 可能不完整，后续 wait 不补发。用户补充另计，合计最多 37,000 UTF-8 字节。
-cell_id 用于脚本，exec_command 返回的 session_id 用于独立终端，后者通过 write_stdin 操作。取消或调用失败时，副作用可能已发生；仅在确认未执行后重试。若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本。`;
+
+## 输出与全局助手
+- text(value)：追加文本；非字符串按 JSON 序列化。工具返回值需显式输出，文件导出的资源链接除外。
+- image(dataUrlOrBlock, detail?)：追加 base64 data URL、{image_url,detail?} 或单个 MCP ImageContent；例如 image(result.content[0])。detail 为 auto/low/high/original，可覆盖块内设置。
+- audio(dataUrlOrBlock)：追加 base64 data URL、{audio_url} 或单个 MCP AudioContent。
+- generatedImage({image_url,output_hint?})：追加已有图片的 data URL 和可选说明。
+- store(key,value) / load(key)：key 为字符串，在同一宿主对话中保存可序列化值／读取副本，未命中为 undefined。每次 exec 读取启动快照，结束时合并写入，报错也可能提交；修改副本后需 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启可能清空存储，长期数据用文件。
+- exit()：立即成功结束脚本。yield_control()：立即交回累计输出，脚本继续运行。
+- setTimeout(callback,ms) / clearTimeout(id)：安排／取消定时器；定时器本身不保持脚本存活，等待需显式 await Promise。
+对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。本机工具按各自契约返回对象或字符串；view_image 返回 CallToolResult。
+普通输出上限为 36,000 UTF-8 字节，超限保留首尾且不补发；先用 JS 筛选/汇总或 store 后分段读取，内层结果不受该出口限额提前裁剪。max_output_tokens 限本次输出，wait.max_tokens 单独设置；媒体与状态保留。用户补充随后续正常响应附带，含补充合计最多 37,000 字节。
+
+## 执行与等待
+exec 默认等待 10000 毫秒，最长 30000；超时返回 Script running 和 cell_id，使用外层 wait 续取。source 也可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}，同名 MCP 参数优先。
+Script completed 表示本次 JS 结束，不代表所有命令成功；检查工具结果中的退出状态。cell_id 属于脚本；exec_command 返回的 session_id 属于独立终端，用 tools.write_stdin 操作。
+停止 cell 用外层 wait 的 terminate=true；已交回 session_id 的独立终端用 tools.write_stdin({session_id,terminate:true}) 停止。取消或失败不回滚副作用，调用失败时先核对已发生的操作；宿主拒绝执行时检查请求，再修正或拆分复杂脚本。
+
+## 本机工具
+${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回，terminate=true 终止脚本。max_tokens 可缩小本次文本预算，不继承 exec；普通文本仍限 36,000 UTF-8 字节，媒体与状态保留。用户补充另计，合计最多 37,000 UTF-8 字节。终端 session_id 用 write_stdin 续取。";
+  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回。terminate=true 终止脚本，取消本次等待只取消观察。max_tokens 可缩小本次文本预算，不继承 exec；普通文本仍限 36,000 UTF-8 字节，媒体与状态保留。用户补充另计，合计最多 37,000 UTF-8 字节。终端 session_id 在 exec 内用 tools.write_stdin 续取。";

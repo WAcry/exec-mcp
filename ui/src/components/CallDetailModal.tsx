@@ -223,12 +223,12 @@ export function CallDetailModal({
                     key={sub.id || i}
                     className="p-3.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 space-y-2.5"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
                         <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
                           #{i + 1}
                         </span>
-                        <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                        <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100 break-all">
                           tools.{sub.name}
                         </span>
                         <span
@@ -253,13 +253,37 @@ export function CallDetailModal({
                         <span className="text-zinc-400 text-[10px] block mb-1">
                           入参 (Arguments):
                         </span>
-                        <CodeBlock
-                          code={
-                            JSON.stringify(sub.input, null, 2) ?? "undefined"
-                          }
-                          language="json"
-                          maxHeight="max-h-36"
-                        />
+                        {sub.name === "apply_patch" &&
+                        typeof sub.input === "string" ? (
+                          <InputParameters
+                            call={{
+                              tool: sub.name,
+                              args: { patch: sub.input },
+                            }}
+                          />
+                        ) : sub.input &&
+                          typeof sub.input === "object" &&
+                          !Array.isArray(sub.input) ? (
+                          <InputParameters
+                            call={{
+                              tool: sub.name,
+                              args: sub.input as CallRecord["args"],
+                            }}
+                          />
+                        ) : (
+                          <CodeBlock
+                            code={
+                              typeof sub.input === "string"
+                                ? sub.input
+                                : (JSON.stringify(sub.input, null, 2) ??
+                                  "undefined")
+                            }
+                            language={
+                              typeof sub.input === "string" ? "text" : "json"
+                            }
+                            maxHeight="max-h-36"
+                          />
+                        )}
                       </div>
 
                       {sub.output !== undefined && (
@@ -333,26 +357,32 @@ export function CallDetailModal({
   );
 }
 
-function InputParameters({ call }: { call: CallRecord }) {
+function InputParameters({
+  call,
+}: {
+  call: Pick<CallRecord, "tool" | "args">;
+}) {
   const { code, parameters } = callInput(call);
   return (
     <div className="space-y-3">
-      <div>
-        <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-          {code ? "其余输入参数" : "输入参数"}（显式传入值）
-        </h4>
-        {(Object.hasOwn(call.args, "file") ||
-          (Array.isArray(call.args.files) && call.args.files.length > 0)) && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-            附件引用只显示名称、类型和大小，下载凭据已省略。
-          </p>
-        )}
-        <CodeBlock
-          code={JSON.stringify(parameters, null, 2)}
-          language="json"
-          maxHeight="max-h-60"
-        />
-      </div>
+      {(!code || Object.keys(parameters).length > 0) && (
+        <div>
+          <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+            {code ? "其余输入参数" : "输入参数"}（显式传入值）
+          </h4>
+          {(Object.hasOwn(call.args, "file") ||
+            (Array.isArray(call.args.files) && call.args.files.length > 0)) && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+              附件引用只显示名称、类型和大小，下载凭据已省略。
+            </p>
+          )}
+          <CodeBlock
+            code={JSON.stringify(parameters, null, 2)}
+            language="json"
+            maxHeight="max-h-60"
+          />
+        </div>
+      )}
       {code && (
         <div>
           <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">

@@ -292,10 +292,8 @@ describe.each(variants())(
       });
       const entry = jsonOutput<{ description: string }>(output);
       expect(entry.description).toContain(shellDescription(selected));
-      expect(tools[0]!.description).not.toContain(entry.description);
-      expect(
-        tools.find((tool) => tool.name === "exec_command")!.description,
-      ).toContain(shellDescription(selected));
+      expect(tools[0]!.description).toContain(entry.description);
+      expect(tools[0]!.description).toContain(shellDescription(selected));
       expect(entry.description).toContain('"shell"');
       expect(entry.description).toContain('"login"');
       if (ps(selected)) {

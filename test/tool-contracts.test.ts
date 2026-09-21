@@ -10,7 +10,6 @@ import {
   nativeContracts,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
-  directContract,
 } from "../src/catalog.js";
 import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { resolveShell } from "../src/host/shell.js";
@@ -29,9 +28,9 @@ const directories: string[] = [];
 const SKILL_RULE =
   "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
 const FILE_EDIT_RULE =
-  "创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。";
+  "创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。";
 const MULTILINE_RULE =
-  '多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 ${"`"}、围栏用 ${"`".repeat(3)}、字面量 ${name} 用 ${"${name}"} 插入；String.raw 也保留转义用的反斜杠。';
+  "多行字符串可用模板字面量；String.raw 保留反斜杠，反引号及 ${...} 仍遵循 JS 语法，Shell 引号和 Markdown 围栏不隔离外层模板。";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -60,7 +59,7 @@ describe("self-contained model-visible contracts", () => {
       ).toBe(false);
     }
   });
-  it("states skill selection in both entry points and scopes result handling to downstream MCP", () => {
+  it("includes skill selection once in exec's native contract and scopes result handling to downstream MCP", () => {
     const contracts = nativeContracts(resolveShell());
     const description = execDescription(contracts);
     expect(description.split("本机及发现契约：")[0]).toContain(SKILL_RULE);
@@ -85,27 +84,27 @@ describe("self-contained model-visible contracts", () => {
       "request_user_input_async",
     ]);
     const description = execDescription(contracts);
-    expect(description).toContain("V8 本身");
+    expect(description).toContain("每次使用新的 V8");
     expect(description.split("本机及发现契约：")[0]).toContain(FILE_EDIT_RULE);
     expect(description.split("本机及发现契约：")[0]).toContain(MULTILINE_RULE);
+    expect(description).toContain("文件和网络操作通过 tools 在实际机器执行");
+    expect(description).toContain("ChatGPT 容器与该机器不共享文件和网络环境");
+    expect(description).toContain("调用失败时先核对已发生的操作");
     expect(description).toContain(
-      "文件与网络等外部操作由 tools.* 在实际机器执行",
+      "宿主拒绝执行时检查请求，再修正或拆分复杂脚本",
     );
-    expect(description).toContain("本机任务使用这里的工具");
-    expect(description).toContain("ChatGPT 容器不共享本机的文件和网络环境");
-    expect(description).toContain("仅在确认未执行后重试");
+    expect(description).toContain("exec.files[index]");
     expect(description).toContain(
-      "若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本",
+      "已知名称和参数可直接 await tools[name](args)",
     );
-    expect(description).toContain("tools.import_file({index,destination})");
-    expect(description).toContain("已知名称和参数可直接调用");
-    expect(description).toContain("按 name/description 用 find/filter 筛选");
+    expect(description).toContain("ALL_TOOLS.filter");
     expect(description).not.toMatch(
       /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|notify 不支持/,
     );
     for (const contract of contracts) {
       expect(description).toContain(contract.name);
-      expect(description).not.toContain(describeContract(contract));
+      expect(description).toContain(describeContract(contract));
+      expect(description.split(`### ${contract.name}\n`)).toHaveLength(2);
     }
     const patch = contracts.find(
       (contract) => contract.name === "apply_patch",
@@ -237,10 +236,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       expect(
         value.catalog.find((tool) => tool.name === contract.name)!.description,
       ).toBe(describeContract(contract));
-      expect(
-        listed.find((tool) => tool.name === contract.name)!.description,
-      ).toBe(directContract(contract).description);
-      expect(listed[0]!.description).not.toContain(describeContract(contract));
+      expect(listed[0]!.description).toContain(describeContract(contract));
     }
   });
   it("creates and edits files with multiline templates while preserving raw backslashes and content indentation", async () => {

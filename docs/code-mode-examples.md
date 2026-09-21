@@ -34,30 +34,22 @@ text({
 超过缓冲后中间日志会丢弃并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
 确需完整原始日志时由调用方显式重定向文件；服务不替所有工具自动落盘。
 
-## 等待终端结束，而不是每行日志都返回
+## 终端收集窗口与外层等待
 
-顶层 `write_stdin` 可以使用以下参数；省略 `chars` 或传空字符串都是只读：
+`tools.write_stdin` 省略 `chars` 或传空字符串时只收集未读输出，默认 5 秒；非空输入默认 250 毫秒。
+两者都在进程结束或窗口到期时返回，已有和新增日志不提前结束窗口。有效范围分别为 5000–300000、250–30000 毫秒，
+另保留显式 `0` 立即读取。超时不终止进程；返回 session_id 时后续继续使用该句柄。
 
-```json
-{
-  "session_id": "exec_command 返回的句柄",
-  "yield_time_ms": 110000
-}
-```
-
-进程结束或等待到期时返回，已有和新增输出不提前唤醒；省略等待时间同样默认 110 秒，以减少反复轮询。
-超时不终止进程；还有 `session_id` 时可继续等待或读取。进程结束但剩余输出超过单次读取上限时，也需继续读取。
-写入 `chars` 后也使用相同等待规则。需要及时查看交互提示时，可设较短窗口（如 `yield_time_ms: 1000`）；`0` 立即读取。
-
-exec 内使用相同参数，仍可在返回模型前筛选结果：
+长任务可以在一个 exec 中等待更久，并在结果返回前筛选：
 
 ```js
-const result = await tools.write_stdin({ session_id: "之前的句柄" });
+const result = await tools.write_stdin({ session_id: "之前的句柄", yield_time_ms: 300000 });
 text(result);
 ```
 
-这是对现有终端的等待，不是新的 cell；exec 本身仍可能先交回 `cell_id`，由外层 `wait` 续取。
-等待不扩大日志或模型输出预算，也不会把交互提示自动回答掉。
+exec 本身仍可能先交回 `cell_id`，此后由外层 `wait` 续取。内层终端收集窗口不受外层 110 秒窗口截断，
+外层 wait 超时也不重启或重放内层调用。不要重新执行原命令来续取结果。
+等待不扩大日志或模型输出预算；已退出但剩余输出超过单次读取上限时，同样需要继续读取。
 
 ## 脚本完成与命令成功是两件事
 
@@ -95,30 +87,9 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 阅读命中项后使用它的准确名称调用 `await tools[name](args)`；已知名称和参数可以直接调用。
 这是当前 exec 的已绑定快照，筛选本身不连接或执行下游，也不自动把完整目录加入模型上下文。
 
-## 原文参数与 JavaScript 源码
-
-本机/发现工具同时支持顶层调用和 exec 内的 tools.*。顶层 exec_command 的 cmd 是 Shell 原文；
-apply_patch 接收 `{patch,workdir?}`，patch 是补丁原文。传输仍需正常 JSON 编码，但不再增加一层 JavaScript 模板求值。
-因此 PowerShell 的反引号、here-string 中嵌套 JavaScript 的模板及 Markdown 围栏可保留原样。
-
-例如，把下面原文放入顶层 apply_patch 的 patch 字段，workdir 指向目标项目即可：
-
-````diff
-*** Begin Patch
-*** Add File: literal-example.md
-+# 原文示例
-+Inline: `review`，字面量 ${name}，路径 C:\work\new\file.txt。
-+```powershell
-+Write-Output "`tname`nnext"
-+```
-*** End Patch
-````
-
-exec 的 source 始终是 JavaScript；Shell 的单引号、here-string、嵌套脚本中的注释都不能改变外层 JS 的分隔符语法。
-下面的 String.raw 写法只用于在 JavaScript 中构造字符串；已经取得的字符串值直接传递即可，不需要重新插入源码。
-
 ## 在 exec 内构造含 Markdown 的多行补丁
 
+exec 的 source 是 JavaScript；Shell 引号、here-string 和嵌套脚本注释不能改变外层 JS 的分隔符语法。
 `String.raw` 保留反斜杠，但模板正文中的反引号仍结束模板，`${...}` 仍执行插值。
 Markdown 的内联代码和围栏使用字符串值插入，字面量 `${name}` 也这样处理；
 插入的值只是文本，不会再次作为 JavaScript 解析。

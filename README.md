@@ -5,8 +5,8 @@
 
 助手可以在一次调用里组合独立操作、并发执行并整理结果，减少机械性的往返。
 工具说明使用中文；支持 ChatGPT 文件导入和产物交付，并提供可关闭的本机 Web 管理控制台。
-本机工具 list_skills、import_file、export_file、exec_command、write_stdin、apply_patch、view_image、request_user_input_async
-既可直接调用，也可在 exec 中编排；exec/wait 负责 JavaScript 与其执行 cell。各入口共享原生工具实现。
+仅暴露 exec/wait 两个工具：命令、补丁、文件、Skills、图片和异步提问均在 exec 中通过 tools.* 调用；
+完整本机用法随 exec 描述提供，下游 MCP 契约通过 ALL_TOOLS 按需查看。
 控制台用于观察和管理当前实例，不是另一套聊天界面，也不增加模型或子 Agent。
 
 > **当前是可从源码运行的首版，尚未发布 npm 包或正式安装器。**
@@ -75,8 +75,8 @@ HTTP header/env 值和命令参数；但命令及工具结果本身仍可能包�
 在“会话组”点击“发送补充”，或进入该组的调用流后发送。默认显示会话哈希，可手动设置本机备注名；
 备注不会改变收件人。只有携带 ChatGPT 对话标识的组可以发送，普通无标识调用仍可使用。
 
-补充随该对话下一次工具响应附带，不需要 Agent 查询，也不打断正在运行的命令。所有顶层工具都支持。
-有结构化结果时，原结果与补充一起放在 structuredContent 的 result/user_notes 中；否则以「用户额外补充：」附入文本。
+补充随该对话下一次 exec/wait 响应附带，不需要 Agent 查询，也不打断正在运行的命令。
+当前执行结果使用 content 文本，补充以「用户额外补充：」附入同一通道，不另外复制一份结构化结果。
 消息 ID 和时间仍可在 Web 查看，不再写入模型收到的补充正文。
 正文最多 30,000 UTF-8 字节；普通结果仍限 36,000 字节，附带补充后合计最多 37,000 字节。
 消息按序、完整使用剩余额度，放不下就继续排队，不缩小正常输出。长消息可能一直等待，待发时可撤回或复制到原对话。
@@ -86,20 +86,20 @@ HTTP header/env 值和命令参数；但命令及工具结果本身仍可能包�
 
 ### 工作途中回答 Agent 的问题
 
-Agent 可调用 `request_user_input_async` 提交问题，立即继续其他工作；你在 Web 的“会话组”看到对应会话的待答数量和问题预览。
+Agent 可在 exec 中调用 `tools.request_user_input_async` 提交问题，立即继续其他工作；你在 Web 的“会话组”看到对应会话的待答数量和问题预览。
 点击“回答问题”打开同一会话的沟通侧栏：在“问题”中逐题选择，或选“以上都不是”填写自己的回答；
 每个选项都可附加限制或说明。推荐项不会自动选中或提交。“补充消息”仍可随时主动发送文字。
 
-```json
-{
-  "questions": [{
-    "title": "这个新模块使用哪种存储？",
-    "options": ["SQLite：本机持久化", "仅内存：重启清空"]
+```js
+text(await tools.request_user_input_async({
+  questions: [{
+    title: "这个新模块使用哪种存储？",
+    options: ["SQLite：本机持久化", "仅内存：重启清空"]
   }]
-}
+}));
 ```
 
-同名工具也可在 exec 中 `await tools.request_user_input_async(...)`；该 await 只等待问题提交。
+该 await 只等待问题提交。
 提交后返回 `accepted` 和请求 ID，不等待人回答；没有查询回答、代用户发送补充或修改备注名的 MCP 工具。
 回答由服务组合题目、实际选项和补充原文，走上述 `user_notes` 通道随正常调用送达。未投递时可撤回并重答；
 已经附入响应则保留历史，可再发修正说明。跨页面竞争提交不会静默覆盖答案，草稿仍保留。
@@ -163,7 +163,7 @@ port = 8891
 不会带着部分工具列表继续运行。不使用的服务可设置 `enabled = false`；未设置 `enabled_tools` 时加载全部工具。
 已有 Skill 或上下文给出工具名称和参数时，助手第一次 exec 即可直接调用。
 `ALL_TOOLS` 是已绑定本机及下游工具的目录，助手在 exec 内按名称或描述筛选、读取完整契约，使用 `tools[name](args)` 调用。
-本机工具各自在同名顶层工具中提供完整说明，exec 不重复展开；下游契约按需输出，不预先填满上下文。
+exec 描述一次性提供全部本机工具的完整说明；下游契约按需输出，不预先填满上下文。
 Web 的下游工具列表可以按名称或描述筛选并展开契约；它只浏览当前目录，不试执行工具。
 stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
@@ -318,12 +318,14 @@ tunnel-client run --profile exec-mcp
 
 ## 文件传输
 
-直接 import_file 接收宿主绑定的 file 和 destination；exec 内使用 exec.files 绑定及零基 index。
-直接 apply_patch 接收 `{patch,workdir?}`，exec 内仍用 `tools.apply_patch(patch)` 字符串；
-直接 cmd/patch 字段是原文，不经 JavaScript 模板解析，正常 JSON 编码仍然必要。
-顶层相对路径基于服务用户主目录，exec 内基于 exec.workdir；终端 session_id 可在两种入口之间继续使用。
-`write_stdin` 无论写入还是仅读取，都默认等进程结束或 110 秒，日志不提前唤醒，以减少轮询。
-需要及时交互时缩短 `yield_time_ms`，`0` 立即读取；超时不终止进程，仍用原 session_id 续取。输出预算不变。示例见 [终端等待](docs/code-mode-examples.md#等待终端结束而不是每行日志都返回)。
+文件由宿主绑定到 `exec.files`；脚本用 `tools.import_file({index,destination})` 选择零基索引并保存。
+`tools.apply_patch(patch)` 接收完整补丁字符串；本机相对路径以 `exec.workdir` 为基准，省略时为服务用户主目录。
+Shell 命令和补丁作为 JavaScript 字符串传递，现成字符串直接使用；多行和嵌套示例见 [Code Mode 示例](docs/code-mode-examples.md)。
+
+`tools.write_stdin` 按 Codex 的窗口收集输出：非空输入默认 250 毫秒，仅读取默认 5 秒；
+有效窗口分别为 250–30000、5000–300000 毫秒，另保留显式 `0` 立即读取。
+进程结束提前返回，日志不会结束窗口；超时不终止进程，仍用原 session_id 续取。
+内层等待可以长于外层；exec 先返回 cell_id 后，用每次最多 110 秒的 wait 续取，不把长等待变成连接器超时。
 
 在 ChatGPT 中附上文件并告诉助手保存位置，助手可将它导入机器后继续处理。
 未使用的附件不会自动下载，默认不会覆盖已有文件；下载链接只由服务端使用。

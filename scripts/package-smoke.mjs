@@ -233,6 +233,22 @@ enabled = true
     { versionNegotiation: { mode: "auto" } },
   );
   await client.connect(new StreamableHTTPClientTransport(new URL(started.mcp)));
+  const valueOf = (result) => {
+    assert.ok(!result.isError, JSON.stringify(result));
+    const value = result.content.findLast(
+      (block) => block.type === "text" && block.text.startsWith("{"),
+    );
+    assert.ok(value, JSON.stringify(result));
+    return JSON.parse(value.text);
+  };
+  const runNative = (name, args, workdir) =>
+    client.callTool({
+      name: "exec",
+      arguments: {
+        source: `text(await tools[${JSON.stringify(name)}](${JSON.stringify(args)}));`,
+        ...(workdir ? { workdir } : {}),
+      },
+    });
   // A known downstream method works on the first exec without a discovery handshake.
   const direct = await client.callTool({
     name: "exec",
@@ -248,18 +264,7 @@ enabled = true
   assert.equal((await webStatus.json()).status, "ready");
   assert.deepEqual(
     (await client.listTools()).tools.map((tool) => tool.name),
-    [
-      "exec",
-      "wait",
-      "list_skills",
-      "import_file",
-      "export_file",
-      "exec_command",
-      "write_stdin",
-      "apply_patch",
-      "view_image",
-      "request_user_input_async",
-    ],
+    ["exec", "wait"],
   );
   const project = path.join(temporary, "project with spaces");
   await mkdir(project);
@@ -273,44 +278,36 @@ enabled = true
       .map((line) => "+" + line)
       .join("\n") +
     "\n*** End Patch\n";
-  const nativeWritten = await client.callTool({
-    name: "apply_patch",
-    arguments: { patch: nativePatch, workdir: project },
-  });
+  const nativeWritten = await runNative("apply_patch", nativePatch, project);
   assert.ok(!nativeWritten.isError, JSON.stringify(nativeWritten));
-  assert.equal(nativeWritten.structuredContent.success, true);
-  assert.deepEqual(nativeWritten.content, []);
+  assert.equal(valueOf(nativeWritten).success, true);
+  assert.equal(nativeWritten.structuredContent, undefined);
   assert.equal(
     await readFile(path.join(project, "direct.md"), "utf8"),
     nativeText,
   );
-  let nativeResult = await client.callTool({
-    name: "exec_command",
-    arguments: {
+  let nativeResult = valueOf(
+    await runNative("exec_command", {
       cmd:
         process.platform === "win32"
           ? '[Console]::WriteLine("PACKAGED_NATIVE_TOOL")'
           : "printf '%s\\n' PACKAGED_NATIVE_TOOL",
       workdir: project,
       yield_time_ms: 0,
-    },
-  });
-  let nativeOutput = nativeResult.structuredContent.output;
+    }),
+  );
+  let nativeOutput = nativeResult.output;
   const nativeDeadline = Date.now() + 30000;
-  while (
-    nativeResult.structuredContent.session_id &&
-    Date.now() < nativeDeadline
-  ) {
-    nativeResult = await client.callTool({
-      name: "write_stdin",
-      arguments: {
-        session_id: nativeResult.structuredContent.session_id,
+  while (nativeResult.session_id && Date.now() < nativeDeadline) {
+    nativeResult = valueOf(
+      await runNative("write_stdin", {
+        session_id: nativeResult.session_id,
         yield_time_ms: 1000,
-      },
-    });
-    nativeOutput += nativeResult.structuredContent.output;
+      }),
+    );
+    nativeOutput += nativeResult.output;
   }
-  assert.equal(nativeResult.structuredContent.exit_code, 0);
+  assert.equal(nativeResult.exit_code, 0);
   assert.match(nativeOutput, /PACKAGED_NATIVE_TOOL/);
   const skillDirectory = path.join(
     project,
@@ -446,20 +443,19 @@ enabled = true
     }),
   });
   assert.equal(directNote.status, 200, await directNote.text());
-  const structuredNote = await client.callTool({
-    name: "apply_patch",
-    arguments: {
-      workdir: project,
-      patch:
-        "*** Begin Patch\n*** Add File: note-probe.txt\n+ok\n*** End Patch\n",
-    },
-    _meta: { "openai/session": "package-smoke-conversation" },
-  });
-  assert.deepEqual(structuredNote.content, []);
-  assert.deepEqual(structuredNote.structuredContent.user_notes, [
-    "PACKAGED_STRUCTURED_NOTE",
-  ]);
-  assert.equal(structuredNote.structuredContent.result.success, true);
+  const structuredNote = await scopedCall(
+    `text(await tools.apply_patch(${JSON.stringify("*** Begin Patch\n*** Add File: note-probe.txt\n+ok\n*** End Patch\n")}));`,
+    { workdir: project },
+  );
+  assert.equal(structuredNote.structuredContent, undefined);
+  assert.ok(
+    structuredNote.content.some(
+      (block) =>
+        block.type === "text" &&
+        block.text === "用户额外补充：\nPACKAGED_STRUCTURED_NOTE",
+    ),
+  );
+  assert.equal(valueOf(structuredNote).success, true);
   assert.ok(
     !JSON.stringify(structuredNote).includes("installed-structured-note"),
   );
@@ -471,14 +467,10 @@ enabled = true
     ),
     { create: "function", read: "undefined" },
   );
-  const asked = await client.callTool({
-    name: "request_user_input_async",
-    arguments: {
-      questions: [{ title: "Which packaged mode?", options: ["Safe", "Fast"] }],
-    },
-    _meta: { "openai/session": "package-smoke-conversation" },
-  });
-  assert.equal(asked.structuredContent.accepted, true);
+  const asked = await scopedCall(
+    'text(await tools.request_user_input_async({questions:[{title:"Which packaged mode?",options:["Safe","Fast"]}]}));',
+  );
+  assert.equal(valueOf(asked).accepted, true);
   const questionsUrl = new URL(
     `/api/sessions/${notesScope}/questions`,
     started.web,

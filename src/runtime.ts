@@ -14,7 +14,6 @@ import {
   WAIT_SCHEMA,
   execDescription,
   WAIT_DESCRIPTION,
-  directContract,
 } from "./catalog.js";
 import type { Config } from "./config.js";
 import { DownstreamMcpRegistry } from "./downstream/registry.js";
@@ -26,7 +25,7 @@ import {
 } from "./host/terminal.js";
 import { PatchRunner } from "./host/patch.js";
 import { viewImage } from "./host/image.js";
-import { toolError, directResult } from "./results.js";
+import { toolError } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
@@ -142,7 +141,7 @@ export class ExecRuntime {
     });
     return this.initialization;
   }
-  /** Shared behavior for direct MCP and Code Mode; direct calls never generate JavaScript. */
+  /** Native capabilities share one Code Mode binding and validation path. */
   private async callNative(
     name: string,
     input: unknown,
@@ -249,7 +248,7 @@ export class ExecRuntime {
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "本机工具既可直接调用，也可在 exec 内通过 tools.* 编排。首次使用或进入新项目时先 list_skills，按目录规则选择并读取全文；先阅读项目适用指令，保留无关改动与秘密。按工具契约处理结果和副作用。等待长任务用较长窗口减少轮询；需及时交互时缩短。user_notes 或「用户额外补充：」是本对话用户从 Web 发来的补充，按所列顺序调整后续工作，随正常调用接收。",
+          "通过 exec 中的 tools.* 调用本机及下游工具，wait 续取运行中的 cell。首次使用或进入新项目时在 exec 中列出 Skills，按目录规则读取选定全文；先阅读项目适用指令，保留无关改动与秘密。user_notes 或「用户额外补充：」来自本对话用户，按所列顺序调整后续工作，随正常调用接收。",
       },
     );
     const annotations = {
@@ -257,138 +256,6 @@ export class ExecRuntime {
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
-    };
-    // Direct and nested native operations share implementations, without source interpolation.
-    const registerNativeTools = () => {
-      for (const contract of this.native) {
-        const direct = directContract(contract);
-        const readOnly = ["list_skills", "view_image"].includes(contract.name);
-        server.registerTool(
-          contract.name,
-          {
-            title: direct.title,
-            description: direct.description,
-            inputSchema: direct.schema,
-            annotations: {
-              readOnlyHint: readOnly,
-              destructiveHint:
-                !readOnly && contract.name !== "request_user_input_async",
-              idempotentHint: readOnly,
-              openWorldHint:
-                !readOnly && contract.name !== "request_user_input_async",
-            },
-            _meta: {
-              ...(this.securitySchemes
-                ? { securitySchemes: this.securitySchemes }
-                : {}),
-              ...(contract.name === "import_file"
-                ? { "openai/fileParams": ["file"] }
-                : {}),
-            },
-          },
-          async (raw, context) => {
-            const args = raw as Record<string, unknown>;
-            const scope = sessionScope(context);
-            this.notes.observe(sessionScopeKey(scope));
-            // Host-bound signed URLs stay out of the Web audit, just as with exec.files.
-            const auditArgs = { ...args };
-            if (contract.name === "import_file") {
-              auditArgs.file = fileAuditMetadata(args.file as HostFile);
-            }
-            const tracker = this.activity.startCall({
-              tool: contract.name,
-              sessionId: sessionScopeKey(scope) ?? "unscoped",
-              args: auditArgs,
-            });
-            const attachments: NativeContext["attachments"] = {
-              items: [],
-              bytes: 0,
-            };
-            try {
-              if (!this.ready) throw new Error("服务正在关闭。");
-              const signal = context.mcpReq.signal;
-              throwIfAborted(signal);
-              const cwd = await this.workdir(
-                contract.name === "apply_patch"
-                  ? (args.workdir as string | undefined)
-                  : undefined,
-              );
-              const input =
-                contract.name === "apply_patch"
-                  ? args.patch
-                  : contract.name === "import_file"
-                    ? {
-                        index: 0,
-                        destination: args.destination,
-                        overwrite: args.overwrite,
-                      }
-                    : args;
-              const value = await this.callNative(contract.name, input, {
-                cwd,
-                explicitWorkdir: false,
-                scope,
-                signal,
-                attachments,
-                files:
-                  contract.name === "import_file"
-                    ? [args.file as HostFile]
-                    : undefined,
-              });
-              const failed = subcallFailed(value);
-              const result = this.notes.attach(
-                directResult(
-                  contract.name,
-                  value,
-                  failed,
-                  attachments.items
-                    .filter((item) => this.artifacts.available(item.id, scope))
-                    .map((item) => item.content),
-                ),
-                sessionScopeKey(scope),
-                tracker.id,
-                context.mcpReq.signal,
-              );
-              tracker.finish({
-                status:
-                  contract.name === "write_stdin" &&
-                  args.terminate === true &&
-                  value &&
-                  typeof value === "object" &&
-                  "exit_code" in value
-                    ? "terminated"
-                    : failed
-                      ? "error"
-                      : value &&
-                          typeof value === "object" &&
-                          "session_id" in value
-                        ? "yielding"
-                        : "completed",
-                output: result,
-              });
-              return result;
-            } catch (error) {
-              const result = toolError(error);
-              result.content.push(
-                ...attachments.items
-                  .filter((item) => this.artifacts.available(item.id, scope))
-                  .map((item) => item.content),
-              );
-              const response = this.notes.attach(
-                boundModelOutput(result),
-                sessionScopeKey(scope),
-                tracker.id,
-                context.mcpReq.signal,
-              );
-              tracker.finish({
-                status: "error",
-                error: error instanceof Error ? error.message : String(error),
-                output: response,
-              });
-              return response;
-            }
-          },
-        );
-      }
     };
     server.registerTool(
       "exec",
@@ -649,7 +516,6 @@ export class ExecRuntime {
         }
       },
     );
-    registerNativeTools();
     server.registerResource(
       "exported-file",
       new ResourceTemplate(`${ARTIFACT_URI_PREFIX}{id}`, { list: undefined }),

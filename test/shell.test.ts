@@ -315,9 +315,7 @@ describe("shell command construction and concise contracts", () => {
       const command = contracts.find(
         (contract) => contract.name === "exec_command",
       )!;
-      expect(execDescription(contracts)).not.toContain(
-        describeContract(command),
-      );
+      expect(execDescription(contracts)).toContain(describeContract(command));
       expect(execDescription(contracts)).toContain(command.name);
       expect(command.description).toContain(shellDescription(shell));
       if (kind !== "other") expect(command.description).toContain("默认");

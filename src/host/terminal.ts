@@ -65,6 +65,14 @@ interface Session {
   stderrBytes: number;
 }
 export const TERMINAL_READ_BYTES = 4 * 1024 * 1024;
+/** Codex's collection windows, with an explicit zero for immediate local inspection. */
+export function stdinYieldTime(input: WriteStdinInput): number {
+  const requested = input.yield_time_ms ?? 250;
+  if (requested === 0) return 0;
+  return input.chars
+    ? Math.max(250, Math.min(30_000, requested))
+    : Math.max(5000, Math.min(300_000, requested));
+}
 export class TerminalManager {
   readonly shell: CommandShell;
   private readonly bufferBytes: number;
@@ -224,7 +232,7 @@ export class TerminalManager {
     if (!session)
       throw new Error(`未知或已读完的终端会话：${input.session_id}`);
     const started = performance.now();
-    const timeoutMs = input.yield_time_ms ?? 110_000;
+    const timeoutMs = stdinYieldTime(input);
     session.touched = Date.now();
     session.observers++;
     try {

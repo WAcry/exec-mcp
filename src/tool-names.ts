@@ -1,4 +1,4 @@
-/** Lightweight shared names for the MCP boundary and Web audit filters. */
+/** Names of nested capabilities; only exec/wait are registered at the MCP boundary. */
 export const NATIVE_TOOL_TITLES = {
   list_skills: "列出 Skills",
   import_file: "导入文件",
@@ -10,11 +10,7 @@ export const NATIVE_TOOL_TITLES = {
   request_user_input_async: "异步询问用户",
 } as const;
 export type NativeToolName = keyof typeof NATIVE_TOOL_TITLES;
-export const TOP_LEVEL_TOOL_NAMES = [
-  "exec",
-  "wait",
-  ...Object.keys(NATIVE_TOOL_TITLES),
-];
+export const TOP_LEVEL_TOOL_NAMES = ["exec", "wait"];
 
 /** A compact preview, not a second copy of the request's full input. */
 export function inputPreview(key: string, value: string): string {

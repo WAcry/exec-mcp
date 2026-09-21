@@ -248,7 +248,7 @@ enabled = true
       const tools = (await c.client.listTools()).tools;
       expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       expect(tools[0]!.description).toContain(
-        "先 text(await tools.list_skills({}))",
+        "首次使用或进入新项目时用 list_skills 查看目录",
       );
       expect(tools[0]!.description).not.toMatch(
         /40000|max_chars|round.?robin/i,

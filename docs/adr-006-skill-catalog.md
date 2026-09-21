@@ -4,7 +4,7 @@
 
 ## 发现文档，不建设 Skill 平台
 
-list_skills 支持直接调用和 exec 内同名调用，只返回名称、调用描述和全文位置。
+tools.list_skills 在 exec 内调用，只返回名称、调用描述和全文位置。
 首次使用实例或进入尚未发现的项目时，Agent 先显式输出这份目录，再按任务选择全文。
 读取正文、参考资料和脚本继续用现有 Shell，不增加 Skill read/search/activate/run 或安装管理。
 不把每个 Skill 伪装成 ALL_TOOLS 方法，不加入 UI、用户输入、子 Agent 或 stdio 入口。
@@ -17,7 +17,7 @@ list_skills 支持直接调用和 exec 内同名调用，只返回名称、调�
 
 始终扫描运行服务账户的 ~/.agents/skills 和 ~/.codex/skills。
 list_skills.workdir 优先；省略时只继承显式提供的 exec.workdir，否则只扫描用户目录。
-相对路径直接调用时基于服务用户主目录，exec 内基于本次 exec.workdir。
+相对路径基于本次 exec.workdir。
 项目范围从工作目录向上到最近的 .git 文件/目录，逐级扫描 .agents/skills，不向兄弟项目遍历；
 没有 Git 边界时只扫描明确工作目录自己的 .agents/skills。
 

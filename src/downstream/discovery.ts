@@ -54,17 +54,17 @@ export class ToolDiscovery {
         );
       }
       const description = [
-        `来源：${tool.serverId}。${tool.namespaceInstructions ? `服务说明（原文）：${tool.namespaceInstructions}\n` : ""}${tool.tool.description ?? ""}`,
-        `调用：await tools.${tool.codeName}(args)。args 必须满足以下 JSON Schema：`,
+        `MCP server: ${tool.serverId}. ${tool.namespaceInstructions ? `Server instructions: ${tool.namespaceInstructions}\n` : ""}${tool.tool.description ?? ""}`,
+        `Call: await tools.${tool.codeName}(args)\nInput JSON Schema:`,
         JSON.stringify(schema),
-        `返回 MCP CallToolResult：{content,structuredContent?,isError?}。`,
+        `Returns CallToolResult: {content, structuredContent?, isError?}.`,
         ...(tool.tool.outputSchema
           ? [
-              `structuredContent 契约：${JSON.stringify(tool.tool.outputSchema)}`,
+              `structuredContent JSON Schema: ${JSON.stringify(tool.tool.outputSchema)}`,
             ]
           : []),
         ...(tool.tool.annotations
-          ? [`上游工具提示：${JSON.stringify(tool.tool.annotations)}`]
+          ? [`Tool annotations: ${JSON.stringify(tool.tool.annotations)}`]
           : []),
       ].join("\n");
       const definition: CodeModeToolDefinition = {

@@ -213,8 +213,8 @@ export function shellInvocation(
 export function shellDescription(shell: CommandShell): string {
   if (shell.kind === "pwsh" || shell.kind === "powershell") {
     const name =
-      shell.kind === "pwsh" ? "PowerShell（pwsh）" : "Windows PowerShell";
-    return `默认在 ${name} 中执行命令${shell.login ? "（加载 profile）" : "（不加载 profile）"}。`;
+      shell.kind === "pwsh" ? "PowerShell (pwsh)" : "Windows PowerShell";
+    return `Default shell: ${name}; profile loading ${shell.login ? "enabled" : "disabled"}.`;
   }
   const names: Partial<Record<ShellKind, string>> = {
     bash: "Bash",
@@ -224,6 +224,6 @@ export function shellDescription(shell: CommandShell): string {
   };
   const name = names[shell.kind];
   return name
-    ? `默认在 ${name} 中执行命令${shell.login ? "（login 模式）" : ""}。`
-    : "运行 Shell 命令。";
+    ? `Default shell: ${name}; login mode ${shell.login ? "enabled" : "disabled"}.`
+    : "Uses the instance's configured shell.";
 }

@@ -13,7 +13,9 @@ export const REQUEST_USER_INPUT_SCHEMA = z
               .trim()
               .min(1)
               .max(2000)
-              .describe("完整、简短的问题，包含作答需要的上下文。"),
+              .describe(
+                "The complete question shown to the user, including any context needed to answer it.",
+              ),
             options: z
               .array(z.string().trim().min(1).max(500))
               .min(2)
@@ -23,20 +25,24 @@ export const REQUEST_USER_INPUT_SCHEMA = z
                 "同一问题的选项不能重复",
               )
               .describe(
-                "按展示顺序列出选项，推荐项放首位；界面自动提供‘以上都不是’与所有选项的补充文本框。",
+                "Distinct suggested answers in display order. The first is marked recommended but not preselected. The UI adds 'None of the above' and a note field for every choice.",
               ),
           })
           .strict(),
       )
       .min(1)
       .max(3)
-      .describe("一起提交的 1 至 3 个独立问题。"),
+      .describe(
+        "One to three self-contained questions to present together, in display order.",
+      ),
     request_key: z
       .string()
       .min(1)
       .max(80)
       .optional()
-      .describe("可选去重键；同一对话同键同内容返回原请求，同键改题报错。"),
+      .describe(
+        "Optional deduplication key within this conversation. Identical content reuses the request; different content with the same key is rejected.",
+      ),
   })
   .strict();
 

@@ -94,11 +94,13 @@ enabled_tools 只选择工具，不限制资源；服务级停用仍由配置过
 与本实例 export_file 的资源交付分开，不重新暴露本机资源读取工具；也不增加订阅、模板补全、资源 UI 或另一套缓存产品。
 Web 用现有子调用审计显示参数和结果，外层 exec/wait 照常附带用户补充。
 
-## 中文与自包含
+## 英文模型契约与中文产品文档
 
-本项目编写或生成的工具标题、说明、参数解释和错误指引全部使用中文。
-第三方原始描述、schema、机器字段及枚举作为来源数据保留；不靠运行时翻译模型重写外部契约。
-中文发现说明与上游原文必须区分，不能把改变语义的“翻译”当成兼容层。
+模型可见的 MCP instructions、工具/资源标题和描述、输入输出 schema 说明以及 ALL_TOOLS 的集成层包装使用英语。
+英语便于直接复用 Codex 原始措辞；不把某一种语言更省 token 宣称成所有模型和文本的固定比例。
+README、ADR 和 Web UI 继续使用中文，现有运行错误与用户补充的消息格式不随元数据翻译改变。
+第三方原始描述、schema、机器字段及枚举作为来源数据保留；Skill 元数据/正文、用户问题和回答也保持原文。
+不靠运行时翻译模型重写外部契约，不能把改变语义的“翻译”当成兼容层。
 
 从一个工具条目应能确定参数形状、必填项、返回值、错误语义以及必要的副作用注意事项。
 顶层 MCP 输入都是对象；exec 内补丁接收字符串，其他工具接收对象。
@@ -129,7 +131,7 @@ Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、
 [补丁定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)、
 [图片定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/view_image_spec.rs)、
 [检索定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/tool_search_spec.rs) 和基础提示词，
-保留共同的工具形状与关键语义，采用中文正向表达。可借鉴上游对工具编排、异步生命周期、媒体参数和 wait 增量结果的说明，
+保留共同的工具形状与关键语义，优先沿用含义一致的上游英语措辞。可借鉴工具编排、异步生命周期、媒体参数和 wait 增量结果的说明，
 不整体复制其 system prompt、审批/沙箱工作流、未接入的 helper 或不同的预算默认值。
 Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机器离线；本项目明确外部访问通过 tools.* 执行。
 
@@ -151,7 +153,7 @@ Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机�
 且 ToolSearch 类型不绑定为嵌套方法。因此此路径使用 ALL_TOOLS 并非仅靠提示偏好。
 本项目只采用适合自身的 Code Mode 目录路径，不照搬 deferred-tool 展示机制，也不推断某个账户的模型能力标记。
 进一步核对 2026-09-21 的 `ebc05da3bdb76f25861e7cb418bd06d28cadc609` 后，统一采用 Code Mode Only。
-以其 Code Mode 描述、shell/patch 定义和基础提示词作为语义参考；保留中文、MCP source 对象参数、
+以其 Code Mode 描述、shell/patch 定义和基础提示词作为语义参考；保留 MCP source 对象参数、
 宿主文件绑定、110 秒外层 wait、用户补充和有界输出这些 ChatGPT 适配。
 本服务不实现上游模型循环、权限审批、notify 注入或暂停审批计时，不把未接入的能力写入描述。
 内层输出默认不复制上游的每工具 token 裁剪，因为脚本仍需筛选原始值；由外层统一约束模型输出。
@@ -159,3 +161,28 @@ Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机�
 固定的 host/patch 版本不因此升级。启动时完成下游加载免去冷启动发现的额外 exec 往返。
 代价是服务启动更慢，启用的故障下游会阻止就绪；换来第一轮已知工具可调用且问题在用户终端尽早暴露。
 不修改固定 host，不伪造动态 JavaScript 绑定，不维持第二套 call API。
+
+### 英文契约审计中的适配理由
+
+2026-09-21 再次核对固定 `rust-v0.155.1` 与 `6149914a0e59363b6777080b3e953b05d592dbac`：
+[Code Mode prompt](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/code-mode-protocol/src/description.rs)、
+[shell 定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/shell_spec.rs)、
+[资源定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)、
+[基础系统提示](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/protocol/src/prompts/base_instructions/default.md)
+与该快照的模型提示、图片和异步提问定义。复用工具含义，不复制 Codex 的 Agent 身份、个性、计划/进度汇报、审批或 Git 工作流指令。
+本服务介绍能力和正确的数据边界，不规定必须先执行什么工具，也不把某一种 Shell/字符串写法升级成行为限制。
+Skill 的 explicit-only 选择仍由用户元数据决定；这不是新增的编排偏好。
+
+| 与 Codex 不完全相同的部分 | 保留理由 |
+| --- | --- |
+| MCP `source/workdir/files` 对象、JSON Schema 完整校验 | 上游 exec 可为 freeform；MCP 参数是对象，且没有 Codex 的 turn cwd，故由 workdir 明确目录。不能直接复制“不要传 JSON”；完整下游约束也不能被有损类型摘要代替。 |
+| `apply_patch` 字符串及描述中的原版 Lark grammar | 外层没有 Codex freeform grammar 槽；grammar 放在描述，实参仍是字符串，由固定 patch engine 执行。只保留调用形状、目录、结果与部分成功语义，不增加补丁教程。 |
+| 内层终端不设逐工具 token 参数，外层有独立输出预算 | 脚本要先处理完整原值；模型输出才走宿主保守总边界，不能为模仿参数表而提前丢失数据。 |
+| 外层 wait 时间、字符串句柄、零等待及终端扩展 | 外层适配 connector 超时；句柄来自当前执行器。保留已支持的管道 EOF、PTY resize 和 terminate，不为提示一致性破坏真实能力。 |
+| Shell 配置默认值与图片 CallToolResult | 动态说明真实默认 Shell/profile；图片沿用原生 MCP 块供 image 转发，不冒称上游的 image_url 返回值或像素缩放实现。 |
+| 文件、Skills、异步提问和 User Note | ChatGPT 不共享本机文件，也不自动注入本机 Skill 或用户回答。保留绑定方式、显示来源和有效期，移除重复的流程命令。 |
+| 资源 URI、聚合 errors 与参数化资源 | 读取可以来自模板或链接，不能照搬只允许已列 URI 的描述；失败需可见，见本 ADR 的资源段。 |
+
+同义句尽量用上游原文；存在能力差异时以实际实现为准，不只为了措辞一致而改 runtime。
+例如不复制资源优先于 Web 的一般检索偏好：接口说明资源是什么即可，不代替调用者判断任务的数据来源。
+本轮只变更契约说明和标题；参数名称、类型、必填项、默认行为与数值限制不变。

@@ -230,6 +230,8 @@ describe.each([false, true])(
         (item) => item.type === "resource_link",
       )!;
       if (link.type !== "resource_link") throw new Error("missing resource");
+      expect(link.description).toContain("File snapshot expires at");
+      expect(link.description).not.toMatch(/\p{Script=Han}/u);
       const read = await t.client.readResource({
         uri: link.uri,
         _meta: { "openai/session": "native-conversation" },

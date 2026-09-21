@@ -1,16 +1,16 @@
 /** Names of nested capabilities; only exec/wait are registered at the MCP boundary. */
 export const NATIVE_TOOL_TITLES = {
-  list_skills: "列出 Skills",
-  import_file: "导入文件",
-  export_file: "导出文件",
-  exec_command: "执行命令",
-  write_stdin: "操作终端",
-  apply_patch: "应用补丁",
-  view_image: "查看图片",
-  request_user_input_async: "异步询问用户",
-  list_mcp_resources: "列出 MCP 资源",
-  list_mcp_resource_templates: "列出 MCP 资源模板",
-  read_mcp_resource: "读取 MCP 资源",
+  list_skills: "List skills",
+  import_file: "Import file",
+  export_file: "Export file",
+  exec_command: "Execute command",
+  write_stdin: "Interact with terminal",
+  apply_patch: "Apply patch",
+  view_image: "View image",
+  request_user_input_async: "Ask user asynchronously",
+  list_mcp_resources: "List MCP resources",
+  list_mcp_resource_templates: "List MCP resource templates",
+  read_mcp_resource: "Read MCP resource",
 } as const;
 export type NativeToolName = keyof typeof NATIVE_TOOL_TITLES;
 export const TOP_LEVEL_TOOL_NAMES = ["exec", "wait"];

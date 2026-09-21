@@ -318,11 +318,13 @@ describe("shell command construction and concise contracts", () => {
       expect(execDescription(contracts)).toContain(describeContract(command));
       expect(execDescription(contracts)).toContain(command.name);
       expect(command.description).toContain(shellDescription(shell));
-      if (kind !== "other") expect(command.description).toContain("默认");
+      if (kind !== "other")
+        expect(command.description).toContain("Default shell:");
       expect(command.description).not.toMatch(
         /探索|你可以|如果你|未知|Git Bash|\/private\/path/,
       );
-      expect(command.description.length).toBeLessThan(150);
+      expect(shellDescription(shell).length).toBeLessThan(100);
+      expect(command.description.split(/\s+/).length).toBeLessThan(75);
     }
     expect(
       shellDescription({
@@ -331,7 +333,7 @@ describe("shell command construction and concise contracts", () => {
         login: false,
         platform: "linux",
       }),
-    ).toBe("运行 Shell 命令。");
+    ).toBe("Uses the instance's configured shell.");
   });
 });
 

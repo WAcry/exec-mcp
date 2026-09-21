@@ -267,7 +267,7 @@ export class ExecRuntime {
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "通过 exec 中的 tools.* 调用本机及下游工具，wait 续取运行中的 cell。首次使用或进入新项目时在 exec 中列出 Skills，按目录规则读取选定全文；先阅读项目适用指令，保留无关改动与秘密。user_notes 或「用户额外补充：」来自本对话用户，按所列顺序调整后续工作，随正常调用接收。",
+          "Exec MCP connects ChatGPT to the operator's machine. exec orchestrates local and downstream tools; wait resumes running cells. Tool responses may include additional user messages or answers from this conversation's Web UI (user_notes or a labeled text block), in submission order, received through normal calls.",
       },
     );
     const annotations = {
@@ -279,7 +279,7 @@ export class ExecRuntime {
     server.registerTool(
       "exec",
       {
-        title: "执行工具代码",
+        title: "Execute code",
         description: execDescription(this.native, this.idleHours),
         inputSchema: EXEC_SCHEMA,
         annotations,
@@ -455,7 +455,7 @@ export class ExecRuntime {
     server.registerTool(
       "wait",
       {
-        title: "等待执行",
+        title: "Wait for execution",
         description: WAIT_DESCRIPTION,
         inputSchema: WAIT_SCHEMA,
         annotations,
@@ -539,9 +539,9 @@ export class ExecRuntime {
       "exported-file",
       new ResourceTemplate(`${ARTIFACT_URI_PREFIX}{id}`, { list: undefined }),
       {
-        title: "已导出的文件",
+        title: "Exported file",
         description:
-          "显式导出的短期文件快照；不列出目录，通过本实例私有 MCP 入口读取。",
+          "Explicitly exported, expiring file snapshot, readable through this instance's private MCP connection.",
         cacheHint: { ttlMs: 0, cacheScope: "private" },
       },
       async (uri, _variables, context) =>

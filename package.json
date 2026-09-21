@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "通过 exec 在自己的机器上组合和执行工具的 MCP 服务。",
+  "description": "An MCP server for orchestrating tools on your own machine through Code Mode.",
   "engines": {
     "node": "^20.19.0 || >=22.19.0 <26"
   },

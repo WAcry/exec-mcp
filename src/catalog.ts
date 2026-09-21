@@ -22,7 +22,7 @@ const tokenBudget = z
   .min(0)
   .max(Number.MAX_SAFE_INTEGER)
   .describe(
-    "本次文本的近似 token 预算，0 省略文本；普通结果仍限 36,000 UTF-8 字节。超限保留首尾；媒体和状态保留，嵌套结果及 store 不变；用户补充另计。",
+    "Approximate text token budget for this response; 0 omits text. Media, execution status and user notes are preserved. Subject to the final output limit.",
   )
   .optional();
 export const EXEC_SCHEMA = z
@@ -32,22 +32,24 @@ export const EXEC_SCHEMA = z
       .array(HOST_FILE_SCHEMA)
       .optional()
       .describe(
-        "ChatGPT 原生文件引用数组，按原顺序原样传入；宿主绑定文件对象，脚本通过 import_file 的零基 index 选择。",
+        "ChatGPT file references, passed unchanged in their original order. The host binds these to file objects; tools.import_file selects a file by zero-based index.",
       ),
     source: z
       .string()
       .min(1)
       .describe(
-        "JavaScript 异步模块源码字符串；Shell 命令通过 tools.exec_command({cmd:...}) 执行。",
+        "JavaScript source evaluated as an async module. Shell commands run through tools.exec_command({cmd: ...}).",
       ),
     workdir: z
       .string()
       .min(1)
-      .describe("本次本机工具的默认目录；省略或相对路径均基于服务用户主目录。")
+      .describe(
+        "Default working directory for this exec's local tools. Omitted or relative paths resolve from the service user's home directory; supports ~/.",
+      )
       .optional(),
     yield_time_ms: ms(
       30_000,
-      "首次等待毫秒数，默认 10000；仅控制本次返回时间。",
+      "Time before yielding a still-running script. Defaults to 10000 ms; range 0-30000. Does not set an execution deadline.",
     ),
   })
   .strict();
@@ -57,77 +59,98 @@ export const WAIT_SCHEMA = z
     cell_id: z
       .string()
       .min(1)
-      .describe("exec 返回的运行中 cell_id，不是终端 session_id。"),
+      .describe(
+        "Running exec cell to resume, as returned by exec. Distinct from a terminal session_id.",
+      ),
     yield_time_ms: ms(
       110_000,
-      "最长等待毫秒数，默认 110000；完成或主动 yield 时提前返回。",
+      "Time before yielding again. Defaults to 110000 ms; range 0-110000. Completion or yield_control returns sooner.",
     ),
     terminate: z
       .boolean()
       .describe(
-        "true 尽力终止 cell 及尚未完成的嵌套调用；不会回滚副作用或终止已交回 session_id 的进程。",
+        "True stops the cell and requests cancellation of pending nested calls. Side effects and terminals already returned with a session_id are not rolled back or stopped.",
       )
       .optional(),
   })
   .strict();
 export const COMMAND_SCHEMA = z
   .object({
-    cmd: z.string().min(1).describe("交给所选 Shell 的命令原文。"),
+    cmd: z.string().min(1).describe("Shell command to execute."),
     workdir: z
       .string()
       .min(1)
-      .describe("命令目录；省略或相对路径基于 exec.workdir，支持 ~/。")
+      .describe(
+        "Working directory for the command. Defaults to exec.workdir; relative paths resolve there. Supports ~/.",
+      )
       .optional(),
     shell: z
       .string()
       .min(1)
       .refine((value) => !!value.trim() && !value.includes("\0"))
       .describe(
-        "本次 Shell 可执行文件名或路径；省略使用实例默认值。相对路径基于本次命令目录。",
+        "Shell binary to launch for this command. Defaults to the instance's configured shell. Relative paths resolve from the command's working directory.",
       )
       .optional(),
     login: z
       .boolean()
       .describe(
-        "本次启动模式；省略继承实例配置。PowerShell 控制 profile，其他 Shell 控制 login；不改变后续命令。",
+        "Enable login shell semantics (profile loading for PowerShell) for this command. Defaults to the instance setting; does not change later commands.",
       )
       .optional(),
-    tty: z.boolean().describe("true 分配 PTY；默认普通管道。").optional(),
-    yield_time_ms: ms(30_000, "等待命令结果，默认 10000 毫秒。"),
+    tty: z
+      .boolean()
+      .describe(
+        "True allocates a PTY for the command; false or omitted uses plain pipes.",
+      )
+      .optional(),
+    yield_time_ms: ms(
+      30_000,
+      "Wait before yielding output. Defaults to 10000 ms; range 0-30000. Commands that finish sooner return immediately.",
+    ),
   })
   .strict();
 export const STDIN_SCHEMA = z
   .object({
-    session_id: z.string().min(1).describe("exec_command 返回的终端句柄。"),
+    session_id: z
+      .string()
+      .min(1)
+      .describe("Terminal session identifier returned by exec_command."),
     chars: z
       .string()
-      .describe("写入的字符；省略或空字符串时仅读取。")
+      .describe(
+        "Characters to write to stdin. Defaults to empty, which collects output without writing.",
+      )
       .optional(),
     close_stdin: z
       .boolean()
-      .describe("普通管道可在写入后关闭 stdin；PTY 不支持。")
+      .describe(
+        "Close stdin after writing. Available for plain pipes, not PTYs.",
+      )
       .optional(),
     yield_time_ms: ms(
       300_000,
-      "输出收集窗口：非空输入默认 250 毫秒，有效范围 250–30000；仅读取默认 5000，有效范围 5000–300000。进程结束提前返回，日志不结束窗口；显式 0 立即读取。",
+      "Output collection window. Non-empty writes default to 250 ms and clamp to 250-30000; empty reads default to 5000 and clamp to 5000-300000. Process exit returns sooner; new output does not end the window. Explicit 0 reads immediately.",
     ),
     cols: z
       .number()
       .int()
       .min(1)
       .max(1000)
-      .describe("PTY 列数；与 rows 一起使用。")
+      .describe("New PTY column count, supplied together with rows.")
       .optional(),
     rows: z
       .number()
       .int()
       .min(1)
       .max(1000)
-      .describe("PTY 行数；与 cols 一起使用。")
+      .describe("New PTY row count, supplied together with cols.")
       .optional(),
     terminate: z
       .boolean()
-      .describe("true 终止该进程树，并读取剩余输出。")
+      .describe(
+        "True terminates this process tree and collects remaining output.",
+      )
       .optional(),
   })
   .strict()
@@ -141,17 +164,19 @@ export const IMAGE_SCHEMA = z
       .string()
       .min(1)
       .describe(
-        "本机已有 PNG/JPEG/WebP/GIF 图片路径；相对 exec.workdir，支持 ~/。",
+        "Local filesystem path to an existing PNG, JPEG, WebP or GIF image. Relative to exec.workdir; supports ~/.",
       ),
     detail: z
       .enum(["high", "original"])
-      .describe("默认 high；original 请求原始细节。")
+      .describe(
+        "Image detail level. Defaults to high; original requests original detail.",
+      )
       .optional(),
   })
   .strict();
 const PATCH_SCHEMA = z.string().min(1);
 const SKILL_INVOCATION_RULE =
-  "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
+  "Skills can be selected by their trigger descriptions; explicit-only skills are read only when the user explicitly requests them.";
 const SKILL_SCHEMA = z
   .object({
     workdir: z
@@ -159,24 +184,45 @@ const SKILL_SCHEMA = z
       .min(1)
       .optional()
       .describe(
-        "项目发现起点，相对 exec.workdir。省略时继承显式的 exec.workdir；两者均省略则只列用户级 Skills。",
+        "Starting directory for project skills, relative to exec.workdir. Defaults to an explicitly supplied exec.workdir; if both are omitted, lists user-level skills only.",
       ),
   })
   .strict();
 const TERMINAL_OUTPUT = {
   type: "object",
   properties: {
-    output: { type: "string" },
+    output: {
+      type: "string",
+      description:
+        "Unread terminal output, up to 4 MiB per call. Larger remaining output can be collected with the same session_id.",
+    },
     wall_time_seconds: { type: "number" },
-    session_id: { type: "string" },
-    exit_code: { type: "integer" },
-    truncated: { type: "boolean", const: true },
-    omitted_bytes: { type: "integer", minimum: 0 },
+    session_id: {
+      type: "string",
+      description:
+        "Present while the process is running or output remains unread; pass to write_stdin.",
+    },
+    exit_code: {
+      type: "integer",
+      description:
+        "Shell exit code, present once the process has exited and all output has been collected.",
+    },
+    truncated: {
+      type: "boolean",
+      const: true,
+      description:
+        "The terminal buffer overflowed and discarded middle output.",
+    },
+    omitted_bytes: {
+      type: "integer",
+      minimum: 0,
+      description: "Discarded output bytes; not recoverable by later reads.",
+    },
     stderr_bytes: {
       type: "integer",
       minimum: 0,
       description:
-        "普通管道累计收到的 stderr 字节数（含已截断部分）；不等同于执行失败。PTY 不区分流。",
+        "Cumulative stderr bytes for plain pipes, including discarded output. Not by itself a failure indicator; PTYs merge streams.",
     },
   },
   required: ["output", "wall_time_seconds"],
@@ -185,17 +231,21 @@ const TERMINAL_OUTPUT = {
 const PATCH_GRAMMAR = `start: begin_patch hunk+ end_patch
 begin_patch: "*** Begin Patch" LF
 end_patch: "*** End Patch" LF?
+
 hunk: add_hunk | delete_hunk | update_hunk
 add_hunk: "*** Add File: " filename LF add_line+
 delete_hunk: "*** Delete File: " filename LF
 update_hunk: "*** Update File: " filename LF change_move? change?
+
 filename: /(.+)/
-add_line: "+" /(.*)/ LF
+add_line: "+" /(.*)/ LF -> line
+
 change_move: "*** Move to: " filename LF
 change: (change_context | change_line)+ eof_line?
 change_context: ("@@" | "@@ " /(.+)/) LF
 change_line: ("+" | "-" | " ") /(.*)/ LF
 eof_line: "*** End of File" LF
+
 %import common.LF`;
 export interface NativeContract {
   name: NativeToolName;
@@ -209,33 +259,33 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
-    description: `返回可用 Skill 的名称、用途和 SKILL.md 真实路径。始终包含用户级 Skills；有 workdir 时加入适用的项目 Skills。${SKILL_INVOCATION_RULE}选定后读取完整 SKILL.md。`,
+    description: `Lists available skill names, descriptions and resolved SKILL.md paths. Includes user-level skills and applicable project skills when a workdir is supplied. The full SKILL.md contains the workflow instructions. ${SKILL_INVOCATION_RULE}`,
   },
   {
     name: "import_file",
     schema: IMPORT_FILE_SCHEMA,
     description:
-      "将本次 exec.files[index] 保存到 destination，返回 {path,size,sha256}。默认保留已有目标；overwrite=true 时，下载校验成功后替换。后续操作使用返回的本机路径。",
+      "Saves exec.files[index] to a local destination. Returns {path,size,sha256}; path is the local file for subsequent operations. Existing destinations are preserved unless overwrite=true; replacement follows a successful download and validation.",
   },
   {
     name: "export_file",
     schema: EXPORT_FILE_SCHEMA,
     description:
-      "向用户交付独立文件快照，返回 {id,name,mime_type,size,sha256,expires_at,uri}；exec/wait 自动附带原生 resource_link。默认 resource 至多 32 MiB，由宿主经 resources/read 获取；url 需已配置 HTTPS 下载入口，持有链接者均可下载。到期失效；宿主决定文件展示或挂载方式。",
+      "Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to 32 MiB via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.",
   },
   {
     name: "exec_command",
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "运行或输出待取时返回 session_id，用 write_stdin 续取。exit_code 为 Shell 退出码；每次≤4 MiB，缓冲溢出由 truncated/omitted_bytes 标记。",
+      "Runs a shell command, returning output or a session ID for ongoing interaction. write_stdin continues the same terminal. A shell exit code does not describe the success of every command in a script.",
   },
   {
     name: "write_stdin",
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
-      "向 exec_command 的终端写入字符并收集未读输出；chars 省略或为空时只收集输出。可调整 PTY 尺寸、关闭管道 stdin 或终止进程。窗口到期不终止进程，返回的 session_id 可继续使用。",
+      "Writes characters to an existing exec_command session and returns recent output. Can also resize a PTY, close pipe stdin or terminate the process. A collection timeout leaves the process running; the returned session_id remains usable.",
   },
   {
     name: "apply_patch",
@@ -251,13 +301,13 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       required: ["success", "exit_code", "output"],
       additionalProperties: false,
     },
-    description: `新增、删除、更新或移动文本文件。接收完整补丁字符串，相对路径基于 exec.workdir；检查返回的 success，失败时可能已有部分变更。补丁遵循以下 Lark grammar：\n${PATCH_GRAMMAR}`,
+    description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
   },
   {
     name: "view_image",
     schema: IMAGE_SCHEMA,
     description:
-      "读取本机已有图片用于视觉检查，返回 MCP CallToolResult；用 image(result.content[0]) 输出其中的图片。",
+      "View a local image file from the filesystem when visual inspection is needed. Returns a CallToolResult containing an ImageContent block; image(result.content[0]) displays it.",
   },
   {
     name: "request_user_input_async",
@@ -272,25 +322,25 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       additionalProperties: false,
     },
     description:
-      "在工作中向本对话的 Web 用户询问缺失信息、偏好或约束。问题提交后立即返回 accepted，不等待回答；可继续不依赖答案的工作。用户可选任一选项或‘以上都不是’，并附加补充；题目、选择与补充随后续任一工具响应作为 user_notes 或‘用户额外补充’返回。需已启动 Web 且宿主提供对话标识。",
+      "Ask the user one or more questions during ongoing work. Submits questions to this conversation's Web UI and immediately returns accepted, without waiting for answers. Answers include the question, choice and optional note, delivered as user notes with subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
   },
   {
     name: "list_mcp_resources",
     schema: RESOURCE_LIST_SCHEMA,
     description:
-      "列出下游 MCP 提供的资源，如文档、数据库结构或应用上下文；与 ALL_TOOLS 工具目录不同。返回 {resources:[{server,uri,name,...}],server?,nextCursor?,errors?}。指定 server 取一页，用 nextCursor 续取；省略 server 汇总所有启用服务，失败服务列在 errors。不支持资源的服务返回空列表。",
+      "Lists resources provided by MCP servers, such as files, database schemas or application-specific information. Returns {resources:[{server,uri,name,...}],server?,nextCursor?,errors?}. A specified server returns one page; omitting server aggregates enabled servers with failures in errors. Servers without resource support contribute an empty list. Resources are separate from the ALL_TOOLS method catalog.",
   },
   {
     name: "list_mcp_resource_templates",
     schema: RESOURCE_LIST_SCHEMA,
     description:
-      "列出下游 MCP 的参数化资源 URI 模板。返回 {resourceTemplates:[{server,uriTemplate,name,...}],server?,nextCursor?,errors?}；按模板展开得到具体 URI，再用 read_mcp_resource 读取。分页、跨服务汇总及 errors 与 list_mcp_resources 相同。",
+      "Lists resource templates provided by MCP servers. Returns {resourceTemplates:[{server,uriTemplate,name,...}],server?,nextCursor?,errors?}. Expanding a uriTemplate produces a concrete URI for read_mcp_resource. Pagination, aggregation and errors follow list_mcp_resources.",
   },
   {
     name: "read_mcp_resource",
     schema: RESOURCE_READ_SCHEMA,
     description:
-      "按 server 和资源 URI 读取该下游 MCP 的内容，已知 URI 可直接读。返回 {server,uri,contents:[{uri,mimeType?,text?,blob?}]}；每项为 text 原文或 blob Base64，可在 JS 中筛选或保存。请求交给指定服务，不是本机文件读取或通用 URL 下载；失败抛出错误。",
+      "Read a specific resource from an MCP server given the server name and resource URI. Known URIs can be read directly. Returns {server,uri,contents:[{uri,mimeType?,text?,blob?}]}: text is plain text; blob is Base64. The URI is resolved by that server, not as a local path or a generic download URL. Failures throw an error.",
   },
 ];
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -300,7 +350,7 @@ export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   return value;
 }
 export function describeContract(contract: NativeContract): string {
-  return `${contract.description}\n调用：await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\n输入 JSON Schema：${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\n返回 JSON Schema：${JSON.stringify(contract.output)}` : ""}`;
+  return `${contract.description}\nCall: await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\nInput JSON Schema: ${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\nOutput JSON Schema: ${JSON.stringify(contract.output)}` : ""}`;
 }
 export function nativeDefinition(
   contract: NativeContract,
@@ -336,7 +386,7 @@ export function nativeContracts(
     contract.name === "exec_command"
       ? {
           ...contract,
-          description: shellDescription(shell) + contract.description,
+          description: contract.description + "\n" + shellDescription(shell),
         }
       : contract,
   );
@@ -346,34 +396,37 @@ export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `运行 JavaScript 异步模块，编排、并发调用工具并筛选结果。每次使用新的 V8；没有 Node.js、console 或模块导入，文件和网络操作通过 tools 在实际机器执行。ChatGPT 容器与该机器不共享文件和网络环境。
-source 填写 JavaScript 源码。所有本机及下游工具通过 await tools.<name>(args) 调用；独立调用可用 Promise.all。脚本结束即销毁本次隔离环境，未 await 的 Promise 会被丢弃。
-本机工具的完整契约列于下方；apply_patch 接收字符串，其他工具接收对象。workdir 指定本次默认目录，省略时为服务用户主目录；JS 普通变量不跨 exec 保留，Shell 的 cd 只影响该进程。
-首次使用或进入新项目时用 list_skills 查看目录，按其规则选择并读取完整 SKILL.md；已在上下文中的目录无需重读。
-创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。嵌套命令、补丁或其他语言时，留意各层引号/反引号、插值与展开、参数边界、反斜杠和编解码，以及真实换行、续行、heredoc、缩进与行尾的含义。
+  return `Run JavaScript code to orchestrate/compose tool calls.
+- Evaluates source in a fresh V8 isolate as an async module. The MCP argument is an object whose source field contains JavaScript.
+- All nested tools are available on the global tools object, for example await tools.exec_command(...). apply_patch takes a string; other local tools take an object. Tool return types are described below. Independent calls can run concurrently with Promise.all.
+- The isolate has no Node.js, filesystem, network, console or module imports. Tools perform external operations on the connected machine; separate ChatGPT containers do not share its files or network environment.
+- When the code is fully evaluated, the isolate's lifetime ends and unawaited promises are discarded. Ordinary JS variables do not persist across exec calls.
+- workdir supplies the local tools' default directory. A shell's cd affects only that process. Nested JS, shell and other languages each interpret quoting, interpolation, escapes, argument boundaries and whitespace.
+- Optional first-line pragma: // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}. Explicit MCP arguments take precedence.
 
-## 工具发现
-ALL_TOOLS 是本次已绑定工具的 {name,description}[]，description 含完整调用契约。下游契约按需查看，已知名称和参数可直接 await tools[name](args)。目录本身不自动输出，更新在下一次 exec 生效。
-目录筛选示例：text(ALL_TOOLS.filter(t => /关键词/i.test(t.name + " " + t.description)))；只列名称可用 text(ALL_TOOLS.map(t => t.name))。
+## Tool discovery
+Local tool contracts are included below. Downstream MCP tools are already bound to tools; their contracts are available in ALL_TOOLS, an array of {name, description} entries for all enabled nested tools.
+To find one, filter ALL_TOOLS by name and description: text(ALL_TOOLS.filter(t => /keyword/i.test(t.name + " " + t.description))). A known name and argument shape can be called directly with await tools[name](args).
+The catalog is not automatically printed; changes appear in the next exec. list_skills provides local skill metadata; a selected SKILL.md provides the full workflow.
 
-## 输出与全局助手
-- text(value)：追加文本；非字符串按 JSON 序列化。工具返回值需显式输出，文件导出的资源链接除外。
-- image(dataUrlOrBlock, detail?)：追加 base64 data URL、{image_url,detail?} 或单个 MCP ImageContent；例如 image(result.content[0])。detail 为 auto/low/high/original，可覆盖块内设置。
-- audio(dataUrlOrBlock)：追加 base64 data URL、{audio_url} 或单个 MCP AudioContent。
-- generatedImage({image_url,output_hint?})：追加已有图片的 data URL 和可选说明。
-- store(key,value) / load(key)：key 为字符串，在同一宿主对话中保存可序列化值／读取副本，未命中为 undefined。每次 exec 读取启动快照，结束时合并写入，报错也可能提交；修改副本后需 store，并发同键写入非事务。空闲 ${idleHours} 小时、内存回收或重启可能清空存储，长期数据用文件。
-- exit()：立即成功结束脚本。yield_control()：立即交回累计输出，脚本继续运行。
-- setTimeout(callback,ms) / clearTimeout(id)：安排／取消定时器；定时器本身不保持脚本存活，等待需显式 await Promise。
-对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。本机工具按各自契约返回对象或字符串；view_image 返回 CallToolResult。
-普通输出上限为 36,000 UTF-8 字节，超限保留首尾且不补发；先用 JS 筛选/汇总或 store 后分段读取，内层结果不受该出口限额提前裁剪。max_output_tokens 限本次输出，wait.max_tokens 单独设置；媒体与状态保留。用户补充随后续正常响应附带，含补充合计最多 37,000 字节。
+## Global helpers
+- text(value): Appends a text item. Non-string values are stringified with JSON.stringify when possible.
+- image(imageUrlOrItem, detail?): Appends an image from a base64 data URL, {image_url, detail?}, or an individual MCP ImageContent block such as result.content[0]. detail is auto/low/high/original or null; the second argument overrides an embedded detail hint.
+- audio(audioUrlOrItem): Appends audio from a base64 data URL, {audio_url}, or an individual MCP AudioContent block.
+- generatedImage({image_url, output_hint?}): Appends an image-generation result from a base64 data URL and its optional output hint.
+- store(key, value): Stores a serializable value under a string key for later exec calls in the same ChatGPT conversation; requires a host-provided conversation ID. load(key) returns a copy, or undefined if missing. Cells read a starting snapshot and merge writes when they finish, including on script error; concurrent same-key writes are not transactional. Changes to a loaded copy require another store. Storage may be cleared after ${idleHours} idle hours, memory recovery or restart.
+- exit(): Immediately ends the current script successfully.
+- yield_control(): Yields accumulated output to the model immediately while the script keeps running.
+- setTimeout(callback, delayMs?) / clearTimeout(id?): Schedules/cancels a callback. Pending timeouts do not keep exec alive by themselves; an awaited promise can wait for one.
 
-## 执行与等待
-exec 默认等待 10000 毫秒，最长 30000；超时返回 Script running 和 cell_id，使用外层 wait 续取。source 也可用首行 // @exec: {"yield_time_ms":10000,"max_output_tokens":1000}，同名 MCP 参数优先。
-Script completed 表示本次 JS 结束，不代表所有命令成功；检查工具结果中的退出状态。cell_id 属于脚本；exec_command 返回的 session_id 属于独立终端，用 tools.write_stdin 操作。
-停止 cell 用外层 wait 的 terminate=true；已交回 session_id 的独立终端用 tools.write_stdin({session_id,terminate:true}) 停止。取消或失败不回滚副作用，调用失败时先核对已发生的操作；宿主拒绝执行时检查请求，再修正或拆分复杂脚本。
+## Results and execution
+Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources.
+Final response text is limited to 36,000 UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is 37,000 UTF-8 bytes.
+exec waits 10000 ms by default, at most 30000. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
+cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.
 
-## 本机工具
+## Local tools
 ${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
 export const WAIT_DESCRIPTION =
-  "续取 exec 返回的 cell_id：仍运行时返回新增输出及同一 cell_id，完成时返回最终结果。默认及最长等待 110 秒，长等待减少轮询；完成、主动 yield 或终止时提前返回。terminate=true 终止脚本，取消本次等待只取消观察。max_tokens 可缩小本次文本预算，不继承 exec；普通文本仍限 36,000 UTF-8 字节，媒体与状态保留。用户补充另计，合计最多 37,000 UTF-8 字节。终端 session_id 在 exec 内用 tools.write_stdin 续取。";
+  "Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to 110000 ms (also the maximum); longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to 36,000 UTF-8 bytes, or 37,000 with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.";

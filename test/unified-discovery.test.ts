@@ -97,7 +97,7 @@ describe.each([false, true])(
         const headings = nativeContracts(resolveShell()).map(
           (tool) => tool.name,
         );
-        expect(description).toContain("输入 JSON Schema");
+        expect(description).toContain("Input JSON Schema");
         const result = await s.call(inspectCatalog);
         expect(result.isError, JSON.stringify(result)).not.toBe(true);
         const value = jsonOutput<{
@@ -147,7 +147,15 @@ describe.each([false, true])(
       );
       expect(entry.description).toContain('"$defs"');
       expect(entry.description).toContain('"minimum":0');
-      expect(entry.description).toContain("structuredContent 契约");
+      expect(entry.description).toContain("structuredContent JSON Schema");
+      expect(entry.description).toContain("MCP server: fixture");
+      expect(entry.description).toContain(
+        "读取夹具数值 / Find a fixture value.",
+      );
+      expect(entry.description.split("\n")[0]).toContain(
+        "读取夹具数值 / Find a fixture value.",
+      );
+      expect(entry.description).toContain("待查询数值");
       const native = jsonOutput<{ name: string; description: string }>(
         await s.call('text(ALL_TOOLS.find(t => t.name === "apply_patch"));'),
       );
@@ -183,11 +191,11 @@ describe.each([false, true])(
         (t) => t.name === "exec",
       )!;
       const example = exec.description!.match(
-        /目录筛选示例：(text\(ALL_TOOLS\.filter\([^\n]+?\)\))；/,
+        /(text\(ALL_TOOLS\.filter\([^\n]+?\)\))\./,
       );
       expect(example).not.toBeNull();
       const matched = jsonOutput<{ name: string; description: string }[]>(
-        await s.call(example![1]!.replace("关键词", "fixture_79")),
+        await s.call(example![1]!.replace("keyword", "fixture_79")),
       );
       expect(matched).toHaveLength(1);
       expect(matched[0]!.name).toBe("mcp__fixture__fixture_79");

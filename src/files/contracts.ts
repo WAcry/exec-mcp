@@ -58,19 +58,29 @@ export const HOST_FILE_SCHEMA = z
     download_url: z
       .string()
       .min(1)
-      .describe("由宿主绑定的临时下载地址，仅供服务端下载使用。"),
-    file_id: z.string().min(1).describe("宿主提供的不透明文件标识。"),
-    mime_type: z.string().optional().describe("宿主提供的 MIME 类型，可省略。"),
+      .describe(
+        "Temporary download URL supplied by the host for the server to fetch.",
+      ),
+    file_id: z
+      .string()
+      .min(1)
+      .describe("Opaque file identifier supplied by the host."),
+    mime_type: z
+      .string()
+      .optional()
+      .describe("MIME type supplied by the host."),
     file_name: z
       .string()
       .optional()
-      .describe("宿主提供的原文件名；保存位置由 destination 指定。"),
+      .describe(
+        "Original filename supplied by the host; destination determines the local path.",
+      ),
     size: z
       .number()
       .int()
       .nonnegative()
       .optional()
-      .describe("宿主可选的文件字节数。"),
+      .describe("File size in bytes, when supplied by the host."),
   })
   .passthrough();
 export type HostFile = z.infer<typeof HOST_FILE_SCHEMA>;
@@ -80,15 +90,21 @@ export const IMPORT_FILE_SCHEMA = z
       .number()
       .int()
       .nonnegative()
-      .describe("本次 exec.files 中目标文件的零基索引。"),
+      .describe(
+        "Zero-based index of the file in this call's exec.files array.",
+      ),
     destination: z
       .string()
       .min(1)
-      .describe("目标文件路径；相对 exec.workdir，支持 ~/。"),
+      .describe(
+        "Destination file path, relative to exec.workdir; supports ~/.",
+      ),
     overwrite: z
       .boolean()
       .optional()
-      .describe("默认不覆盖；true 在下载校验成功后替换目标。"),
+      .describe(
+        "True replaces an existing destination after download validation. Defaults to false.",
+      ),
   })
   .strict();
 export const EXPORT_FILE_SCHEMA = z
@@ -96,18 +112,22 @@ export const EXPORT_FILE_SCHEMA = z
     path: z
       .string()
       .min(1)
-      .describe("要交付的普通文件；相对 exec.workdir，支持 ~/。"),
+      .describe(
+        "Regular file to export, relative to exec.workdir; supports ~/.",
+      ),
     name: z
       .string()
       .min(1)
       .max(255)
       .optional()
-      .describe("交付时的单个文件名，默认源文件名。"),
+      .describe(
+        "Single filename presented to the user. Defaults to the source filename.",
+      ),
     delivery: z
       .enum(["resource", "url"])
       .optional()
       .describe(
-        "默认 resource 经 MCP 读取；url 显式发布限时下载链接，须已配置独立下载入口。",
+        "Defaults to resource delivery through MCP. url publishes an expiring download link and requires a configured download endpoint.",
       ),
   })
   .strict();

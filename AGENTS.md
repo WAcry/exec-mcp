@@ -13,8 +13,10 @@
 推送、发布、部署、重启现有服务或不可逆操作，需要本次任务的明确授权。
 新项目的开发不授权修改或重启正在使用的 codex-mcp。
 
-文档、工具标题、工具描述、参数说明和本项目生成的错误指引均使用中文。
-代码标识符、协议字段、命令、枚举和上游原始数据不翻译。
+README、ADR 等文档、Web UI 和现有运行错误指引继续使用中文。
+模型可见的 MCP instructions、工具/资源标题和描述、schema 参数说明以及 ALL_TOOLS 包装使用英语，
+以固定 Codex 版本及核对过的上游提示为参考；差异须有实际环境或契约依据，见 ADR-002。
+代码标识符、协议字段、命令、枚举和上游原始数据不翻译；用户补充、Skill 正文和第三方契约保持原文。
 公开文档不要带入个人路径、公司环境、凭据或内部部署前提。
 
 ## 不做 Spec 驱动开发
@@ -47,7 +49,7 @@ Backlog 不覆盖生效 ADR，也不授权自动开始实现；计划状态变�
 | 任务 | 生效决定 |
 | --- | --- |
 | 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001：执行内核与产品边界](docs/adr-001-exec-runtime.md) |
-| ALL_TOOLS、契约发现、中文描述、下游 MCP | [ADR-002：工具发现与契约](docs/adr-002-tool-discovery.md) |
+| ALL_TOOLS、契约发现、英文模型描述、下游 MCP | [ADR-002：工具发现与契约](docs/adr-002-tool-discovery.md) |
 | JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003：结果与执行生命周期](docs/adr-003-results-lifecycle.md) |
 | Tunnel、认证、安装、发布及机器权限 | [ADR-004：接入与信任边界](docs/adr-004-connectivity-trust.md) |
 | 原生附件、文件导入导出、资源读取与下载 URL | [ADR-005：文件传输与交付边界](docs/adr-005-file-transfer.md) |

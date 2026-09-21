@@ -223,7 +223,7 @@ export class ArtifactStore {
             name: leaf,
             mimeType: info.mime_type,
             size: info.size,
-            description: `限时文件，${info.expires_at} 过期。${token ? "持有此链接即可下载，可转发；机器与独立下载入口须在线。" : "通过同一 MCP 连接权限的 resources/read 获取；不是公网 URL。"}`,
+            description: `File snapshot expires at ${info.expires_at}. ${token ? "Anyone with this shareable link can download while the machine and download endpoint are online." : "Read through resources/read on the same authorized MCP connection; not a public URL."}`,
           },
         };
       } finally {

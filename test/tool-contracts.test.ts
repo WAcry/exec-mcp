@@ -8,6 +8,7 @@ import {
   describeContract,
   execDescription,
   nativeContracts,
+  jsonSchema,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
 } from "../src/catalog.js";
@@ -26,11 +27,11 @@ const connections: Awaited<ReturnType<typeof connect>>[] = [];
 const terminals: TerminalManager[] = [];
 const directories: string[] = [];
 const SKILL_RULE =
-  "普通 Skill 可按目录中的触发描述自动选择；标记为仅显式的 Skill 只有用户明确点名要求使用时才能读取。";
+  "Skills can be selected by their trigger descriptions; explicit-only skills are read only when the user explicitly requests them.";
 const FILE_EDIT_RULE =
-  "创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。";
+  "The patch is sent through stdin, avoiding command-line argument limits.";
 const MULTILINE_RULE =
-  "嵌套命令、补丁或其他语言时，留意各层引号/反引号、插值与展开、参数边界、反斜杠和编解码，以及真实换行、续行、heredoc、缩进与行尾的含义。";
+  "Nested JS, shell and other languages each interpret quoting, interpolation, escapes, argument boundaries and whitespace.";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -62,13 +63,13 @@ describe("self-contained model-visible contracts", () => {
   it("includes skill selection once in exec's native contract and scopes result handling to downstream MCP", () => {
     const contracts = nativeContracts(resolveShell());
     const description = execDescription(contracts);
-    expect(description.split("本机及发现契约：")[0]).toContain(SKILL_RULE);
+    expect(description.split(SKILL_RULE)).toHaveLength(2);
     expect(
       contracts.find((contract) => contract.name === "list_skills")!
         .description,
     ).toContain(SKILL_RULE);
     expect(description).toContain(
-      "对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用",
+      "Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure.",
     );
   });
   it("keeps the current native surface, runtime boundary and actual calling forms without historical instructions", () => {
@@ -87,22 +88,25 @@ describe("self-contained model-visible contracts", () => {
       "read_mcp_resource",
     ]);
     const description = execDescription(contracts);
-    expect(description).toContain("每次使用新的 V8");
-    expect(description.split("本机及发现契约：")[0]).toContain(FILE_EDIT_RULE);
-    expect(description.split("本机及发现契约：")[0]).toContain(MULTILINE_RULE);
-    expect(description).toContain("文件和网络操作通过 tools 在实际机器执行");
-    expect(description).toContain("ChatGPT 容器与该机器不共享文件和网络环境");
-    expect(description).toContain("调用失败时先核对已发生的操作");
+    expect(description).toContain("fresh V8 isolate as an async module");
+    expect(description).toContain(FILE_EDIT_RULE);
+    expect(description.split("## Local tools")[0]).toContain(MULTILINE_RULE);
     expect(description).toContain(
-      "宿主拒绝执行时检查请求，再修正或拆分复杂脚本",
+      "Tools perform external operations on the connected machine",
+    );
+    expect(description).toContain(
+      "ChatGPT containers do not share its files or network environment",
+    );
+    expect(description).toContain(
+      "Failures and cancellation do not undo side effects",
     );
     expect(description).toContain("exec.files[index]");
     expect(description).toContain(
-      "已知名称和参数可直接 await tools[name](args)",
+      "A known name and argument shape can be called directly with await tools[name](args)",
     );
     expect(description).toContain("ALL_TOOLS.filter");
     expect(description).not.toMatch(
-      /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|notify 不支持/,
+      /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|String\.raw|must use|always use/i,
     );
     for (const contract of contracts) {
       expect(description).toContain(contract.name);
@@ -122,15 +126,56 @@ describe("self-contained model-visible contracts", () => {
     const skill = contracts.find(
       (contract) => contract.name === "list_skills",
     )!;
-    expect(skill.description).toContain("完整 SKILL.md");
-    expect(skill.description).toContain("仅显式");
+    expect(skill.description).toContain("full SKILL.md");
+    expect(skill.description).toContain("explicit-only");
     expect(skill.description).not.toMatch(
-      /40000|40,000|max_chars|round.?robin|预算|去重|压缩|Git 根/i,
+      /40000|40,000|max_chars|round.?robin|budget|dedup|compress|Git root/i,
     );
     expect(
       contracts.find((contract) => contract.name === "export_file")!
         .description,
-    ).toContain("持有链接者均可下载");
+    ).toContain("anyone with the link can download");
+  });
+
+  it("keeps every local description and schema in English for each supported shell", () => {
+    for (const kind of [
+      "bash",
+      "zsh",
+      "sh",
+      "fish",
+      "pwsh",
+      "powershell",
+      "other",
+    ] as const) {
+      for (const login of [false, true]) {
+        const contracts = nativeContracts({
+          file: kind,
+          kind,
+          login,
+          platform: "linux",
+        });
+        const description = execDescription(contracts);
+        expect(description).not.toMatch(/\p{Script=Han}/u);
+        expect(description).toContain("Input JSON Schema:");
+        expect(description).toContain("Output JSON Schema:");
+        for (const schema of [
+          EXEC_SCHEMA,
+          WAIT_SCHEMA,
+          ...contracts.map((c) => c.schema),
+        ]) {
+          expect(JSON.stringify(jsonSchema(schema))).not.toMatch(
+            /\p{Script=Han}/u,
+          );
+        }
+        // Grammar is carried as metadata, not a patch example or an unsupported MCP schema type.
+        const patch = contracts.find((c) => c.name === "apply_patch")!;
+        expect(patch.description).toContain('add_line: "+" /(.*)/ LF -> line');
+        expect(patch.description).not.toMatch(
+          /example|\*\*\* Add File: [a-z]/i,
+        );
+        expect(patch.schema.safeParse({ patch: "text" }).success).toBe(false);
+      }
+    }
   });
 
   it("publishes the optional truncation fields actually returned by a full terminal buffer", async () => {
@@ -199,16 +244,22 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     const listed = (await connection.client.listTools()).tools;
     expect(listed.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
     expect(listed[0]!.description).not.toContain("revoke_file");
-    expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
-      FILE_EDIT_RULE,
-    );
-    expect(listed[0]!.description!.split("本机及发现契约：")[0]).toContain(
+    expect(listed[0]!.description!).toContain(FILE_EDIT_RULE);
+    expect(listed[0]!.description!.split("## Local tools")[0]).toContain(
       MULTILINE_RULE,
     );
     expect(listed[0]!.description).toContain(SKILL_RULE);
     expect(listed[0]!.description).toContain(
-      "对下游 MCP 的 CallToolResult，先检查 isError",
+      "Downstream MCP methods return CallToolResult",
     );
+    const instructions = connection.client.getInstructions()!;
+    expect(instructions).toContain("user_notes");
+    expect(instructions).toContain("this conversation's Web UI");
+    expect(instructions).not.toMatch(/\p{Script=Han}/u);
+    expect(JSON.stringify(listed)).not.toMatch(/\p{Script=Han}/u);
+    const resourceTemplates = await connection.client.listResourceTemplates();
+    expect(resourceTemplates.resourceTemplates.length).toBeGreaterThan(0);
+    expect(JSON.stringify(resourceTemplates)).not.toMatch(/\p{Script=Han}/u);
     const patch =
       "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch\n";
     const result = await connection.client.callTool({

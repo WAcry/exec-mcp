@@ -336,9 +336,11 @@ describe.each([false, true])(
       });
       const catalog = jsonOutput<{ description: string }>(catalogResult);
       expect(catalog.description).not.toContain("wait_for");
-      expect(catalog.description).toContain("日志不结束窗口");
-      expect(catalog.description).toContain("非空输入默认 250");
-      expect(catalog.description).toContain("仅读取默认 5000");
+      expect(catalog.description).toContain(
+        "new output does not end the window",
+      );
+      expect(catalog.description).toContain("Non-empty writes default to 250");
+      expect(catalog.description).toContain("empty reads default to 5000");
       expect(advertised[0]!.description).toContain(catalog.description);
       for (const wait_for of ["output", "exit"]) {
         const oldArguments = {

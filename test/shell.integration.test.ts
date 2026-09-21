@@ -520,7 +520,9 @@ describe("fixed executable identity and native startup rules", () => {
         { env: { PATH: firstBin } },
       );
       const terminal = manager(selected);
-      expect(shellDescription(selected)).toBe("运行 Shell 命令。");
+      expect(shellDescription(selected)).toBe(
+        "Uses the instance's configured shell.",
+      );
       const result = await observeTerminal(
         await terminal.execCommand({ cmd: "ignored" }, root),
         (input) => terminal.writeStdin(input),

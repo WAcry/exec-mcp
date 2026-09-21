@@ -10,17 +10,21 @@ import { MAX_PAYLOAD_BYTES } from "../limits.js";
 const serverName = z
   .string()
   .min(1)
-  .describe("config.toml 中启用的 MCP 服务名，或列表条目的 server；原样传入。");
+  .describe(
+    "MCP server name exactly as configured, matching the server field in list results.",
+  );
 export const RESOURCE_LIST_SCHEMA = z
   .object({
     server: serverName
       .optional()
-      .describe("config.toml 中的服务名；指定时取一页，省略汇总全部启用服务。"),
+      .describe(
+        "MCP server name. Specify to fetch one page; omit to aggregate all enabled servers.",
+      ),
     cursor: z
       .string()
       .optional()
       .describe(
-        "上一页的 nextCursor，原样传入；仅与同一 server 和同一种列表配合，省略取首页。",
+        "Opaque nextCursor from the previous page; omit for the first page. Requires the same server and list method that produced it.",
       ),
   })
   .strict()
@@ -35,7 +39,7 @@ export const RESOURCE_READ_SCHEMA = z
       .string()
       .min(1)
       .describe(
-        "该服务的资源 URI：来自资源列表、资源链接或按 uriTemplate 展开的地址；原样传入。",
+        "Resource URI to read, exactly as listed, linked by a tool, or expanded from a uriTemplate.",
       ),
   })
   .strict();

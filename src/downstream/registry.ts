@@ -13,6 +13,7 @@ import {
   type Implementation,
   type Tool,
   type Transport,
+  type RequestOptions,
 } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { inheritedEnvironment } from "../environment.js";
@@ -21,6 +22,13 @@ import { EnvironmentHttpClient } from "../network/http.js";
 import type { DownstreamTool, JsonObject } from "../types.js";
 import { VERSION } from "../version.js";
 import type { DownstreamMcpServerConfig } from "./config.js";
+import {
+  listResourceCatalog,
+  ResourceError,
+  resourceResultBytes,
+  type ResourceListInput,
+  type ResourceReadInput,
+} from "./resources.js";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -315,6 +323,114 @@ export class DownstreamMcpRegistry {
     this.lifecycleAbort.abort(new Error("Downstream MCP registry closed"));
     this.closePromise = this.finishClose();
     return this.closePromise;
+  }
+
+  public listResources(input: ResourceListInput, signal?: AbortSignal) {
+    this.assertOpen();
+    throwIfAborted(signal);
+    return listResourceCatalog(
+      "resources",
+      input,
+      [...this.definitions.keys()],
+      (server, operation) =>
+        this.resourceOperation(server, "resources/list", operation, signal),
+    );
+  }
+
+  public listResourceTemplates(input: ResourceListInput, signal?: AbortSignal) {
+    this.assertOpen();
+    throwIfAborted(signal);
+    return listResourceCatalog(
+      "resourceTemplates",
+      input,
+      [...this.definitions.keys()],
+      (server, operation) =>
+        this.resourceOperation(
+          server,
+          "resources/templates/list",
+          operation,
+          signal,
+        ),
+    );
+  }
+
+  public readResource(input: ResourceReadInput, signal?: AbortSignal) {
+    return this.resourceOperation(
+      input.server,
+      "resources/read",
+      async (client, options) => {
+        if (!client.getServerCapabilities()?.resources)
+          throw new ResourceError("该服务未声明 resources 能力。");
+        const { _meta: _private, ...result } = await client.readResource(
+          { uri: input.uri },
+          { ...options, cacheMode: "bypass" },
+        );
+        const value = { ...result, server: input.server, uri: input.uri };
+        resourceResultBytes(value);
+        return value;
+      },
+      signal,
+    );
+  }
+
+  /** Resource RPCs share the configured connection, credentials and cancellation
+   * lifetime. They never fall back to local files or a separate HTTP fetch.
+   */
+  private async resourceOperation<T>(
+    server: string,
+    method: string,
+    operation: (client: Client, options: RequestOptions) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    this.assertOpen();
+    throwIfAborted(signal);
+    if (!this.definitions.has(server))
+      throw new ResourceError(
+        `未知或未启用的下游 MCP 服务：${JSON.stringify(server)}。`,
+      );
+    const state = await this.ensureServer(server, signal);
+    const timeout = state.config.toolTimeoutMs ?? this.toolTimeoutMs;
+    const deadline = AbortSignal.timeout(timeout);
+    const requestSignal = combinedSignal(
+      this.lifecycleAbort.signal,
+      signal,
+      deadline,
+    );
+    state.activeCalls++;
+    try {
+      return await raceWithSignal(
+        operation(state.client, {
+          signal: requestSignal,
+          timeout,
+          maxTotalTimeout: timeout,
+        }),
+        requestSignal,
+      );
+    } catch (error) {
+      if (signal?.aborted || this.lifecycleAbort.signal.aborted)
+        throw abortError("下游 MCP 资源请求已取消。");
+      if (error instanceof ResourceError) throw error;
+      if (shouldDiscardConnection(error, state.transport))
+        this.markStale(state);
+      if (
+        deadline.aborted ||
+        (SdkError.isInstance(error) &&
+          error.code === SdkErrorCode.RequestTimeout)
+      )
+        throw new Error(
+          `下游 MCP ${JSON.stringify(server)} ${method} 超时；可调整 tool_timeout_sec。`,
+        );
+      if (ProtocolError.isInstance(error))
+        throw new Error(
+          `下游 MCP ${JSON.stringify(server)} ${method} 被拒绝（协议错误 ${error.code}）；请核对资源 URI、游标及服务凭据。`,
+        );
+      throw new Error(
+        `下游 MCP ${JSON.stringify(server)} ${method} 失败；请检查连接和凭据，未自动重试。`,
+      );
+    } finally {
+      state.activeCalls--;
+      if (state.stale && state.activeCalls === 0) void this.closeState(state);
+    }
   }
 
   private async finishClose(): Promise<void> {

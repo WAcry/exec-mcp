@@ -159,9 +159,13 @@ try {
     `
 import {Server} from '@modelcontextprotocol/server';
 import {serveStdio} from '@modelcontextprotocol/server/stdio';
-serveStdio(()=>{const s=new Server({name:'packaged',version:'1'},{capabilities:{tools:{}}});
+serveStdio(()=>{const s=new Server({name:'packaged',version:'1'},{capabilities:{tools:{},resources:{}}});
 s.setRequestHandler('tools/list',async()=>({tools:[{name:'echo',inputSchema:{type:'object'}}]}));
-s.setRequestHandler('tools/call',async()=>({content:[{type:'text',text:'PACKAGED_DIRECT_CALL'}]}));return s;});
+s.setRequestHandler('tools/call',async()=>({content:[{type:'text',text:'PACKAGED_DIRECT_CALL'}]}));
+s.setRequestHandler('resources/list',async()=>({resources:[{uri:'memo://packaged/readme',name:'Packaged notes'}]}));
+s.setRequestHandler('resources/templates/list',async()=>({resourceTemplates:[{uriTemplate:'memo://packaged/{id}',name:'Packaged parameterized notes'}]}));
+s.setRequestHandler('resources/read',async(req)=>({contents:[{uri:req.params.uri,mimeType:'text/plain',text:'PACKAGED_RESOURCE_CONTENT'}]}));
+return s;});
 `,
   );
   await writeFile(
@@ -408,6 +412,21 @@ enabled = true
   assert.equal(catalogResult.complete, true);
   assert.equal(catalogResult.selected, true);
   assert.match(JSON.stringify(catalogResult.reply), /PACKAGED_DIRECT_CALL/);
+  const resources = valueOf(
+    await scopedCall(`
+    const [listed, templates] = await Promise.all([
+      tools.list_mcp_resources({}), tools.list_mcp_resource_templates({server:'packaged'})
+    ]);
+    const item=listed.resources[0];
+    text({listed,templates,read:await tools.read_mcp_resource({server:item.server,uri:item.uri})});
+  `),
+  );
+  assert.equal(resources.listed.resources[0].server, "packaged");
+  assert.equal(
+    resources.templates.resourceTemplates[0].uriTemplate,
+    "memo://packaged/{id}",
+  );
+  assert.equal(resources.read.contents[0].text, "PACKAGED_RESOURCE_CONTENT");
   const notesScope = createHash("sha256")
     .update("package-smoke-conversation")
     .digest("base64url");

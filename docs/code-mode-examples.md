@@ -87,6 +87,42 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 阅读命中项后使用它的准确名称调用 `await tools[name](args)`；已知名称和参数可以直接调用。
 这是当前 exec 的已绑定快照，筛选本身不连接或执行下游，也不自动把完整目录加入模型上下文。
 
+## MCP 资源
+
+资源是下游服务提供的数据，不是 ALL_TOOLS 中的可调用方法。比如文档原文、数据库结构或参数化查询上下文。
+三个资源辅助方法仍在 exec 内，不增加顶层工具。已有资源 URI 可以直接读取；只有不清楚目录时才需要列出：
+
+```js
+const result = await tools.list_mcp_resources({});
+text(result);
+```
+
+每条目录带 `server`。以下以已配置的 `docs` 服务为例，指定服务只取一页；
+`nextCursor` 是不透明值，和同一个服务、同一种列表一起原样传回：
+
+```js
+const page = await tools.list_mcp_resources({ server: "docs" });
+text(page);
+```
+
+用列表或工具返回的资源 URI 读取。返回的 `contents` 是资源条目，不是 MCP 工具的 `content`：
+
+```js
+const result = await tools.read_mcp_resource({
+  server: "docs",
+  uri: "memo://project/readme"
+});
+for (const item of result.contents) {
+  if (item.text !== undefined) text(item.text);
+}
+```
+
+`list_mcp_resource_templates({ server: "docs" })` 返回 `uriTemplate`；按其参数展开出具体 URI 后，
+仍用 `read_mcp_resource`。一个服务即使资源列表为空，也可能提供模板或只在工具结果中返回资源链接。
+资源 URI 交给指定下游，不作为本机路径或任意网络地址读取。二进制条目的 `blob` 是 Base64，
+例如已知为图片时可用 `image("data:" + item.mimeType + ";base64," + item.blob)` 显式输出。
+大资源可先用 JS 筛选或 store；沿用嵌套结果传输上限与最终模型输出预算，不自动落盘。
+
 ## 在 exec 内构造含 Markdown 的多行补丁
 
 exec 的 source 是 JavaScript；Shell 引号、here-string 和嵌套脚本注释不能改变外层 JS 的分隔符语法。

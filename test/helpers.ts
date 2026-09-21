@@ -115,14 +115,21 @@ function shellQuote(value: string): string {
     ? `'${value.replaceAll("'", "''")}'`
     : `'${value.replaceAll("'", "'\\''")}'`;
 }
-export async function connect(overrides: Partial<Config> = {}, legacy = false) {
-  const server = await startServer({
-    host: "127.0.0.1",
-    port: 0,
-    access: "openai-tunnel",
-    mcpServers: [],
-    ...overrides,
-  });
+export async function connect(
+  overrides: Partial<Config> = {},
+  legacy = false,
+  options: Parameters<typeof startServer>[1] = {},
+) {
+  const server = await startServer(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      access: "openai-tunnel",
+      mcpServers: [],
+      ...overrides,
+    },
+    options,
+  );
   const client = new Client(
     { name: "exec-mcp-test", version: "1" },
     { versionNegotiation: { mode: legacy ? "legacy" : "auto" } },

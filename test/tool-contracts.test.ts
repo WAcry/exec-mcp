@@ -30,7 +30,7 @@ const SKILL_RULE =
 const FILE_EDIT_RULE =
   "创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。";
 const MULTILINE_RULE =
-  "多行字符串可用模板字面量；String.raw 保留反斜杠，反引号及 ${...} 仍遵循 JS 语法，Shell 引号和 Markdown 围栏不隔离外层模板。";
+  "嵌套命令、补丁或其他语言时，留意各层引号/反引号、插值与展开、参数边界、反斜杠和编解码，以及真实换行、续行、heredoc、缩进与行尾的含义。";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -82,6 +82,9 @@ describe("self-contained model-visible contracts", () => {
       "apply_patch",
       "view_image",
       "request_user_input_async",
+      "list_mcp_resources",
+      "list_mcp_resource_templates",
+      "read_mcp_resource",
     ]);
     const description = execDescription(contracts);
     expect(description).toContain("每次使用新的 V8");

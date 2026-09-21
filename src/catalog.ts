@@ -5,6 +5,10 @@ import { shellDescription, type CommandShell } from "./host/shell.js";
 import type { NativeToolName } from "./tool-names.js";
 import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
 import {
+  RESOURCE_LIST_SCHEMA,
+  RESOURCE_READ_SCHEMA,
+} from "./downstream/resources.js";
+import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
   EXPORT_FILE_SCHEMA,
@@ -270,6 +274,24 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     description:
       "在工作中向本对话的 Web 用户询问缺失信息、偏好或约束。问题提交后立即返回 accepted，不等待回答；可继续不依赖答案的工作。用户可选任一选项或‘以上都不是’，并附加补充；题目、选择与补充随后续任一工具响应作为 user_notes 或‘用户额外补充’返回。需已启动 Web 且宿主提供对话标识。",
   },
+  {
+    name: "list_mcp_resources",
+    schema: RESOURCE_LIST_SCHEMA,
+    description:
+      "列出下游 MCP 提供的资源，如文档、数据库结构或应用上下文；与 ALL_TOOLS 工具目录不同。返回 {resources:[{server,uri,name,...}],server?,nextCursor?,errors?}。指定 server 取一页，用 nextCursor 续取；省略 server 汇总所有启用服务，失败服务列在 errors。不支持资源的服务返回空列表。",
+  },
+  {
+    name: "list_mcp_resource_templates",
+    schema: RESOURCE_LIST_SCHEMA,
+    description:
+      "列出下游 MCP 的参数化资源 URI 模板。返回 {resourceTemplates:[{server,uriTemplate,name,...}],server?,nextCursor?,errors?}；按模板展开得到具体 URI，再用 read_mcp_resource 读取。分页、跨服务汇总及 errors 与 list_mcp_resources 相同。",
+  },
+  {
+    name: "read_mcp_resource",
+    schema: RESOURCE_READ_SCHEMA,
+    description:
+      "按 server 和资源 URI 读取该下游 MCP 的内容，已知 URI 可直接读。返回 {server,uri,contents:[{uri,mimeType?,text?,blob?}]}；每项为 text 原文或 blob Base64，可在 JS 中筛选或保存。请求交给指定服务，不是本机文件读取或通用 URL 下载；失败抛出错误。",
+  },
 ];
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
   const { $schema: _dialect, ...value } = z.toJSONSchema(schema, {
@@ -328,7 +350,7 @@ export function execDescription(
 source 填写 JavaScript 源码。所有本机及下游工具通过 await tools.<name>(args) 调用；独立调用可用 Promise.all。脚本结束即销毁本次隔离环境，未 await 的 Promise 会被丢弃。
 本机工具的完整契约列于下方；apply_patch 接收字符串，其他工具接收对象。workdir 指定本次默认目录，省略时为服务用户主目录；JS 普通变量不跨 exec 保留，Shell 的 cd 只影响该进程。
 首次使用或进入新项目时用 list_skills 查看目录，按其规则选择并读取完整 SKILL.md；已在上下文中的目录无需重读。
-创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。多行字符串可用模板字面量；String.raw 保留反斜杠，反引号及 \${...} 仍遵循 JS 语法，Shell 引号和 Markdown 围栏不隔离外层模板。
+创建和修改文本文件优先用 tools.apply_patch，避免命令行参数长度限制。嵌套命令、补丁或其他语言时，留意各层引号/反引号、插值与展开、参数边界、反斜杠和编解码，以及真实换行、续行、heredoc、缩进与行尾的含义。
 
 ## 工具发现
 ALL_TOOLS 是本次已绑定工具的 {name,description}[]，description 含完整调用契约。下游契约按需查看，已知名称和参数可直接 await tools[name](args)。目录本身不自动输出，更新在下一次 exec 生效。

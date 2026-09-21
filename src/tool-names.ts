@@ -8,6 +8,9 @@ export const NATIVE_TOOL_TITLES = {
   apply_patch: "应用补丁",
   view_image: "查看图片",
   request_user_input_async: "异步询问用户",
+  list_mcp_resources: "列出 MCP 资源",
+  list_mcp_resource_templates: "列出 MCP 资源模板",
+  read_mcp_resource: "读取 MCP 资源",
 } as const;
 export type NativeToolName = keyof typeof NATIVE_TOOL_TITLES;
 export const TOP_LEVEL_TOOL_NAMES = ["exec", "wait"];

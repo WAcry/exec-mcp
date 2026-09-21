@@ -39,6 +39,10 @@ import { ActivityStore } from "./web/activity.js";
 import type { CallRecord } from "./web/types.js";
 import { SessionNotes } from "./session-notes.js";
 import type { RequestUserInput } from "./user-questions.js";
+import type {
+  ResourceListInput,
+  ResourceReadInput,
+} from "./downstream/resources.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -232,6 +236,21 @@ export class ExecRuntime {
         return this.notes.ask(
           sessionScopeKey(ctx.scope),
           input as RequestUserInput,
+        );
+      case "list_mcp_resources":
+        return this.downstream.listResources(
+          input as ResourceListInput,
+          ctx.signal,
+        );
+      case "list_mcp_resource_templates":
+        return this.downstream.listResourceTemplates(
+          input as ResourceListInput,
+          ctx.signal,
+        );
+      case "read_mcp_resource":
+        return this.downstream.readResource(
+          input as ResourceReadInput,
+          ctx.signal,
         );
       default:
         throw new Error("未知本机工具。");

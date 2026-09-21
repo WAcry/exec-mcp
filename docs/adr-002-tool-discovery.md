@@ -67,6 +67,33 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 [MCP tools/list](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#listing-tools) 返回分页契约，
 没有可假定通用的逐工具 schema/read RPC。目录与 V8 快照仍遵守 [ADR-003](adr-003-results-lifecycle.md) 的传输边界。
 
+## MCP 资源是独立的协议能力
+
+ALL_TOOLS 只描述 tools/call 可调用方法及本机辅助方法，不能替代 resources/list、resources/templates/list
+和 resources/read；已接入的服务可能只提供文档或参数化资源，工具结果也可能提供不在资源列表里的 resource_link。
+增加 Codex 同名的三个 exec 内辅助方法，而不是工具搜索、通用 HTTP 下载器或宿主 resources/read 代理。
+本机契约照常在 exec 展开，顶层保持 exec/wait；共用已配置下游的 SDK Client、凭据、代理、超时与取消生命周期。
+
+参考固定 rust-v0.155.1 及 `ebc05da3bdb76f25861e7cb418bd06d28cadc609` 的
+[资源定义](https://github.com/openai/codex/blob/ebc05da3bdb76f25861e7cb418bd06d28cadc609/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)
+和对应 handlers：列表可选 server/cursor，指定服务取单页，省略服务汇总全目录；读取必须指定 server/uri。
+保留资源和模板的原始元数据，并给每项附准确的 server；游标和 URI 是下游标识，原样传送，不 trim、解码或映射成本机路径。
+已知 URI（列表、模板展开或资源链接）可直接读取，不要求先列目录，不增加 URI 白名单或独立授权层。
+不照搬上游“URI 必须来自资源列表”的限制性描述：参数化和未列出的链接也是有效来源。
+
+聚合列表逐服务并行；单服务分页使用一个总期限，重复游标、页数不收敛或过大明确报错。
+聚合保留成功服务及 errors，不把故障伪装成空目录或默默交付不完整的单服务列表。
+无 resources 能力是合法状态：列出为空，读取则明确不支持，不发送无效 RPC。
+沿用现有传输边界，并将三个方法按大型下游结果计入原有并发预算；不过早按模型 token 预算裁剪。
+SDK 的自动汇总会让指定 server 的首页失去 nextCursor，因此单页使用官方 SDK 的 request，
+聚合自行处理有界分页；读取使用 readResource 的 cacheMode=bypass。两者不保留资源正文缓存。
+
+启动仍验证连接和工具目录，不预拉资源目录或正文；资源可能很大且动态，按需查询不等于延迟建立连接。
+enabled_tools 只选择工具，不限制资源；服务级停用仍由配置过滤。故障后由下一次独立请求恢复连接，不重放当前请求。
+读取返回 {server,uri,contents}，文本和 Base64 保留原值，由 Agent 显式输出；不自动下载、执行或渲染资源中的内容。
+与本实例 export_file 的资源交付分开，不重新暴露本机资源读取工具；也不增加订阅、模板补全、资源 UI 或另一套缓存产品。
+Web 用现有子调用审计显示参数和结果，外层 exec/wait 照常附带用户补充。
+
 ## 中文与自包含
 
 本项目编写或生成的工具标题、说明、参数解释和错误指引全部使用中文。
@@ -94,6 +121,8 @@ Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、
 留在相应 ADR/README。只有自然调用容易踩到且 schema/返回值未说明的区别，才值得额外提醒。
 例如隔离 JS 与实际机器的边界、未 await 的调用被丢弃、cell_id 与终端 session_id 的区别、
 待输出媒体和自动交付的文件链接，均会直接影响调用；旧入口的参数形状不写成当前提示中的历史禁令。
+嵌套字符串只简要提醒多层语法、参数边界和文本保真风险，不在工具描述中指定模板字面量、String.raw、
+占位符或转义算法；调用方根据目标语言选择构造方式。文档中的经过测试示例是用法演示，不是必须遵循的写法。
 
 对照固定 Codex rust-v0.155.1 的 [Code Mode 契约](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/code-mode-protocol/src/description.rs)、
 [命令定义](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/shell_spec.rs)、

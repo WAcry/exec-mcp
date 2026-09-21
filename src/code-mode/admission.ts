@@ -122,7 +122,10 @@ export function nestedToolReservationBytes(toolName: CodeModeToolName): number {
   if (
     toolName.namespace !== undefined ||
     toolName.name.startsWith("mcp") ||
-    toolName.name === "view_image"
+    toolName.name === "view_image" ||
+    toolName.name === "list_mcp_resources" ||
+    toolName.name === "list_mcp_resource_templates" ||
+    toolName.name === "read_mcp_resource"
   )
     return LARGE_NESTED_TOOL_RESERVATION_BYTES;
   return DEFAULT_NESTED_TOOL_RESERVATION_BYTES;

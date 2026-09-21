@@ -165,8 +165,15 @@ port = 8891
 `ALL_TOOLS` 是已绑定本机及下游工具的目录，助手在 exec 内按名称或描述筛选、读取完整契约，使用 `tools[name](args)` 调用。
 exec 描述一次性提供全部本机工具的完整说明；下游契约按需输出，不预先填满上下文。
 Web 的下游工具列表可以按名称或描述筛选并展开契约；它只浏览当前目录，不试执行工具。
+下游的文档、数据库结构等 MCP 资源也可以按需读取：exec 内提供 `list_mcp_resources`、
+`list_mcp_resource_templates` 和 `read_mcp_resource`，无需增加配置。资源与可调用工具是不同目录；
+只提供资源、没有 tools 的服务也可接入。资源列表带原配置服务名，读取按 `server`＋`uri` 路由，
+不会把下游的 `file://` URI 当成本机路径。示例见[资源读取](docs/code-mode-examples.md#mcp-资源)。
 stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
+`enabled_tools` 仅筛选工具，不筛选资源；停用整个服务仍使用 `enabled = false`。
+资源列表指定 `server` 时返回一页，以 `nextCursor` 续取；省略时汇总全部启用服务，失败记录在 `errors`。
+资源按调用实时读取，不缓存正文、不在启动时加载所有资源；沿用 `tool_timeout_sec` 作为单服务请求的总期限。
 `startup_timeout_sec` 默认 30 秒，覆盖该服务的协议协商与全部目录分页；可按需要设置 120、300 等更长时间，
 不受 ChatGPT 的单次 wait 时间约束。多个下游并行加载；启动期间可按 Ctrl+C 取消并清理。
 配置修改后重启 exec-mcp。配置可能含凭据，不要提交、分享或复制到对话中。

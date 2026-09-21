@@ -8,7 +8,6 @@ import {
   DownstreamMcpRegistry,
   type DownstreamStartupEvent,
 } from "./registry.js";
-import { ToolSearchIndex, type ToolDescriptor } from "./search.js";
 
 interface Prepared {
   tool: DownstreamTool;
@@ -28,45 +27,6 @@ export class ToolDiscovery {
     return this.prepare(this.registry.bindingSnapshot()).map(
       (entry) => entry.definition,
     );
-  }
-  /** Capture exactly one exec's callable catalog; search never refreshes or binds tools.
-   * Keep metadata only: a long-lived search must not retain another call's callbacks.
-   */
-  searchFor(tools: readonly Omit<CodeModeToolDefinition, "call">[]) {
-    const visible = new Map<string, { name: string; description: string }>();
-    const descriptors: ToolDescriptor[] = tools.map((tool) => {
-      if (visible.has(tool.name)) throw new Error(`工具名称冲突：${tool.name}`);
-      visible.set(tool.name, {
-        name: tool.name,
-        description: tool.description,
-      });
-      const downstream = this.cached.get(tool.name)?.tool;
-      return (
-        downstream ?? {
-          id: tool.name,
-          codeName: tool.name,
-          serverId: "exec-mcp",
-          tool: {
-            name: tool.name,
-            description: tool.description,
-            ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-            ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
-          },
-        }
-      );
-    });
-    // Most execs call known tools. Build BM25 only when this snapshot is searched.
-    let index: ToolSearchIndex | undefined;
-    return (query: string, limit: number, signal?: AbortSignal) => {
-      signal?.throwIfAborted();
-      index ??= new ToolSearchIndex(descriptors);
-      return {
-        tools: index
-          .search(query, { limit })
-          .map((tool) => ({ ...visible.get(tool.codeName)! })),
-        errors: this.registry.catalogErrors(),
-      };
-    };
   }
   private prepare(tools: readonly DownstreamTool[]): Prepared[] {
     const next = new Map<string, Prepared>();

@@ -386,15 +386,14 @@ describe("complete downstream startup before readiness", () => {
   });
 });
 
-describe("discovery is a local query, never a tool-unlock handshake", () => {
-  it("searches the complete cache without issuing additional network requests", async () => {
+describe("discovery is a local snapshot, never a tool-unlock handshake", () => {
+  it("reads the complete catalog without issuing additional network requests", async () => {
     const fixture = await httpFixture();
     const server = await start([fixture.definition]);
     const requests = fixture.state.requests;
-    const search = server.runtime.searchTools("echo", 8);
-    expect(search.tools).toHaveLength(1);
-    expect(search.errors).toEqual({});
-    expect(search).not.toHaveProperty("note");
+    const catalog = server.runtime.discovery.snapshot();
+    expect(catalog.map((tool) => tool.name)).toEqual(["mcp__fixture__echo"]);
+    expect(server.runtime.downstream.catalogErrors()).toEqual({});
     expect(fixture.state.requests).toBe(requests);
   });
   it("can call a known method again after a disconnect without any preceding search", async () => {
@@ -414,9 +413,8 @@ describe("discovery is a local query, never a tool-unlock handshake", () => {
     expect(failed.isError).toBe(true);
     expect(fixture.state.calls).toBe(2);
     const listings = fixture.state.lists;
-    const search = server.runtime.searchTools("echo", 8);
-    expect(search.tools).toHaveLength(1);
-    expect(search.errors.fixture).toBeTruthy();
+    expect(server.runtime.discovery.snapshot()).toHaveLength(1);
+    expect(server.runtime.downstream.catalogErrors().fixture).toBeTruthy();
     expect(fixture.state.lists).toBe(listings);
     const recovered = await run();
     expect(recovered.isError).not.toBe(true);

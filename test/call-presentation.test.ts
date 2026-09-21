@@ -47,7 +47,10 @@ describe("complete input presentation for every entry point", () => {
         workdir: "/repo",
       },
     ],
-    ["tool_search", { query: "tools 中文", limit: 1 }],
+    [
+      "request_user_input_async",
+      { questions: [{ title: "选择模式", options: ["甲", "乙"] }] },
+    ],
     [
       "write_stdin",
       {
@@ -88,7 +91,7 @@ describe("complete input presentation for every entry point", () => {
   );
 
   it("does not disguise direct calls or wait as an empty nested call flow", () => {
-    for (const tool of ["tool_search", "exec_command", "apply_patch", "wait"]) {
+    for (const tool of ["list_skills", "exec_command", "apply_patch", "wait"]) {
       expect(hasSubcalls(record(tool))).toBe(false);
       expect(hasSubcalls(record(tool, {}, "running"))).toBe(false);
     }
@@ -98,7 +101,7 @@ describe("complete input presentation for every entry point", () => {
   });
 
   it("distinguishes an observation returning from the underlying program completing", () => {
-    expect(callStatusLabel(record("tool_search"))).toBe("调用完成");
+    expect(callStatusLabel(record("list_skills"))).toBe("调用完成");
     expect(callStatusLabel(record("exec"))).toBe("脚本完成");
     expect(callStatusLabel(record("exec", {}, "yielding"))).toBe(
       "脚本仍在运行",

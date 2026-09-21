@@ -83,6 +83,18 @@ text(await tools.exec_command({
 
 服务不擅自修改错误策略。原生程序的退出码可用 `exit $LASTEXITCODE` 显式传回。
 
+## 在 exec 中查阅下游工具
+
+`ALL_TOOLS` 是 `{name, description}[]`；description 包含完整的输入、返回契约，工具名称与 `tools` 上的绑定一致。
+按名称或描述筛选并显式输出，或只列名称缩小范围：
+
+```js
+text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.description)));
+```
+
+阅读命中项后使用它的准确名称调用 `await tools[name](args)`；已知名称和参数可以直接调用。
+这是当前 exec 的已绑定快照，筛选本身不连接或执行下游，也不自动把完整目录加入模型上下文。
+
 ## 原文参数与 JavaScript 源码
 
 本机/发现工具同时支持顶层调用和 exec 内的 tools.*。顶层 exec_command 的 cmd 是 Shell 原文；

@@ -147,18 +147,6 @@ export const IMAGE_SCHEMA = z
       .optional(),
   })
   .strict();
-export const SEARCH_SCHEMA = z
-  .object({
-    query: z.string().min(1).describe("所需工具的用途、名称或服务名。"),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(50)
-      .describe("最多返回的结果数，默认 8。")
-      .optional(),
-  })
-  .strict();
 const PATCH_SCHEMA = z.string().min(1);
 export const DIRECT_PATCH_SCHEMA = z
   .object({
@@ -291,12 +279,6 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       "读取本机已有图片用于视觉检查，返回 MCP CallToolResult；用 image(result.content[0]) 输出其中的图片。",
   },
   {
-    name: "tool_search",
-    schema: SEARCH_SCHEMA,
-    description:
-      "在本次 ALL_TOOLS 的全部本机及下游工具中进行 BM25 搜索，返回 {tools:[{name,description}],errors}；命中项含完整契约，可在同一 exec 调用。已知名称可直接调用。",
-  },
-  {
     name: "request_user_input_async",
     schema: REQUEST_USER_INPUT_SCHEMA,
     output: {
@@ -392,10 +374,6 @@ export function directContract(contract: NativeContract) {
     case "view_image":
       description = "读取本机已有图片用于视觉检查，直接返回原生 MCP 图片。";
       break;
-    case "tool_search":
-      description =
-        "在当前全部本机及下游工具中进行 BM25 搜索，返回 {tools:[{name,description}],errors}。命中项含 exec 内的完整契约；下游工具通过 exec 中的 tools[name](args) 调用。";
-      break;
   }
   if (contract.name === "exec_command")
     description +=
@@ -425,7 +403,8 @@ exec 可合并、并发调用并用 JS 筛选/汇总结果，减少外层往返�
 用 await tools.<name>(args) 调用；独立操作可 await Promise.all([...])；脚本结束时，未等待的 Promise 会被丢弃。
 创建和修改文本文件优先用 tools.apply_patch，避免把文件内容塞进终端命令而触及参数长度上限。
 多行 JS 字符串可用模板字面量，保留反斜杠用 String.raw；Shell 引号、here-string 和 Markdown 围栏不隔离外层 JS。模板正文反引号用 \${"\`"}、围栏用 \${"\`".repeat(3)}、字面量 \${name} 用 \${"\${name}"} 插入；String.raw 也保留转义用的反斜杠。
-ALL_TOOLS 是本次已绑定本机和下游工具的 {name,description}[]，含 exec 内的完整调用契约；find/filter 或 tools.tool_search 按需读取。数组本身不自动输出。已知工具可直接 tools[name](args)，目录更新从下一次 exec 生效。
+下游 MCP 工具已绑定在 tools 上，完整契约未在此展开。ALL_TOOLS 是本次可嵌套本机及下游工具的 {name,description}[]；按 name/description 用 find/filter 筛选，text(条目) 查看完整参数和返回契约，再 await tools[条目.name](args) 调用。已知名称和参数可直接调用；数组不自动输出，目录更新从下一次 exec 生效。
+目录筛选示例：text(ALL_TOOLS.filter(t => /关键词/i.test(t.name + " " + t.description)))；只列名称可用 text(ALL_TOOLS.map(t => t.name))。
 本机工具的默认目录由 workdir 指定；不同 exec 的普通 JS 变量和 Shell 当前目录不共享，Shell 的 cd 只影响该进程。
 通过输出助手显式交回结果：text(value) 输出字符串或 JSON；image(dataUrlOrBlock, detail?)、audio(dataUrlOrBlock) 输出 base64 data URL 或 MCP content 中的单个媒体块，例如 image(result.content[0])；generatedImage({image_url,output_hint?}) 输出已有图片的 data URL 及可选说明。对下游 MCP 的 CallToolResult，先检查 isError，有 structuredContent 时优先使用，再从 content 补充不同文本与媒体。
 文件引用通过顶层 files 绑定，tools.import_file({index,destination}) 保存到机器；tools.export_file({path}) 交付快照，exec/wait 自动附带原生资源链接。

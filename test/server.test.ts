@@ -136,7 +136,7 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
 describe.each([false, true])(
   "startup discovery over actual MCP (legacy=%s)",
   (legacy) => {
-    it("binds a known name on the first exec and searches/calls within one snapshot", async () => {
+    it("binds a known name on the first exec and filters/calls within one snapshot", async () => {
       const marker = path.join(await directory(), "calls.txt");
       const { client } = await connection(
         { mcpServers: [fixture(marker)] },
@@ -155,23 +155,17 @@ describe.each([false, true])(
       expect(
         jsonOutput(await exec(client, "text(ALL_TOOLS.map(t=>t.name));")),
       ).toContain("mcp__fixture__add");
-      const search = await exec(
+      const filtered = await exec(
         client,
-        'const r=await tools.tool_search({query:"求和"});text({r,bound:typeof tools.mcp__fixture__add,result:await tools[r.tools[0].name]({value:4})});',
+        'const entries=ALL_TOOLS.filter(t=>t.description.includes("求和"));text({entries,bound:typeof tools.mcp__fixture__add,result:await tools[entries[0].name]({value:4})});',
       );
-      expect(jsonOutput(search)).toMatchObject({
+      expect(jsonOutput(filtered)).toMatchObject({
         bound: "function",
-        r: {
-          errors: {},
-          tools: expect.arrayContaining([
-            expect.objectContaining({ name: "mcp__fixture__add" }),
-          ]),
-        },
+        entries: expect.arrayContaining([
+          expect.objectContaining({ name: "mcp__fixture__add" }),
+        ]),
         result: { structuredContent: { value: 5 } },
       });
-      expect(
-        jsonOutput<{ r: Record<string, unknown> }>(search).r,
-      ).not.toHaveProperty("note");
       const result = await exec(
         client,
         "text(await tools.mcp__fixture__add({value:2}));",

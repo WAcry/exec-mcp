@@ -82,7 +82,6 @@ describe("self-contained model-visible contracts", () => {
       "write_stdin",
       "apply_patch",
       "view_image",
-      "tool_search",
       "request_user_input_async",
     ]);
     const description = execDescription(contracts);
@@ -99,7 +98,8 @@ describe("self-contained model-visible contracts", () => {
       "若宿主拒绝执行，先检查请求是否合规，再修正或拆分复杂脚本",
     );
     expect(description).toContain("tools.import_file({index,destination})");
-    expect(description).toContain("已知工具可直接 tools[name](args)");
+    expect(description).toContain("已知名称和参数可直接调用");
+    expect(description).toContain("按 name/description 用 find/filter 筛选");
     expect(description).not.toMatch(
       /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|notify 不支持/,
     );

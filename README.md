@@ -5,7 +5,7 @@
 
 助手可以在一次调用里组合独立操作、并发执行并整理结果，减少机械性的往返。
 工具说明使用中文；支持 ChatGPT 文件导入和产物交付，并提供可关闭的本机 Web 管理控制台。
-本机工具 list_skills、import_file、export_file、exec_command、write_stdin、apply_patch、view_image、tool_search
+本机工具 list_skills、import_file、export_file、exec_command、write_stdin、apply_patch、view_image、request_user_input_async
 既可直接调用，也可在 exec 中编排；exec/wait 负责 JavaScript 与其执行 cell。各入口共享原生工具实现。
 控制台用于观察和管理当前实例，不是另一套聊天界面，也不增加模型或子 Agent。
 
@@ -161,9 +161,10 @@ port = 8891
 `serve` 会先并行连接所有启用的下游 MCP，验证凭据、读取全部工具页并校验输入契约，再开放端口、报告就绪。
 任何启用的服务连接失败、需要登录、目录失败或契约无效，本次启动都会失败退出并清理已启动的客户端，
 不会带着部分工具列表继续运行。不使用的服务可设置 `enabled = false`；未设置 `enabled_tools` 时加载全部工具。
-已有 Skill 或上下文给出工具名称时，助手第一次 exec 即可直接调用，不必先 tool_search。
-`ALL_TOOLS` 和 `tools.tool_search` 覆盖同一个已绑定目录：全部本机工具及启用的下游工具。
-本机工具的完整契约同时在外层 exec 描述中提供；搜索后可在同一次 exec 直接调用。
+已有 Skill 或上下文给出工具名称和参数时，助手第一次 exec 即可直接调用。
+`ALL_TOOLS` 是已绑定本机及下游工具的目录，助手在 exec 内按名称或描述筛选、读取完整契约，使用 `tools[name](args)` 调用。
+本机工具各自在同名顶层工具中提供完整说明，exec 不重复展开；下游契约按需输出，不预先填满上下文。
+Web 的下游工具列表可以按名称或描述筛选并展开契约；它只浏览当前目录，不试执行工具。
 stdio 可额外设置 `cwd`、`env`；HTTP 可设置 `headers`。
 两者均可设置 `enabled`、`enabled_tools`、`startup_timeout_sec` 和 `tool_timeout_sec`。
 `startup_timeout_sec` 默认 30 秒，覆盖该服务的协议协商与全部目录分页；可按需要设置 120、300 等更长时间，

@@ -115,7 +115,7 @@ describe.each([false, true])(
       const t = await setup(legacy);
       const tools = (await t.client.listTools()).tools;
       expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
-      expect(tools).toHaveLength(11);
+      expect(tools).toHaveLength(10);
       const exec = tools.find((tool) => tool.name === "exec")!;
       expect(exec.description).not.toContain("输入 JSON Schema");
       expect(exec.description).not.toContain("Lark grammar");
@@ -320,18 +320,14 @@ describe.each([false, true])(
         expect(result.exit_code).toBe(0);
       }
     });
-    it("uses the same complete search snapshot without putting those descriptions back in exec", async () => {
+    it("reads a complete native contract from ALL_TOOLS without putting it back in the exec description", async () => {
       const t = await setup(legacy);
-      const direct = jsonOutput<{
-        tools: { name: string; description: string }[];
-      }>(await t.call("tool_search", { query: "apply_patch", limit: 1 }));
-      expect(direct.tools[0]!.name).toBe("apply_patch");
       const nested = jsonOutput<{ name: string; description: string }>(
         await t.call("exec", {
           source: 'text(ALL_TOOLS.find(t=>t.name==="apply_patch"));',
         }),
       );
-      expect(direct.tools[0]).toEqual(nested);
+      expect(nested.name).toBe("apply_patch");
       expect(nested.description).toContain("await tools.apply_patch(patch)");
       expect(nested.description).toBe(
         describeContract(
@@ -486,20 +482,17 @@ describe.each([false, true])(
         "*** Add File: web.md",
       );
     });
-    it("retains search options and the actual direct MCP response in the audit", async () => {
+    it("retains Skill discovery options and the actual direct MCP response in the audit", async () => {
       const t = await setup(legacy);
-      const result = await t.call("tool_search", {
-        query: "apply_patch",
-        limit: 1,
-      });
-      const call = t.activity.getCalls({ tool: "tool_search" }).items[0]!;
-      expect(call.args).toEqual({ query: "apply_patch", limit: 1 });
+      const result = await t.call("list_skills", { workdir: t.root });
+      const call = t.activity.getCalls({ tool: "list_skills" }).items[0]!;
+      expect(call.args).toEqual({ workdir: t.root });
       expect(call.status).toBe("completed");
       expect(call.output).toEqual(visibleResult(result));
       expect(call.subcalls).toEqual([]);
       const tools = (await t.client.listTools()).tools;
       expect(
-        tools.find((tool) => tool.name === "tool_search")!.description,
+        tools.find((tool) => tool.name === "list_skills")!.description,
       ).toContain("对象结果在 structuredContent");
       expect(tools[0]!.description).toContain("本机对象结果直接返回");
     });

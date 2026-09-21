@@ -9,7 +9,6 @@ import {
 import { CodeModeService, sessionScopeKey } from "./code-mode/service.js";
 import {
   nativeContracts,
-  nativeDefinition,
   bindNative,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
@@ -76,7 +75,6 @@ interface NativeContext {
     items: { id: string; content: ResourceLink }[];
     bytes: number;
   };
-  search: ReturnType<ToolDiscovery["searchFor"]>;
 }
 export class ExecRuntime {
   readonly codeMode: CodeModeService;
@@ -136,14 +134,6 @@ export class ExecRuntime {
   }
   get ready(): boolean {
     return this.initialized && this.closing === undefined;
-  }
-  /** Web diagnostics search the current complete catalog, just like a newly created exec. */
-  searchTools(query: string, limit: number, signal?: AbortSignal) {
-    const tools = [
-      ...this.native.map(nativeDefinition),
-      ...this.discovery.snapshot(),
-    ];
-    return this.discovery.searchFor(tools)(query, limit, signal);
   }
   initialize(...args: Parameters<ToolDiscovery["initialize"]>): Promise<void> {
     this.initialization ??= this.discovery.initialize(...args).then(() => {
@@ -238,10 +228,6 @@ export class ExecRuntime {
         const value = input as { path: string; detail?: string };
         return viewImage(resolveUserPath(value.path, ctx.cwd), value.detail);
       }
-      case "tool_search": {
-        const value = input as { query: string; limit?: number };
-        return ctx.search(value.query, value.limit ?? 8, ctx.signal);
-      }
       case "request_user_input_async":
         throwIfAborted(ctx.signal);
         return this.notes.ask(
@@ -276,9 +262,7 @@ export class ExecRuntime {
     const registerNativeTools = () => {
       for (const contract of this.native) {
         const direct = directContract(contract);
-        const readOnly = ["list_skills", "view_image", "tool_search"].includes(
-          contract.name,
-        );
+        const readOnly = ["list_skills", "view_image"].includes(contract.name);
         server.registerTool(
           contract.name,
           {
@@ -349,8 +333,6 @@ export class ExecRuntime {
                   contract.name === "import_file"
                     ? [args.file as HostFile]
                     : undefined,
-                search: (query, limit, searchSignal) =>
-                  this.searchTools(query, limit, searchSignal),
               });
               const failed = subcallFailed(value);
               const result = this.notes.attach(
@@ -476,7 +458,6 @@ export class ExecRuntime {
                     files: args.files,
                     signal: nested.signal,
                     attachments,
-                    search,
                   },
                 );
                 callTracker.recordSubcall({
@@ -501,7 +482,6 @@ export class ExecRuntime {
             }),
           );
           const downstream = this.discovery.snapshot();
-          const search = this.discovery.searchFor([...tools, ...downstream]);
           let codeModeState: "yielded" | "completed" | "terminated" | undefined;
           const execResult = await this.codeMode.exec({
             source: args.source,

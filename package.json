@@ -42,7 +42,6 @@
     "ajv-formats": "3.0.1",
     "file-type": "21.3.4",
     "jose": "6.2.12",
-    "minisearch": "7.2.0",
     "node-pty": "1.1.0",
     "toml-eslint-parser": "1.0.3",
     "undici": "7.29.1",

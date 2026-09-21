@@ -189,6 +189,7 @@ export interface McpToolItem {
 export interface McpServersResponse {
   servers: McpServerItem[];
   tools: McpToolItem[];
+  errors: Record<string, string>;
 }
 
 export interface TerminalSessionItem {

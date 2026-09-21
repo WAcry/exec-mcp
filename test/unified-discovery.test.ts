@@ -10,6 +10,9 @@ import { startServer } from "../src/server.js";
 import { startWebServer } from "../src/web/server.js";
 import type { CodeModeToolDefinition } from "../src/code-mode/types.js";
 import { jsonOutput } from "./helpers.js";
+import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
+import { describeContract, nativeContracts } from "../src/catalog.js";
+import { resolveShell } from "../src/host/shell.js";
 
 const cleanups: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -25,7 +28,7 @@ async function setup(legacy: boolean, web = true, downstream = false) {
     import {serveStdio} from '@modelcontextprotocol/server/stdio';
     serveStdio(()=>{const s=new Server({name:'catalog-fixture',version:'1'},{capabilities:{tools:{}}});
     s.setRequestHandler('tools/list',async()=>({tools:[
-      {name:'lookup_fixture',description:'Find a fixture value.',inputSchema:{type:'object',properties:{value:{type:'number'}},required:['value'],additionalProperties:false}},
+      {name:'lookup_fixture',description:'读取夹具数值 / Find a fixture value.',inputSchema:{type:'object',properties:{value:{$ref:'#/$defs/value'}},$defs:{value:{type:'number',minimum:0,description:'待查询数值'}},required:['value'],additionalProperties:false},outputSchema:{type:'object',properties:{value:{type:'number'},name:{type:'string'}},required:['value','name']}},
       {name:'apply_patch',description:'Provider-specific independent method.',inputSchema:{type:'object'}}]}));
     s.setRequestHandler('tools/call',async(req)=>({content:[],structuredContent:{value:req.params.arguments?.value,name:req.params.name}}));return s;});`;
   const config = {
@@ -67,18 +70,17 @@ async function setup(legacy: boolean, web = true, downstream = false) {
   return { root, server, console, client, call };
 }
 
-const allSearches = `
-  const rows=await Promise.all(ALL_TOOLS.map(async tool=>{
-    const hit=(await tools.tool_search({query:tool.name,limit:1})).tools[0];
-    return {name:tool.name,matched:hit?.name===tool.name,same:hit?.description===tool.description};
-  }));
-  text({names:ALL_TOOLS.map(t=>t.name),rows,removed:typeof tools.get_user_input});`;
+const inspectCatalog = `
+  text({names:ALL_TOOLS.map(t=>t.name),rows:ALL_TOOLS.map(tool=>({
+    name:tool.name,bound:typeof tools[tool.name],keys:Object.keys(tool).sort(),
+    complete:tool.description.includes('JSON Schema')
+  })),removed:typeof tools.tool_search});`;
 
 describe.each([false, true])(
   "one catalog over real MCP (legacy=%s)",
   (legacy) => {
     it.each([false, true])(
-      "advertises every native tool and searches every bound method with its exact contract (Web=%s)",
+      "advertises every native tool and exposes every bound method in ALL_TOOLS (Web=%s)",
       async (web) => {
         const s = await setup(legacy, web, true);
         const advertised = (await s.client.listTools()).tools;
@@ -88,46 +90,76 @@ describe.each([false, true])(
         const description = advertised[0]!.description!;
         const headings = advertised.slice(2).map((tool) => tool.name);
         expect(description).not.toContain("输入 JSON Schema");
-        const result = await s.call(allSearches);
+        const result = await s.call(inspectCatalog);
         expect(result.isError, JSON.stringify(result)).not.toBe(true);
         const value = jsonOutput<{
           names: string[];
-          rows: { name: string; matched: boolean; same: boolean }[];
+          rows: {
+            name: string;
+            bound: string;
+            keys: string[];
+            complete: boolean;
+          }[];
           removed: string;
         }>(result);
         expect(headings).toEqual(
           value.names.filter((name) => !name.startsWith("mcp__")),
         );
         for (const name of headings) expect(description).toContain(name);
-        expect(value.rows).toHaveLength(11);
-        expect(
-          value.rows.every((row) => row.matched && row.same),
-          JSON.stringify(value.rows),
-        ).toBe(true);
+        expect(value.rows).toHaveLength(headings.length + 2);
+        for (const row of value.rows) {
+          expect(row.bound).toBe("function");
+          expect(row.keys).toEqual(["description", "name"]);
+          expect(row.complete).toBe(true);
+        }
         expect(value.removed).toBe("undefined");
-        for (const name of ["get_user_input", "revoke_file"]) {
+        for (const name of ["tool_search", "get_user_input", "revoke_file"]) {
           expect(value.names).not.toContain(name);
           expect(description).not.toContain(name);
         }
       },
     );
 
-    it("searches English and Chinese purposes, then calls native freeform and downstream hits in the same exec", async () => {
+    it("filters by names and descriptions, reads full contracts and calls native/downstream entries by exact name", async () => {
       const s = await setup(legacy, true, true);
+      const entries = jsonOutput<{ name: string; description: string }[]>(
+        await s.call(
+          'text(ALL_TOOLS.filter(t => /读取夹具|lookup_fixture/i.test(t.name + " " + t.description)));',
+        ),
+      );
+      expect(entries).toHaveLength(1);
+      const entry = entries[0]!;
+      expect(entry.name).toBe("mcp__fixture__lookup_fixture");
+      const definition = s.server.runtime.discovery
+        .snapshot()
+        .find((t) => t.name === entry.name)!;
+      expect(entry.description).toBe(definition.description);
+      expect(entry.description).toContain(
+        JSON.stringify(definition.inputSchema),
+      );
+      expect(entry.description).toContain('"$defs"');
+      expect(entry.description).toContain('"minimum":0');
+      expect(entry.description).toContain("structuredContent 契约");
+      const native = jsonOutput<{ name: string; description: string }>(
+        await s.call('text(ALL_TOOLS.find(t => t.name === "apply_patch"));'),
+      );
+      expect(native.description).toBe(
+        describeContract(
+          nativeContracts(resolveShell()).find(
+            (t) => t.name === "apply_patch",
+          )!,
+        ),
+      );
       const patch =
         "*** Begin Patch\n*** Add File: matched.txt\n+matched\n*** End Patch\n";
       const result = await s.call(`
-      const english=await tools.tool_search({query:'apply patch',limit:8});
-      const chinese=await tools.tool_search({query:'修改文本文件',limit:8});
-      const exact=await tools.tool_search({query:'apply_patch',limit:1});
-      const patched=await tools[exact.tools[0].name](${JSON.stringify(patch)});
-      const external=await tools.tool_search({query:'mcp__fixture__lookup_fixture',limit:1});
-      const reply=await tools[external.tools[0].name]({value:42});
-      text({english:english.tools.map(t=>t.name),chinese:chinese.tools.map(t=>t.name),exact:exact.tools[0].name,patched,reply});`);
+      const exact=ALL_TOOLS.find(t => t.name === 'apply_patch');
+      const patched=await tools[exact.name](${JSON.stringify(patch)});
+      const external=ALL_TOOLS.find(t => t.name === ${JSON.stringify(entry.name)});
+      const reply=await tools[external.name]({value:42});
+      text({exact:exact.name,patched,reply});`);
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
       expect(jsonOutput(result)).toMatchObject({
-        english: expect.arrayContaining(["apply_patch"]),
-        chinese: expect.arrayContaining(["apply_patch"]),
         exact: "apply_patch",
         patched: { success: true },
         reply: { structuredContent: { value: 42, name: "lookup_fixture" } },
@@ -137,7 +169,7 @@ describe.each([false, true])(
       );
     });
 
-    it("keeps search on an executing cell's snapshot even after a catalog change; the next exec sees the update", async () => {
+    it("keeps metadata and bindings on an executing cell's snapshot; the next exec sees catalog updates", async () => {
       const s = await setup(legacy, false);
       const make = (name: string): CodeModeToolDefinition => ({
         name,
@@ -159,16 +191,17 @@ describe.each([false, true])(
       };
       snapshot.mockReturnValue([first, advance]);
       const result = await s.call(`
-      const before=await tools.tool_search({query:'catalog',limit:50});
+      const before=ALL_TOOLS.filter(t => t.name.includes('catalog'));
       await tools.advance_catalog({});
-      const after=await tools.tool_search({query:'catalog',limit:50});
-      text({names:ALL_TOOLS.map(t=>t.name),before:before.tools,after:after.tools,next:typeof tools.catalog_second});`);
+      const after=ALL_TOOLS.filter(t => t.name.includes('catalog'));
+      text({names:ALL_TOOLS.map(t=>t.name),before,after,value:await tools.catalog_first({}),next:typeof tools.catalog_second});`);
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
       const value = jsonOutput<{
         names: string[];
         before: { name: string }[];
         after: { name: string }[];
         next: string;
+        value: string;
       }>(result);
       expect(value.after).toEqual(value.before);
       expect(value.after.some((tool) => tool.name === "catalog_first")).toBe(
@@ -178,17 +211,44 @@ describe.each([false, true])(
         true,
       );
       expect(value.next).toBe("undefined");
+      expect(value.value).toBe("catalog_first");
       const later = jsonOutput<{
-        rows: { name: string; matched: boolean; same: boolean }[];
+        rows: { name: string; bound: string }[];
         names: string[];
-      }>(await s.call(allSearches));
+      }>(await s.call(inspectCatalog));
       expect(later.names).toContain("catalog_second");
       expect(later.names).not.toContain("catalog_first");
-      expect(later.rows.every((row) => row.matched && row.same)).toBe(true);
+      expect(later.rows.every((row) => row.bound === "function")).toBe(true);
     });
 
-    it("uses the same complete search scope in the Web diagnostic", async () => {
-      const s = await setup(legacy);
+    it("lists full downstream contracts in Web without a separate search endpoint or model tool", async () => {
+      const s = await setup(legacy, true, true);
+      const catalog = await fetch(
+        new URL("api/mcp-servers", s.console!.loopbackUrl),
+      );
+      expect(catalog.status).toBe(200);
+      const body = (await catalog.json()) as {
+        tools: { name: string; description: string }[];
+        errors: Record<string, string>;
+      };
+      expect(body.errors).toEqual({});
+      const expected = jsonOutput(
+        await s.call(
+          'text(ALL_TOOLS.filter(t => t.name.startsWith("mcp__")));',
+        ),
+      );
+      expect(
+        body.tools.map(({ name, description }) => ({ name, description })),
+      ).toEqual(expected);
+      vi.spyOn(s.server.runtime.downstream, "catalogErrors").mockReturnValue({
+        fixture: "连接已断开；目录保留上次快照。",
+      });
+      const disconnected = await fetch(
+        new URL("api/mcp-servers", s.console!.loopbackUrl),
+      );
+      expect((await disconnected.json()).errors).toEqual({
+        fixture: "连接已断开；目录保留上次快照。",
+      });
       const response = await fetch(
         new URL("api/mcp-servers/test-search", s.console!.loopbackUrl),
         {
@@ -197,14 +257,11 @@ describe.each([false, true])(
           body: JSON.stringify({ query: "apply_patch", limit: 1 }),
         },
       );
-      expect(response.status).toBe(200);
-      const expected = jsonOutput(
-        await s.call(
-          'text(await tools.tool_search({query:"apply_patch",limit:1}));',
-        ),
-      );
-      expect(await response.json()).toEqual(expected);
+      expect(response.status).toBe(404);
+      const rejected = await s.client
+        .callTool({ name: "tool_search", arguments: { query: "fixture" } })
+        .catch(() => ({ isError: true }));
+      expect(rejected.isError).toBe(true);
     });
   },
 );
-import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";

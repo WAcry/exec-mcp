@@ -110,8 +110,14 @@ async function fixture(legacy = false) {
       arguments: args,
       ...(scope === undefined ? {} : { _meta: { "openai/session": scope } }),
     });
-  await call("tool_search", { query: "apply_patch", limit: 1 });
-  await call("tool_search", { query: "apply_patch", limit: 1 }, scopeB);
+  const probeArgs = {
+    workdir: root,
+    patch:
+      "*** Begin Patch\n*** Add File: scope-probe.txt\n+ready\n*** End Patch\n",
+  };
+  const probe = (scope = scopeA) => call("apply_patch", probeArgs, scope);
+  await probe();
+  await probe(scopeB);
   const send = async (id: string, text: string, target = hashA) => {
     const response = await api(`/api/sessions/${target}/notes`, "POST", {
       id,
@@ -124,7 +130,19 @@ async function fixture(legacy = false) {
     (await (
       await api(`/api/sessions/${target}/notes`)
     ).json()) as SessionNotesPage;
-  return { root, server, web, client, api, call, send, page, activity };
+  return {
+    root,
+    server,
+    web,
+    client,
+    api,
+    call,
+    send,
+    page,
+    activity,
+    probe,
+    probeArgs,
+  };
 }
 
 describe.each([false, true])(
@@ -267,15 +285,8 @@ describe.each([false, true])(
         ).status,
       ).toBe(404);
       await f.send("after-answer", "其他工作继续");
-      expect(
-        noteBlocks(
-          await f.call("tool_search", { query: "apply_patch" }, scopeB),
-        ),
-      ).toHaveLength(0);
-      const response = await f.call("tool_search", {
-        query: "apply_patch",
-        limit: 1,
-      });
+      expect(noteBlocks(await f.probe(scopeB))).toHaveLength(0);
+      const response = await f.probe();
       expect(response.content).toEqual([]);
       expect(response.structuredContent).toMatchObject({
         user_notes: [
@@ -436,7 +447,6 @@ describe.each([false, true])(
             "*** Begin Patch\n*** Add File: patch.txt\n+fixture\n*** End Patch\n",
         },
         view_image: { path: image },
-        tool_search: { query: "apply_patch", limit: 1 },
         request_user_input_async: {
           questions: [
             { title: "Use which mode?", options: ["First", "Second"] },
@@ -468,9 +478,7 @@ describe.each([false, true])(
       }
       await f.call("wait", { cell_id: cell, terminate: true });
       expect((await f.page()).items).toHaveLength(TOP_LEVEL_TOOL_NAMES.length);
-      expect(
-        noteBlocks(await f.call("tool_search", { query: "write_stdin" })),
-      ).toHaveLength(0);
+      expect(noteBlocks(await f.probe())).toHaveLength(0);
     });
 
     it("keeps a running terminal handle and short user messages in structuredContent without a text mirror", async () => {
@@ -569,14 +577,10 @@ describe.each([false, true])(
       if (resource.type !== "resource_link")
         throw new Error("missing resource link");
       await f.send("private-a", "ONLY_A");
-      expect(
-        noteBlocks(
-          await f.call("tool_search", { query: "apply_patch" }, scopeB),
-        ),
-      ).toHaveLength(0);
+      expect(noteBlocks(await f.probe(scopeB))).toHaveLength(0);
       const noScope = await f.client.callTool({
-        name: "tool_search",
-        arguments: { query: "apply_patch" },
+        name: "apply_patch",
+        arguments: f.probeArgs,
       });
       expect(noteBlocks(noScope)).toHaveLength(0);
       await f.client.listTools();
@@ -706,8 +710,7 @@ describe.each([false, true])(
       await f.send("retry", text);
       await f.send("retry", text);
       expect((await f.page()).items).toHaveLength(1);
-      for (let i = 0; i < 3; i++)
-        await f.call("tool_search", { query: "exec_command" }, scopeB);
+      for (let i = 0; i < 3; i++) await f.probe(scopeB);
       await f.api("/api/calls", "DELETE");
       const groups = (await (
         await f.api("/api/sessions?search=My%20task")

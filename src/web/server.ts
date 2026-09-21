@@ -686,7 +686,11 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       description: tool.description,
       inputSchema: tool.inputSchema,
     }));
-    jsonResponse(res, 200, { servers, tools });
+    jsonResponse(res, 200, {
+      servers,
+      tools,
+      errors: runtime.downstream.catalogErrors(),
+    });
     return;
   }
 
@@ -740,21 +744,6 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
     // Acknowledge before retiring any executing requests; repeated clicks coalesce.
     jsonResponse(res, 202, { accepted: true });
     void context.controller.restart().catch(() => undefined);
-    return;
-  }
-
-  if (pathname === "/api/mcp-servers/test-search" && req.method === "POST") {
-    const body = (await readJsonBody(req)) as {
-      query?: unknown;
-      limit?: unknown;
-    };
-    const query =
-      typeof body.query === "string" ? body.query.slice(0, 2000) : "";
-    const limit =
-      typeof body.limit === "number"
-        ? Math.max(1, Math.min(50, Math.trunc(body.limit)))
-        : 8;
-    jsonResponse(res, 200, runtime.searchTools(query, limit));
     return;
   }
 

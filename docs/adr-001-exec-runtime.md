@@ -17,7 +17,7 @@ tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先�
 ## 决定
 
 顶层 MCP 提供 `exec`、`wait` 及本机/发现工具：list_skills、import_file、export_file、
-exec_command、write_stdin、apply_patch、view_image、tool_search、request_user_input_async。本机工具也保留在 exec 内；
+exec_command、write_stdin、apply_patch、view_image、request_user_input_async。本机工具也保留在 exec 内；
 下游工具继续通过 exec 绑定调用，不把整个下游目录注册成顶层工具。
 直接调用不生成 JavaScript，不经过 V8；两种入口共用命令、补丁、文件和发现实现。
 理由是 PowerShell 反引号、嵌套脚本模板和 Markdown 围栏反复撞上外层 JS 语法，

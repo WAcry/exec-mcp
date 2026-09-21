@@ -1,53 +1,41 @@
 # ADR-002：工具发现与契约
 
-状态：生效。日期：2026-09-17。
+状态：生效。更新：2026-09-21。
 
-## 为什么不是二选一
+## 一个目录，一种下游调用方式
 
-`ALL_TOOLS.filter(...)` 适合已知关键词、名称和目录浏览，但字符串过滤不等于 BM25。
-只保留过滤会把检索质量和排序算法都交给每一段临时代码；
-只保留旧式 search/call 又多出不透明 `tool_id` 和第二套调用入口。
-我们保留一个目录、一种实际调用方式，让筛选和检索各做适合的工作。
+本项目启动时已经连接并验证完整下游目录，工具不是搜索后才获得执行资格。
+采用 Codex Code Mode 的 ALL_TOOLS 与 tools[name](args)：模型可在 JS 中按名称、描述筛选，
+只输出需要阅读的完整契约，再按该契约调用。已知名称与参数时无发现前置步骤。
+移除顶层及嵌套 tool_search、其 BM25 索引与依赖；不保留别名、隐藏工具或第二套 search/call API。
+普通字符串筛选不提供 BM25 相关性排名或同义词召回；接受这一代价，换取单一可见目录和更小的工具表面。
 
 ## 决定
 
 **本机/发现工具分别暴露完整顶层契约，同时保留 exec 内同名调用。**
 exec 描述只列出可用名称、组合语义和补丁/附件参数差异，不再次展开所有本机描述和 schema。
-tool_search 同样提供直接和嵌套入口；按 query 做本地 BM25 检索，返回精确方法名和 exec 内完整契约。
-名称参考 Codex 的 `tool_search`，不再提供 `mcp_tool_search` 别名。
-不提供 `mcp_tool_call`；下游工具统一通过 `tools.mcp__...(...)` 或 `tools[name](args)` 调用。
+下游工具统一通过 `tools.mcp__...(...)` 或 `tools[name](args)` 调用，不另外生成不透明 tool_id 交给模型。
 
 `ALL_TOOLS` 保持 Codex 的普通数组形状 `{name, description}[]`，
 表示本次 exec 已绑定的工具契约，不是对远端持续在线的保证。
-本机工具、内部发现函数和启动时发现的所有启用下游工具都在其中；条目描述给出完整调用契约。
+本机工具和启动时发现的所有启用下游工具都在其中；条目描述给出完整调用契约。
 精确读取用 `find`，列出和筛选用普通 JavaScript，不额外添加 read/call 目录 API。
 
 **不把本机工具从 ALL_TOOLS 删除。** 数组留在运行时不会自动占用模型上下文，
 只有 Agent 输出条目时才进入上下文。保留完整目录能避免“ALL 不包含全部可调用方法”的例外。
-为避免重复，`exec` 不自动打印目录；完整条目留在 V8，仅在显式 text/搜索结果返回时进入模型上下文。
+为避免重复，`exec` 不自动打印目录；完整条目留在 V8，仅在显式 text 返回时进入模型上下文。
 目录条目和直接工具由同一份定义生成；patch 的对象包装、file 的宿主绑定只是 MCP 边界适配。
 exec/wait 不在可嵌套目录内，不引入递归执行或另一套等待语义。
 
-### 搜索与目录使用相同的候选集合
-
-tools.tool_search 搜索本次 ALL_TOOLS 中的全部条目：本机、文件、Skill、搜索函数自身和下游工具。一次 exec 内搜索只使用其绑定快照，不能因服务端目录刷新而返回尚未绑定的新名称。
-结果的名称、完整 description 与 ALL_TOOLS 对应条目一致；精确可调用名优先于其他服务的同名原始名称。
-Web 检索探针使用当前完整目录，与新 exec 相同；下游服务/工具列表页面仍只列下游。
-
-不删除 BM25，不增加 scope 参数、查询别名或第二套 call API。只让 Agent 记住同一个目录，
-比解释“ALL 包含但 search 不搜索”的例外简单；按需建立的是本地索引，不是按需加载/连接工具。
-搜索仍是词项匹配，不是 embedding；结果数量受 limit 限制，不承诺任何同义表达都命中。
-
-固定 Codex 的 tool_search 针对 deferred tools，目的是为下一次模型调用展示工具；其 Code Mode 同时保留 ALL_TOOLS。
-我们有意不照搬这个发现范围：本项目启动已加载完整下游，本机有直接/嵌套入口，
-统一搜索候选与已绑定工具更适合这一结构。保留 Codex 的名称、query/limit、BM25 和直接工具调用形式。
+Web 下游页面直接筛选已经取得的目录并展示完整契约，不调用模型工具、不保留 BM25 检索探针。
+目录查询不连接、执行或解锁工具；仍可查看配置和实际连接/目录错误。
 
 ### 运行时目录与 ChatGPT 已导入元数据是不同层
 
 代码生成的 exec 描述和原生绑定共用同一契约；ChatGPT 连接可以仍保留部署前的工具元数据。
 只开新对话不代替连接的元数据刷新。排查时比较服务实际 tools/list、当前 ALL_TOOLS 和宿主显示的描述，
 不把宿主旧描述推断成运行时工具由 ChatGPT 注入。升级/重启并刷新连接是操作者动作，不在每次结果里重发全套 schema。
-新增本机工具时，测试须同时核对顶层完整契约、ALL_TOOLS、搜索和两种实际调用，不只核对静态工具名列表。
+新增本机工具时，测试须同时核对顶层完整契约、ALL_TOOLS 和两种实际调用，不只核对静态工具名列表。
 
 ## 启动完整加载，按需向模型展示
 
@@ -57,8 +45,8 @@ Web 检索探针使用当前完整目录，与新 exec 相同；下游服务/工
 启动验证不会实际执行 tools/call：工具本身可能有写入、副作用或额外权限，不能以“全面检查”为理由擅自试调用。
 
 这不等于把所有下游 schema 输出给 ChatGPT。完整目录留在服务和 V8 内，本机契约只在其同名顶层工具展开。
-已知精确名称和参数的 Agent（例如有 Skill 指导）可以在第一次 exec 直接调用；tool_search 只是本地 BM25 查询，
-不是加载、鉴权、连接或解锁工具的前置步骤。搜索和调用已绑定工具可在同一个脚本中完成。
+已知精确名称和参数的 Agent（例如有 Skill 指导）可以在第一次 exec 直接调用；
+按需展示不等于延迟加载、鉴权或连接。JS 筛选和调用使用本次 exec 的同一个快照。
 
 单个下游的 startup_timeout_sec 覆盖连接、协议协商和所有目录页，而不是每一页重新计时；
 默认 30 秒，启动不是 ChatGPT connector 调用，不继承 110 秒等待上限。超时可由用户在配置中放宽。
@@ -71,7 +59,7 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 
 一次 exec 的 tools 和 ALL_TOOLS 仍使用相同快照。目录变更通知自动刷新缓存，更新只影响之后创建的 exec，
 不修改正在运行的 V8。断连保留最后验证的绑定以便已知方法仍能发起连接准备；实际发送前必须重新核对当前契约，
-工具移除、变更或无法核对时拒绝发送，不因旧快照绕过撤销。查询只报告连接/目录错误，不要求先搜才能恢复。
+工具移除、变更或无法核对时拒绝发送，不因旧快照绕过撤销；已知工具的调用可以准备新连接，不要求先浏览目录才能恢复。
 已经发送的工具调用失败不自动重试，因为副作用可能已发生。启动成功也不能保证远端不会后来掉线、撤权或要求 step-up 登录。
 
 工具名称稳定且无歧义，禁止规范化碰撞后静默覆盖。用户显式 enabled_tools 是目录选择，不是权限审批；
@@ -97,7 +85,7 @@ HTTP 使用配置中的 headers。缺失/过期凭据或需要用户输入时明
 
 Code Mode 运行规则只在 exec 讲：JS 环境、显式输出、store/load、等待、发现及内层参数差异。
 各顶层工具独立说明自己的原文参数、目录和结果，不要求先读 exec 或 README，也不复制整份其他工具契约。
-检索规则沿用可解释的 BM25，支持标识符和中文词项；不用 embedding 服务，也不要求 Agent 自写排序。
+筛选使用标准 JavaScript，不增加 embedding 服务、目录 DSL 或特殊宿主 helper。
 实际工具说明从可执行定义生成，不在 ADR 维护另一份完整提示词或 schema。
 
 ## 工具说明写给第一次使用它的 Agent
@@ -123,12 +111,17 @@ Codex 的隔离 V8 没有直接网络/文件 API，不意味着工具所在机�
 
 ## 与 Codex 对齐到哪里
 
-参考快照 `8b78600dc85cc265d7e7e827f6aa903875405287` 中，
-[ALL_TOOLS](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-runtime/src/runtime/globals.rs)
-本身只有 name/description；[契约增强](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
-由集成层把调用声明加进 description，并非独立 host 自动补齐。
-[tool_search](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/tool_search_spec.rs)
-采用 BM25，并使匹配工具在后续模型调用可见。
-本项目复用目录、检索和直接调用形状，但有意改为启动时完成下游加载，免去冷启动发现的额外 exec 往返。
+核对 `rust-v0.155.1` 及 2026-09-21 的 main 快照 `f747d23d4bc8a167207fb1c411e221022391fdbb`：
+[Code Mode 说明](https://github.com/openai/codex/blob/f747d23d4bc8a167207fb1c411e221022391fdbb/codex-rs/code-mode-protocol/src/description.rs)
+明确要求通过 ALL_TOOLS 的 name/description 筛选未在提示中展开、但已在 tools 绑定的工具。
+该数组本身只有 name/description；集成层负责把调用声明与 schema 加入描述，并非独立 host 自动补齐。
+[工具组装](https://github.com/openai/codex/blob/f747d23d4bc8a167207fb1c411e221022391fdbb/codex-rs/core/src/tools/spec_plan.rs)
+仍保留 tool_search，取决于模型 supports_search_tool、供应商 namespace 能力及是否有可搜索的 deferred 工具；
+其用途是为后续模型调用暴露匹配工具，不能把某次使用中未出现搜索推断成 Codex 全面删除了搜索。
+[模型元数据](https://github.com/openai/codex/blob/f747d23d4bc8a167207fb1c411e221022391fdbb/codex-rs/models-manager/models.json)
+中 GPT-6 Astra 和 GPT-5.6 系列指定 code_mode_only；组装器在该模式隐藏普通顶层工具，
+且 ToolSearch 类型不绑定为嵌套方法。因此此路径使用 ALL_TOOLS 并非仅靠提示偏好。
+本项目只采用适合自身的 Code Mode 目录路径，不照搬 deferred-tool 展示机制，也不推断某个账户的模型能力标记。
+固定的 host/patch 版本不因此升级。启动时完成下游加载免去冷启动发现的额外 exec 往返。
 代价是服务启动更慢，启用的故障下游会阻止就绪；换来第一轮已知工具可调用且问题在用户终端尽早暴露。
 不修改固定 host，不伪造动态 JavaScript 绑定，不维持第二套 call API。

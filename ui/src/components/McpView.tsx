@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import type { McpServersResponse } from "../types";
 import { apiFetch } from "../lib/api";
 import { CodeBlock } from "./CodeBlock";
-import { Wrench, Server, Search, ChevronRight } from "lucide-react";
+import { Wrench, Server, Search, ChevronRight, RefreshCw } from "lucide-react";
 import { useManagement } from "../context/ManagementContext";
 import { ConfigToggle } from "./ConfigToggle";
 
@@ -10,36 +10,51 @@ export function McpView() {
   const management = useManagement();
   const [data, setData] = useState<McpServersResponse | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResult, setSearchResult] = useState<unknown | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [refresh, setRefresh] = useState(0);
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch<McpServersResponse>("/api/mcp-servers")
-      .then(setData)
-      .catch(console.error);
-  }, [management.data?.revision, management.data?.generation]);
-
-  const handleTestSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-    setIsSearching(true);
-    try {
-      const res = await apiFetch("/api/mcp-servers/test-search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: searchQuery }),
+    const controller = new AbortController();
+    setLoading(true);
+    setError("");
+    apiFetch<McpServersResponse>("/api/mcp-servers", {
+      signal: controller.signal,
+    })
+      .then((value) => {
+        if (!controller.signal.aborted) setData(value);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setError(String(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
       });
-      setSearchResult(res);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+    return () => controller.abort();
+  }, [management.data?.revision, management.data?.generation, refresh]);
+
+  const query = searchQuery.trim().toLowerCase();
+  const tools = (data?.tools ?? []).filter((tool) =>
+    (tool.name + " " + tool.description).toLowerCase().includes(query),
+  );
 
   return (
     <div className="space-y-4">
+      {error && (
+        <p role="alert" className="text-xs text-rose-600">
+          读取目录失败：{error}
+        </p>
+      )}
+      {Object.entries(data?.errors ?? {}).map(([server, message]) => (
+        <p
+          key={server}
+          role="alert"
+          className="text-xs text-rose-600 break-words"
+        >
+          {server}：{message}
+        </p>
+      ))}
       {/* Downstream Server Configurations */}
       <div className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
@@ -55,7 +70,8 @@ export function McpView() {
         </div>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          所有启用的下游在服务就绪前完成连接与工具加载；检索只查询本地目录，不负责解锁工具。
+          所有启用的下游在服务就绪前完成连接与工具加载；Agent 在 exec 中通过
+          ALL_TOOLS 查看契约并调用 tools[name](args)。
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
@@ -151,54 +167,9 @@ export function McpView() {
         </div>
       </div>
 
-      {/* BM25 Tool Search Diagnostic Simulator */}
-      <div className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs space-y-3">
-        <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-zinc-400" />
-          <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-            BM25 检索探针 (tools.tool_search)
-          </h3>
-        </div>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          模拟 ChatGPT 在 Code Mode 中调用{" "}
-          <code>tools.tool_search(&#123; query &#125;)</code>{" "}
-          时返回的命中工具与说明；范围包含本机工具和已加载的下游工具。
-        </p>
-
-        <form onSubmit={handleTestSearch} className="flex gap-2">
-          <input
-            type="text"
-            placeholder="输入检索词（例如: database, search, query, git, file...）"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 px-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
-          />
-          <button
-            type="submit"
-            disabled={isSearching || !searchQuery.trim()}
-            className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            {isSearching ? "检索中..." : "执行检索"}
-          </button>
-        </form>
-
-        {searchResult !== null && (
-          <div className="mt-3 space-y-1.5">
-            <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-              检索命中结果:
-            </span>
-            <CodeBlock
-              code={JSON.stringify(searchResult, null, 2) ?? "null"}
-              language="json"
-              maxHeight="max-h-64"
-            />
-          </div>
-        )}
-      </div>
-
       {/* Available Tools Snapshot */}
       <div className="p-4 rounded-xl bg-white dark:bg-zinc-900/50 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Wrench className="w-4 h-4 text-zinc-400" />
             <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
@@ -206,26 +177,53 @@ export function McpView() {
             </h3>
           </div>
           <span className="text-xs font-mono text-zinc-400">
-            {data?.tools.length ?? 0} 个可调用工具
+            {tools.length} / {data?.tools.length ?? 0} 个工具
           </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Search className="w-4 h-4 shrink-0 text-zinc-400" />
+          <input
+            aria-label="筛选已加载工具"
+            placeholder="按名称或描述筛选"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="min-w-0 flex-1 px-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg"
+          />
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => setRefresh((value) => value + 1)}
+            className="flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            {loading ? "读取中…" : "刷新目录"}
+          </button>
         </div>
 
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
           {!data || data.tools.length === 0 ? (
             <div className="py-6 text-center text-zinc-400 text-xs">
-              当前没有下游工具；请检查启用的服务是否提供工具，以及 enabled_tools
-              的目录选择。
+              {loading
+                ? "正在读取目录…"
+                : "当前没有下游工具；请检查启用服务和 enabled_tools 的目录选择。"}
+            </div>
+          ) : tools.length === 0 ? (
+            <div className="py-6 text-center text-zinc-400 text-xs">
+              没有匹配的工具。
             </div>
           ) : (
-            data.tools.map((t) => (
+            tools.map((t) => (
               <div key={t.name} className="py-2.5 flex flex-col gap-1">
-                <div
+                <button
+                  type="button"
+                  aria-expanded={selectedTool === t.name}
                   onClick={() =>
                     setSelectedTool(selectedTool === t.name ? null : t.name)
                   }
-                  className="flex items-center justify-between cursor-pointer group"
+                  className="flex items-center justify-between gap-2 text-left cursor-pointer group"
                 >
-                  <span className="font-mono text-xs font-bold text-zinc-800 dark:text-zinc-200 group-hover:underline">
+                  <span className="font-mono text-xs font-bold text-zinc-800 dark:text-zinc-200 group-hover:underline break-all">
                     tools.{t.name}
                   </span>
                   <ChevronRight
@@ -233,16 +231,16 @@ export function McpView() {
                       selectedTool === t.name ? "rotate-90" : ""
                     }`}
                   />
-                </div>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                  {t.description}
+                </button>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 break-words">
+                  {t.description.split("\n")[0]}
                 </p>
-                {selectedTool === t.name && t.inputSchema && (
+                {selectedTool === t.name && (
                   <div className="mt-2">
                     <CodeBlock
-                      code={JSON.stringify(t.inputSchema, null, 2)}
-                      language="json"
-                      maxHeight="max-h-48"
+                      code={t.description}
+                      language="text"
+                      maxHeight="max-h-96"
                     />
                   </div>
                 )}

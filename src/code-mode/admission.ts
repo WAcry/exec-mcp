@@ -2,7 +2,6 @@ import type { CodeModeToolName } from "./types.js";
 
 export const NESTED_TOOL_ADMISSION_BUDGET_BYTES = 1024 * 1024 * 1024;
 export const LARGE_NESTED_TOOL_RESERVATION_BYTES = 192 * 1024 * 1024;
-export const SEARCH_NESTED_TOOL_RESERVATION_BYTES = 96 * 1024 * 1024;
 export const DEFAULT_NESTED_TOOL_RESERVATION_BYTES = 16 * 1024 * 1024;
 
 interface Waiter {
@@ -126,9 +125,7 @@ export function nestedToolReservationBytes(toolName: CodeModeToolName): number {
     toolName.name === "view_image"
   )
     return LARGE_NESTED_TOOL_RESERVATION_BYTES;
-  return toolName.name === "tool_search"
-    ? SEARCH_NESTED_TOOL_RESERVATION_BYTES
-    : DEFAULT_NESTED_TOOL_RESERVATION_BYTES;
+  return DEFAULT_NESTED_TOOL_RESERVATION_BYTES;
 }
 
 function assertPositiveSafeInteger(value: number, name: string): void {

@@ -7,7 +7,6 @@ export const NATIVE_TOOL_TITLES = {
   write_stdin: "操作终端",
   apply_patch: "应用补丁",
   view_image: "查看图片",
-  tool_search: "搜索工具",
   request_user_input_async: "异步询问用户",
 } as const;
 export type NativeToolName = keyof typeof NATIVE_TOOL_TITLES;

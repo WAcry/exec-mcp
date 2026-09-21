@@ -229,7 +229,7 @@ enabled = true
     { versionNegotiation: { mode: "auto" } },
   );
   await client.connect(new StreamableHTTPClientTransport(new URL(started.mcp)));
-  // A known downstream method works on the first exec, without tool_search.
+  // A known downstream method works on the first exec without a discovery handshake.
   const direct = await client.callTool({
     name: "exec",
     arguments: { source: "text(await tools.mcp__packaged__echo({}));" },
@@ -254,7 +254,6 @@ enabled = true
       "write_stdin",
       "apply_patch",
       "view_image",
-      "tool_search",
       "request_user_input_async",
     ],
   );
@@ -375,7 +374,8 @@ enabled = true
   assert.equal(result.structuredContent, undefined);
   assert.ok(
     result.content.some(
-      (block) => block.type === "text" && block.text.includes("tool_search"),
+      (block) =>
+        block.type === "text" && block.text.includes("mcp__packaged__echo"),
     ),
   );
   const webCalls = await fetch(new URL("/api/calls", started.web));
@@ -393,22 +393,20 @@ enabled = true
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
-  // The installed package searches exactly the catalog bound to this execution.
+  // The installed package exposes complete, callable metadata without executing a search tool.
   const catalogCheck = await scopedCall(`
-    const complete=await Promise.all(ALL_TOOLS.map(async tool=>{
-      const hit=(await tools.tool_search({query:tool.name,limit:1})).tools[0];
-      return hit?.name===tool.name&&hit?.description===tool.description;
-    }));
-    text({complete:complete.every(Boolean)});`);
+    const complete=ALL_TOOLS.every(tool => typeof tools[tool.name] === 'function' && tool.description.length > 0);
+    const selected=ALL_TOOLS.find(tool => tool.name === 'mcp__packaged__echo');
+    text({complete,selected:!!selected,reply:await tools[selected.name]({})});`);
   assert.ok(!catalogCheck.isError, JSON.stringify(catalogCheck));
-  assert.deepEqual(
-    JSON.parse(
-      catalogCheck.content.find(
-        (block) => block.type === "text" && block.text.startsWith("{"),
-      ).text,
-    ),
-    { complete: true },
+  const catalogResult = JSON.parse(
+    catalogCheck.content.find(
+      (block) => block.type === "text" && block.text.startsWith("{"),
+    ).text,
   );
+  assert.equal(catalogResult.complete, true);
+  assert.equal(catalogResult.selected, true);
+  assert.match(JSON.stringify(catalogResult.reply), /PACKAGED_DIRECT_CALL/);
   const notesScope = createHash("sha256")
     .update("package-smoke-conversation")
     .digest("base64url");
@@ -445,18 +443,19 @@ enabled = true
   });
   assert.equal(directNote.status, 200, await directNote.text());
   const structuredNote = await client.callTool({
-    name: "tool_search",
-    arguments: { query: "apply_patch", limit: 1 },
+    name: "apply_patch",
+    arguments: {
+      workdir: project,
+      patch:
+        "*** Begin Patch\n*** Add File: note-probe.txt\n+ok\n*** End Patch\n",
+    },
     _meta: { "openai/session": "package-smoke-conversation" },
   });
   assert.deepEqual(structuredNote.content, []);
   assert.deepEqual(structuredNote.structuredContent.user_notes, [
     "PACKAGED_STRUCTURED_NOTE",
   ]);
-  assert.equal(
-    structuredNote.structuredContent.result.tools[0].name,
-    "apply_patch",
-  );
+  assert.equal(structuredNote.structuredContent.result.success, true);
   assert.ok(
     !JSON.stringify(structuredNote).includes("installed-structured-note"),
   );

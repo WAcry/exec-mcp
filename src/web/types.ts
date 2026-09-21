@@ -51,6 +51,8 @@ export interface SessionSummary {
   id: string;
   label?: string;
   pendingNotes?: number;
+  pendingQuestions?: number;
+  questionPreview?: string;
   canMessage?: boolean;
   callCount: number;
   errorCount: number;

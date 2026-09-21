@@ -111,11 +111,11 @@ const digest = (value: Buffer | string) =>
 describe.each([false, true])(
   "direct and nested native tools over MCP (legacy=%s)",
   (legacy) => {
-    it("advertises all ten object-input tools with native contracts, no duplicated exec catalog and no V8 startup", async () => {
+    it("advertises all native object-input tools without a duplicated exec catalog or V8 startup", async () => {
       const t = await setup(legacy);
       const tools = (await t.client.listTools()).tools;
       expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
-      expect(tools).toHaveLength(10);
+      expect(tools).toHaveLength(11);
       const exec = tools.find((tool) => tool.name === "exec")!;
       expect(exec.description).not.toContain("输入 JSON Schema");
       expect(exec.description).not.toContain("Lark grammar");

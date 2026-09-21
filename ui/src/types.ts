@@ -58,6 +58,8 @@ export interface SessionSummary {
   id: string;
   label?: string;
   pendingNotes?: number;
+  pendingQuestions?: number;
+  questionPreview?: string;
   canMessage?: boolean;
   callCount: number;
   errorCount: number;
@@ -79,6 +81,10 @@ export interface PaginatedResult<T> {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+export interface SessionPage extends PaginatedResult<SessionSummary> {
+  pendingQuestionsTotal: number;
 }
 
 export interface CodeModeMemoryStatus {

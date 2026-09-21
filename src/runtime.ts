@@ -40,6 +40,7 @@ import { boundModelOutput } from "./code-mode/model-output.js";
 import { ActivityStore } from "./web/activity.js";
 import type { CallRecord } from "./web/types.js";
 import { SessionNotes } from "./session-notes.js";
+import type { RequestUserInput } from "./user-questions.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -241,6 +242,12 @@ export class ExecRuntime {
         const value = input as { query: string; limit?: number };
         return ctx.search(value.query, value.limit ?? 8, ctx.signal);
       }
+      case "request_user_input_async":
+        throwIfAborted(ctx.signal);
+        return this.notes.ask(
+          sessionScopeKey(ctx.scope),
+          input as RequestUserInput,
+        );
       default:
         throw new Error("未知本机工具。");
     }
@@ -265,7 +272,7 @@ export class ExecRuntime {
       idempotentHint: false,
       openWorldHint: true,
     };
-    // Register the same eight native operations alongside exec/wait. No V8 boot or source interpolation.
+    // Direct and nested native operations share implementations, without source interpolation.
     const registerNativeTools = () => {
       for (const contract of this.native) {
         const direct = directContract(contract);
@@ -280,9 +287,11 @@ export class ExecRuntime {
             inputSchema: direct.schema,
             annotations: {
               readOnlyHint: readOnly,
-              destructiveHint: !readOnly,
+              destructiveHint:
+                !readOnly && contract.name !== "request_user_input_async",
               idempotentHint: readOnly,
-              openWorldHint: !readOnly,
+              openWorldHint:
+                !readOnly && contract.name !== "request_user_input_async",
             },
             _meta: {
               ...(this.securitySchemes

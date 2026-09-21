@@ -12,7 +12,8 @@ import { ConfigView } from "./components/ConfigView";
 import { AuthModal } from "./components/AuthModal";
 import { useAuth } from "./context/AuthContext";
 import { apiFetch } from "./lib/api";
-import type { CallSummary, PaginatedResult, SessionSummary } from "./types";
+import type { CallSummary, PaginatedResult, SessionPage } from "./types";
+import type { AnswerDraft } from "./components/QuestionCard";
 import { ManagementProvider, useManagement } from "./context/ManagementContext";
 import { RuntimeControl } from "./components/RuntimeControl";
 import {
@@ -36,6 +37,17 @@ function ConsoleApp() {
   const [notesTarget, setNotesTarget] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, NoteDraft>>({});
   const [notesRevision, setNotesRevision] = useState(0);
+  const [notesTab, setNotesTab] = useState<"notes" | "questions">("notes");
+  const [answerDrafts, setAnswerDrafts] = useState<
+    Record<string, Record<string, AnswerDraft>>
+  >({});
+  const openConversation = (
+    id: string,
+    tab: "notes" | "questions" = "notes",
+  ) => {
+    setNotesTab(tab);
+    setNotesTarget(id);
+  };
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -51,8 +63,8 @@ function ConsoleApp() {
   // Sessions state
   const [sessionsPage, setSessionsPage] = useState(1);
   const [sessionsSearch, setSessionsSearch] = useState("");
-  const [sessionsData, setSessionsData] =
-    useState<PaginatedResult<SessionSummary> | null>(null);
+  const [pendingQuestionsOnly, setPendingQuestionsOnly] = useState(false);
+  const [sessionsData, setSessionsData] = useState<SessionPage | null>(null);
 
   const fetchCalls = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -90,10 +102,11 @@ function ConsoleApp() {
       const params = new URLSearchParams();
       params.set("page", String(sessionsPage));
       params.set("pageSize", "18");
+      if (pendingQuestionsOnly) params.set("pendingQuestions", "true");
       if (sessionsSearch) {
         params.set("search", sessionsSearch);
       }
-      const res = await apiFetch<PaginatedResult<SessionSummary>>(
+      const res = await apiFetch<SessionPage>(
         `/api/sessions?${params.toString()}`,
       );
       setSessionsData(res);
@@ -101,7 +114,7 @@ function ConsoleApp() {
     } catch {
       /* ignore */
     }
-  }, [sessionsPage, sessionsSearch, isAuthenticated]);
+  }, [sessionsPage, sessionsSearch, pendingQuestionsOnly, isAuthenticated]);
 
   // Initial load & Polling fallback
   useEffect(() => {
@@ -176,6 +189,7 @@ function ConsoleApp() {
     setSessionsData(null);
     setNotesTarget(null);
     setNoteDrafts({});
+    setAnswerDrafts({});
   }, [isAuthenticated]);
 
   const handleClearHistory = async () => {
@@ -217,6 +231,20 @@ function ConsoleApp() {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
         <RuntimeControl />
+        {!!sessionsData?.pendingQuestionsTotal && (
+          <button
+            onClick={() => {
+              setActiveTab("sessions");
+              setPendingQuestionsOnly(true);
+              setSessionsSearch("");
+              setSessionsPage(1);
+            }}
+            className="w-full mb-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 px-4 py-3 text-left text-sm text-indigo-700 dark:text-indigo-300 cursor-pointer"
+          >
+            {sessionsData.pendingQuestionsTotal} 个问题待回答
+            <span className="ml-2 text-xs opacity-80">查看所属会话 →</span>
+          </button>
+        )}
         <MemoryWatermark memory={systemStatus?.memory} />
 
         {systemStatus?.stats && <StatsOverview stats={systemStatus.stats} />}
@@ -230,7 +258,7 @@ function ConsoleApp() {
             </span>
             <button
               disabled={callsFilters.sessionId === "unscoped"}
-              onClick={() => setNotesTarget(callsFilters.sessionId!)}
+              onClick={() => openConversation(callsFilters.sessionId!)}
               className="shrink-0 px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 disabled:opacity-40 cursor-pointer"
             >
               发送补充
@@ -255,7 +283,12 @@ function ConsoleApp() {
         {activeTab === "sessions" && (
           <SessionsView
             sessionsData={sessionsData}
-            onMessageSession={setNotesTarget}
+            onMessageSession={openConversation}
+            pendingQuestionsOnly={pendingQuestionsOnly}
+            onPendingQuestionsChange={(value) => {
+              setPendingQuestionsOnly(value);
+              setSessionsPage(1);
+            }}
             onSelectSession={handleSelectSession}
             onPageChange={setSessionsPage}
             onSearchChange={(q) => {
@@ -285,6 +318,23 @@ function ConsoleApp() {
           sessionId={notesTarget}
           draft={noteDrafts[notesTarget]}
           revision={notesRevision}
+          initialTab={notesTab}
+          answerDrafts={answerDrafts[notesTarget] ?? {}}
+          onAnswerDraft={(questionId, draft) =>
+            setAnswerDrafts((previous) => ({
+              ...previous,
+              [notesTarget]: { ...previous[notesTarget], [questionId]: draft },
+            }))
+          }
+          onAnswerSent={(questionId, id) =>
+            setAnswerDrafts((previous) => {
+              if (previous[notesTarget]?.[questionId]?.id !== id)
+                return previous;
+              const next = { ...previous[notesTarget] };
+              delete next[questionId];
+              return { ...previous, [notesTarget]: next };
+            })
+          }
           onClose={() => setNotesTarget(null)}
           onChange={() => {
             void fetchSessions();

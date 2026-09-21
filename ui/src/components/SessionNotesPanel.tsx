@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Send, X, Pencil, Check, MessageSquare } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { draftId } from "../lib/draft-id";
+import { SessionQuestions } from "./SessionQuestions";
+import type { AnswerDraft } from "./QuestionCard";
 import {
   NOTE_LABEL_BYTES,
   NOTE_MAX_BYTES,
@@ -13,11 +16,8 @@ export interface NoteDraft {
   text: string;
 }
 export function newNoteDraft(text: string): NoteDraft {
-  // getRandomValues also works on HTTP LAN origins where randomUUID may be unavailable.
   return {
-    id: [...crypto.getRandomValues(new Uint8Array(16))]
-      .map((v) => v.toString(16).padStart(2, "0"))
-      .join(""),
+    id: draftId(),
     text,
   };
 }
@@ -33,6 +33,10 @@ export function SessionNotesPanel({
   onClose,
   onChange,
   revision,
+  initialTab,
+  answerDrafts,
+  onAnswerDraft,
+  onAnswerSent,
 }: {
   sessionId: string;
   draft: NoteDraft | undefined;
@@ -41,7 +45,12 @@ export function SessionNotesPanel({
   onClose: () => void;
   onChange: () => void;
   revision: number;
+  initialTab: "notes" | "questions";
+  answerDrafts: Record<string, AnswerDraft>;
+  onAnswerDraft: (questionId: string, draft: AnswerDraft) => void;
+  onAnswerSent: (questionId: string, draftId: string) => void;
 }) {
+  const [tab, setTab] = useState(initialTab);
   const [data, setData] = useState<SessionNotesPage | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -56,6 +65,10 @@ export function SessionNotesPanel({
   const base = `/api/sessions/${encodeURIComponent(sessionId)}`;
   const body = draft?.text ?? "";
   const bodyBytes = bytes(body);
+  const questionChanged = () => {
+    setRefresh((v) => v + 1);
+    onChange();
+  };
 
   useEffect(() => {
     mounted.current = true;
@@ -202,7 +215,7 @@ export function SessionNotesPanel({
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
-              会话补充消息
+              会话沟通
             </h2>
             <button
               className={actionClass}
@@ -264,142 +277,192 @@ export function SessionNotesPanel({
           </p>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          <div className="flex items-center justify-between text-xs text-zinc-500">
-            <span>消息记录</span>
-            <span>{data?.pendingCount ?? 0} 条待附带</span>
-          </div>
-          {!data ? (
-            <p className="text-xs text-zinc-500">正在读取…</p>
-          ) : data.items.length === 0 ? (
-            <p className="text-xs text-zinc-500 py-10 text-center">
-              补充上下文、约束或改变主意，直接写在这里。
-            </p>
-          ) : (
-            data.items.map((note) => (
-              <article
-                key={note.id}
-                data-note-id={note.id}
-                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-3 space-y-2"
+        <div
+          role="tablist"
+          aria-label="会话沟通内容"
+          className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 px-4"
+        >
+          <button
+            role="tab"
+            aria-selected={tab === "questions"}
+            onClick={() => setTab("questions")}
+            className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "questions" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
+          >
+            问题
+            {data?.pendingQuestions ? ` · ${data.pendingQuestions} 待回答` : ""}
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "notes"}
+            onClick={() => setTab("notes")}
+            className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "notes" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
+          >
+            补充消息{data?.pendingCount ? ` · ${data.pendingCount} 待附带` : ""}
+          </button>
+        </div>
+        {tab === "questions" && (
+          <>
+            {error && (
+              <p
+                role="alert"
+                className="px-5 pt-3 text-xs text-rose-600 break-words"
               >
-                <div className="flex justify-between flex-wrap gap-1 text-[11px] text-zinc-500">
-                  <span>
-                    #{note.sequence} ·{" "}
-                    {new Date(note.createdAt).toLocaleString()}
-                  </span>
-                  <span>
-                    {note.status === "pending"
-                      ? "待附带"
-                      : note.status === "attached"
-                        ? "已附入工具响应"
-                        : "已撤回"}
-                  </span>
-                </div>
-                <p className="text-sm whitespace-pre-wrap break-words max-h-64 overflow-auto">
-                  {note.text}
+                {error}
+              </p>
+            )}
+            <SessionQuestions
+              sessionId={sessionId}
+              drafts={answerDrafts}
+              onDraft={onAnswerDraft}
+              onSent={onAnswerSent}
+              onChange={questionChanged}
+              revision={revision + refresh}
+            />
+          </>
+        )}
+        {tab === "notes" && (
+          <>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>消息记录</span>
+                <span>{data?.pendingCount ?? 0} 条待附带</span>
+              </div>
+              {!data ? (
+                <p className="text-xs text-zinc-500">正在读取…</p>
+              ) : data.items.length === 0 ? (
+                <p className="text-xs text-zinc-500 py-10 text-center">
+                  补充上下文、约束或改变主意，直接写在这里。
                 </p>
-                {note.callId && (
-                  <p className="text-[10px] font-mono text-zinc-500 break-all">
-                    响应记录：{note.callId}
-                  </p>
-                )}
-                <div className="flex gap-2">
+              ) : (
+                data.items.map((note) => (
+                  <article
+                    key={note.id}
+                    data-note-id={note.id}
+                    className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-3 space-y-2"
+                  >
+                    <div className="flex justify-between flex-wrap gap-1 text-[11px] text-zinc-500">
+                      <span>
+                        #{note.sequence} ·{" "}
+                        {new Date(note.createdAt).toLocaleString()}
+                      </span>
+                      <span>
+                        {note.status === "pending"
+                          ? "待附带"
+                          : note.status === "attached"
+                            ? "已附入工具响应"
+                            : "已撤回"}
+                      </span>
+                    </div>
+                    <p className="text-sm whitespace-pre-wrap break-words max-h-64 overflow-auto">
+                      {note.text}
+                    </p>
+                    {note.callId && (
+                      <p className="text-[10px] font-mono text-zinc-500 break-all">
+                        响应记录：{note.callId}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <button
+                        className={actionClass}
+                        onClick={() => void copy(note.text)}
+                      >
+                        <Copy className="w-3 h-3" />
+                        复制
+                      </button>
+                      {note.status === "pending" && (
+                        <button
+                          className={actionClass}
+                          onClick={() => void withdraw(note.id)}
+                        >
+                          撤回
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))
+              )}
+              {data && data.totalPages > 1 && (
+                <div className="flex justify-between gap-2 text-xs items-center">
                   <button
                     className={actionClass}
-                    onClick={() => void copy(note.text)}
+                    disabled={page <= 1}
+                    onClick={() => setPage((v) => v - 1)}
                   >
-                    <Copy className="w-3 h-3" />
-                    复制
+                    较新
                   </button>
-                  {note.status === "pending" && (
-                    <button
-                      className={actionClass}
-                      onClick={() => void withdraw(note.id)}
-                    >
-                      撤回
-                    </button>
-                  )}
+                  <span>
+                    {page} / {data.totalPages}
+                  </span>
+                  <button
+                    className={actionClass}
+                    disabled={page >= data.totalPages}
+                    onClick={() => setPage((v) => v + 1)}
+                  >
+                    更早
+                  </button>
                 </div>
-              </article>
-            ))
-          )}
-          {data && data.totalPages > 1 && (
-            <div className="flex justify-between gap-2 text-xs items-center">
-              <button
-                className={actionClass}
-                disabled={page <= 1}
-                onClick={() => setPage((v) => v - 1)}
-              >
-                较新
-              </button>
-              <span>
-                {page} / {data.totalPages}
-              </span>
-              <button
-                className={actionClass}
-                disabled={page >= data.totalPages}
-                onClick={() => setPage((v) => v + 1)}
-              >
-                更早
-              </button>
+              )}
             </div>
-          )}
-        </div>
 
-        <footer className="border-t border-zinc-200 dark:border-zinc-800 px-5 py-4 space-y-2">
-          {error && (
-            <p
-              role="alert"
-              className="text-xs text-rose-600 dark:text-rose-400 break-words"
-            >
-              {error}
-            </p>
-          )}
-          {notice && (
-            <p
-              role="status"
-              className="text-xs text-zinc-600 dark:text-zinc-400"
-            >
-              {notice}
-            </p>
-          )}
-          <label htmlFor="note-body" className="text-xs font-medium">
-            发送补充
-          </label>
-          <textarea
-            ref={input}
-            id="note-body"
-            value={body}
-            onChange={(e) => onDraft(newNoteDraft(e.target.value))}
-            maxLength={NOTE_MAX_BYTES}
-            disabled={sending}
-            rows={4}
-            placeholder="例如：先保留现有配置；测试完成后再修改默认值。"
-            className="w-full resize-y max-h-60 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
-          />
-          <div className="flex items-center justify-between">
-            <span
-              className={`text-[11px] font-mono ${bodyBytes > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
-            >
-              {bodyBytes.toLocaleString()} / {NOTE_MAX_BYTES.toLocaleString()}{" "}
-              UTF-8 字节
-            </span>
-            <button
-              className={actionClass}
-              disabled={
-                !data || sending || !body.trim() || bodyBytes > NOTE_MAX_BYTES
-              }
-              onClick={() => void send()}
-            >
-              <Send className="w-3 h-3" />
-              {sending ? "保存中…" : "发送补充"}
-            </button>
-          </div>
-          <p className="text-[11px] leading-relaxed text-zinc-500">
-            按顺序利用响应剩余额度，长消息可能继续排队；已附带不代表已读。临时保留
-            72 小时，程序退出后丢失。可随时复制到原对话。
-          </p>
-        </footer>
+            <footer className="border-t border-zinc-200 dark:border-zinc-800 px-5 py-4 space-y-2">
+              {error && (
+                <p
+                  role="alert"
+                  className="text-xs text-rose-600 dark:text-rose-400 break-words"
+                >
+                  {error}
+                </p>
+              )}
+              {notice && (
+                <p
+                  role="status"
+                  className="text-xs text-zinc-600 dark:text-zinc-400"
+                >
+                  {notice}
+                </p>
+              )}
+              <label htmlFor="note-body" className="text-xs font-medium">
+                发送补充
+              </label>
+              <textarea
+                ref={input}
+                id="note-body"
+                value={body}
+                onChange={(e) => onDraft(newNoteDraft(e.target.value))}
+                maxLength={NOTE_MAX_BYTES}
+                disabled={sending}
+                rows={4}
+                placeholder="例如：先保留现有配置；测试完成后再修改默认值。"
+                className="w-full resize-y max-h-60 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
+              />
+              <div className="flex items-center justify-between">
+                <span
+                  className={`text-[11px] font-mono ${bodyBytes > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
+                >
+                  {bodyBytes.toLocaleString()} /{" "}
+                  {NOTE_MAX_BYTES.toLocaleString()} UTF-8 字节
+                </span>
+                <button
+                  className={actionClass}
+                  disabled={
+                    !data ||
+                    sending ||
+                    !body.trim() ||
+                    bodyBytes > NOTE_MAX_BYTES
+                  }
+                  onClick={() => void send()}
+                >
+                  <Send className="w-3 h-3" />
+                  {sending ? "保存中…" : "发送补充"}
+                </button>
+              </div>
+              <p className="text-[11px] leading-relaxed text-zinc-500">
+                按顺序利用响应剩余额度，长消息可能继续排队；已附带不代表已读。临时保留
+                72 小时，程序退出后丢失。可随时复制到原对话。
+              </p>
+            </footer>
+          </>
+        )}
       </section>
     </div>
   );

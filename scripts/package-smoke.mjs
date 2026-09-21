@@ -255,6 +255,7 @@ enabled = true
       "apply_patch",
       "view_image",
       "tool_search",
+      "request_user_input_async",
     ],
   );
   const project = path.join(temporary, "project with spaces");
@@ -465,7 +466,49 @@ enabled = true
         (block) => block.type === "text" && block.text.startsWith("{"),
       ).text,
     ),
-    { create: "undefined", read: "undefined" },
+    { create: "function", read: "undefined" },
+  );
+  const asked = await client.callTool({
+    name: "request_user_input_async",
+    arguments: {
+      questions: [{ title: "Which packaged mode?", options: ["Safe", "Fast"] }],
+    },
+    _meta: { "openai/session": "package-smoke-conversation" },
+  });
+  assert.equal(asked.structuredContent.accepted, true);
+  const questionsUrl = new URL(
+    `/api/sessions/${notesScope}/questions`,
+    started.web,
+  );
+  const questions = await (await fetch(questionsUrl)).json();
+  assert.equal(questions.pendingCount, 1);
+  const answered = await fetch(
+    new URL(
+      `${questionsUrl.pathname}/${questions.items[0].id}/answer`,
+      started.web,
+    ),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-exec-web": "1" },
+      body: JSON.stringify({
+        id: "installed-answer",
+        option_index: 0,
+        note: "Keep Node 20.",
+      }),
+    },
+  );
+  assert.equal(answered.status, 200, await answered.text());
+  const reply = await scopedCall(
+    "text('continued without polling for the answer');",
+  );
+  assert.ok(
+    reply.content.some(
+      (block) =>
+        block.type === "text" &&
+        block.text.includes("Which packaged mode?") &&
+        block.text.includes("Safe") &&
+        block.text.includes("Keep Node 20."),
+    ),
   );
   for (const route of ["/api/user-input", "/api/user-input/old-request"])
     assert.equal((await fetch(new URL(route, started.web))).status, 404);

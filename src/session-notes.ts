@@ -1,6 +1,19 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { MAX_PAYLOAD_BYTES } from "./limits.js";
 import { normalizeResult } from "./results.js";
+import { randomHandle } from "./util.js";
+import {
+  REQUEST_USER_INPUT_SCHEMA,
+  QUESTION_ANSWER_SCHEMA,
+  type RequestUserInput,
+  type QuestionAnswer,
+} from "./user-questions.js";
+import {
+  formatUserAnswer,
+  type UserQuestionRequest,
+  type UserQuestionsPage,
+  type UserQuestionView,
+} from "./user-questions-types.js";
 import type { PaginatedResult, SessionSummary } from "./web/types.js";
 import {
   NOTE_LABEL_BYTES,
@@ -18,6 +31,7 @@ interface Conversation {
   touched: number;
   sequence: number;
   notes: SessionNote[];
+  requests: UserQuestionRequest[];
 }
 
 export class SessionNoteError extends Error {
@@ -48,6 +62,22 @@ const noteBytes = (n: SessionNote) =>
   1024 + n.text.length * 2 + Buffer.byteLength(n.text);
 const pendingCount = (c: Conversation) =>
   c.notes.filter((n) => n.status === "pending").length;
+const requestBytes = (request: UserQuestionRequest) => {
+  const value = JSON.stringify(request);
+  return 1024 + value.length * 2 + Buffer.byteLength(value);
+};
+const questionPending = (
+  c: Conversation,
+  question: UserQuestionRequest["questions"][number],
+) =>
+  !question.answer ||
+  c.notes.find((n) => n.id === question.answer!.noteId)?.status === "withdrawn";
+const pendingQuestions = (c: Conversation) =>
+  c.requests.reduce(
+    (count, r) =>
+      count + r.questions.filter((q) => questionPending(c, q)).length,
+    0,
+  );
 
 /** Ephemeral user messages, independent of audit eviction and native host generations.
  * All selection/commit operations are synchronous: no reservation protocol or model-side polling.
@@ -97,6 +127,7 @@ export class SessionNotes {
       touched: this.now(),
       sequence: 0,
       notes: [],
+      requests: [],
     });
     this.bytes += 1024;
   }
@@ -130,6 +161,17 @@ export class SessionNotes {
 
   enqueue(id: string, messageId: string, text: string): SessionNote {
     const conversation = this.require(id);
+    const note = this.insertNote(conversation, messageId, text);
+    this.emit(id);
+    return { ...note };
+  }
+
+  private insertNote(
+    conversation: Conversation,
+    messageId: string,
+    text: string,
+    questionId?: string,
+  ): SessionNote {
     if (!/^[A-Za-z0-9_-]{1,80}$/.test(messageId))
       throw new SessionNoteError(400, "消息提交 ID 无效。");
     if (!text.trim()) throw new SessionNoteError(400, "请填写补充内容。");
@@ -140,7 +182,7 @@ export class SessionNotes {
       );
     const prior = conversation.notes.find((n) => n.id === messageId);
     if (prior) {
-      if (prior.text !== text)
+      if (prior.text !== text || prior.questionId !== questionId)
         throw new SessionNoteError(
           409,
           "同一提交 ID 的内容已改变；请作为新消息发送。",
@@ -153,14 +195,173 @@ export class SessionNotes {
       text,
       createdAt: new Date(this.now()).toISOString(),
       status: "pending",
+      ...(questionId ? { questionId } : {}),
     };
     this.admit(noteBytes(note));
     conversation.sequence++;
     conversation.notes.push(note);
     conversation.touched = this.now();
     this.bytes += noteBytes(note);
-    this.emit(id);
     return { ...note };
+  }
+
+  ask(
+    id: string | undefined,
+    raw: RequestUserInput,
+  ): { accepted: true; request_id: string } {
+    if (!this.webUsers)
+      throw new SessionNoteError(
+        503,
+        "异步提问需要已启动的 Web 控制台；请在原对话中与用户沟通。",
+      );
+    if (!id)
+      throw new SessionNoteError(
+        400,
+        "宿主未提供对话标识，无法确定提问归属；请在原对话中与用户沟通。",
+      );
+    const input = REQUEST_USER_INPUT_SCHEMA.parse(raw);
+    this.observe(id);
+    const c = this.require(id);
+    const existing =
+      input.request_key === undefined
+        ? undefined
+        : c.requests.find((r) => r.request_key === input.request_key);
+    if (existing) {
+      if (
+        JSON.stringify(
+          existing.questions.map(({ title, options }) => ({ title, options })),
+        ) !== JSON.stringify(input.questions)
+      )
+        throw new SessionNoteError(
+          409,
+          "同一 request_key 的问题已改变；请使用新的键。",
+        );
+      return { accepted: true, request_id: existing.id };
+    }
+    const request: UserQuestionRequest = {
+      id: randomHandle("ask"),
+      ...(input.request_key === undefined
+        ? {}
+        : { request_key: input.request_key }),
+      createdAt: new Date(this.now()).toISOString(),
+      touched: this.now(),
+      questions: input.questions.map((q) => ({
+        ...q,
+        options: [...q.options],
+        id: randomHandle("q"),
+      })),
+    };
+    const cost = requestBytes(request);
+    this.admit(cost);
+    c.requests.push(request);
+    c.touched = this.now();
+    this.bytes += cost;
+    this.emit(id);
+    return { accepted: true, request_id: request.id };
+  }
+
+  questions(id: string, page = 1, pendingOnly = false): UserQuestionsPage {
+    const c = this.require(id);
+    const all: UserQuestionView[] = c.requests.toReversed().flatMap((r) =>
+      r.questions.map((q) => {
+        const delivery = q.answer
+          ? c.notes.find((n) => n.id === q.answer!.noteId)?.status
+          : undefined;
+        return {
+          ...structuredClone(q),
+          requestId: r.id,
+          createdAt: r.createdAt,
+          pending: questionPending(c, q),
+          ...(delivery ? { delivery } : {}),
+        };
+      }),
+    );
+    // Keep unanswered work visible even when newer requests have already been answered.
+    all.sort((a, b) => Number(b.pending) - Number(a.pending));
+    const filtered = pendingOnly ? all.filter((q) => q.pending) : all;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / 20));
+    const current = Math.max(1, Math.min(page, totalPages));
+    return {
+      items: filtered.slice((current - 1) * 20, current * 20),
+      pendingCount: pendingQuestions(c),
+      total: filtered.length,
+      page: current,
+      totalPages,
+    };
+  }
+
+  answer(id: string, questionId: string, raw: QuestionAnswer): SessionNote {
+    const input = QUESTION_ANSWER_SCHEMA.parse(raw);
+    const c = this.require(id);
+    const request = c.requests.find((r) =>
+      r.questions.some((q) => q.id === questionId),
+    );
+    const question = request?.questions.find((q) => q.id === questionId);
+    if (!request || !question)
+      throw new SessionNoteError(404, "问题不存在或已过期。");
+    if (
+      input.option_index !== null &&
+      input.option_index >= question.options.length
+    )
+      throw new SessionNoteError(400, "请选择此问题提供的选项。");
+    if (input.option_index === null && !input.note.trim())
+      throw new SessionNoteError(400, "选择‘以上都不是’时，请填写自己的回答。");
+    const text = formatUserAnswer(question, input.option_index, input.note);
+    // Every admitted answer can fit even the JSON-based notes channel of a small response.
+    if (
+      Buffer.byteLength(text) > NOTE_MAX_BYTES ||
+      Buffer.byteLength(JSON.stringify(text)) > NOTE_MAX_BYTES
+    )
+      throw new SessionNoteError(
+        413,
+        `问题、选择和补充合计最多 ${NOTE_MAX_BYTES} 字节（含 JSON 编码）；请缩短补充。`,
+      );
+    const noteId = `${question.id}_${input.id}`;
+    const prior = c.notes.find((n) => n.id === noteId);
+    if (prior) {
+      if (prior.text !== text || prior.questionId !== questionId)
+        throw new SessionNoteError(
+          409,
+          "同一次提交的答复已改变；请刷新后确认。",
+        );
+      return { ...prior };
+    }
+    if (!questionPending(c, question))
+      throw new SessionNoteError(
+        409,
+        "此问题已在另一处回答；草稿保留，可复制为补充消息。",
+      );
+    const answeredAt = new Date(this.now()).toISOString();
+    const answer = {
+      option_index: input.option_index,
+      note: input.note,
+      noteId,
+      answeredAt,
+    };
+    const replacement = {
+      ...request,
+      touched: this.now(),
+      questions: request.questions.map((q) =>
+        q === question ? { ...q, answer } : q,
+      ),
+    };
+    const delta = requestBytes(replacement) - requestBytes(request);
+    this.admit(
+      delta +
+        noteBytes({
+          id: noteId,
+          sequence: c.sequence + 1,
+          text,
+          createdAt: answeredAt,
+          status: "pending",
+        }),
+    );
+    const note = this.insertNote(c, noteId, text, questionId);
+    question.answer = answer;
+    request.touched = replacement.touched;
+    this.bytes += delta;
+    this.emit(id);
+    return note;
   }
 
   withdraw(id: string, noteId: string): void {
@@ -185,6 +386,7 @@ export class SessionNotes {
       sessionId: id,
       label: c.label,
       pendingCount: pendingCount(c),
+      pendingQuestions: pendingQuestions(c),
       items: c.notes.slice(Math.max(0, end - 30), end).map((n) => ({ ...n })),
       page: current,
       totalPages,
@@ -195,8 +397,13 @@ export class SessionNotes {
 
   sessions(
     audit: readonly SessionSummary[],
-    options: { page: number; pageSize: number; search?: string },
-  ): PaginatedResult<SessionSummary> {
+    options: {
+      page: number;
+      pageSize: number;
+      search?: string;
+      pendingQuestionsOnly?: boolean;
+    },
+  ): PaginatedResult<SessionSummary> & { pendingQuestionsTotal: number } {
     this.sweep();
     const merged = new Map(
       audit.map((s) => [s.id, { ...s, canMessage: false }]),
@@ -215,11 +422,20 @@ export class SessionNotes {
         ).toISOString(),
         label: c.label,
         pendingNotes: pendingCount(c),
+        pendingQuestions: pendingQuestions(c),
+        questionPreview:
+          c.requests
+            .flatMap((r) => r.questions)
+            .find((q) => questionPending(c, q))
+            ?.title.slice(0, 240) ?? "",
         canMessage: true,
       });
     }
     const query = options.search?.toLowerCase();
     const all = [...merged.values()]
+      .filter(
+        (s) => !options.pendingQuestionsOnly || (s.pendingQuestions ?? 0) > 0,
+      )
       .filter(
         (s) =>
           !query ||
@@ -234,6 +450,10 @@ export class SessionNotes {
     const totalPages = Math.max(1, Math.ceil(all.length / options.pageSize));
     const page = Math.max(1, Math.min(options.page, totalPages));
     return {
+      pendingQuestionsTotal: [...this.conversations.values()].reduce(
+        (sum, c) => sum + pendingQuestions(c),
+        0,
+      ),
       items: all.slice((page - 1) * options.pageSize, page * options.pageSize),
       total: all.length,
       page,
@@ -328,7 +548,12 @@ export class SessionNotes {
         this.bytes -= noteBytes(note);
         return false;
       });
-      if (!c.notes.length && c.touched <= deadline) {
+      c.requests = c.requests.filter((request) => {
+        if (request.touched > deadline) return true;
+        this.bytes -= requestBytes(request);
+        return false;
+      });
+      if (!c.notes.length && !c.requests.length && c.touched <= deadline) {
         this.bytes -= profileBytes(c);
         this.conversations.delete(id);
       }

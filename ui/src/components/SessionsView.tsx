@@ -18,7 +18,9 @@ interface SessionsViewProps {
   onSelectSession: (sessionId: string) => void;
   onPageChange: (page: number) => void;
   onSearchChange: (search: string) => void;
-  onMessageSession: (sessionId: string) => void;
+  onMessageSession: (sessionId: string, tab?: "notes" | "questions") => void;
+  pendingQuestionsOnly: boolean;
+  onPendingQuestionsChange: (value: boolean) => void;
 }
 
 export function SessionsView({
@@ -27,6 +29,8 @@ export function SessionsView({
   onPageChange,
   onSearchChange,
   onMessageSession,
+  pendingQuestionsOnly,
+  onPendingQuestionsChange,
 }: SessionsViewProps) {
   const [query, setQuery] = useState("");
   const [nativeMap, setNativeMap] = useState<Record<string, NativeSessionItem>>(
@@ -56,7 +60,7 @@ export function SessionsView({
 
   return (
     <div className="space-y-3.5">
-      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
         <form onSubmit={handleSearch} className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
@@ -67,6 +71,14 @@ export function SessionsView({
             className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
           />
         </form>
+        <label className="flex gap-2 items-center text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={pendingQuestionsOnly}
+            onChange={(e) => onPendingQuestionsChange(e.target.checked)}
+          />
+          仅看待回答
+        </label>
         <div className="text-xs text-zinc-500 font-mono whitespace-nowrap">
           共 {sessionsData?.total ?? 0} 个对话分组
         </div>
@@ -75,9 +87,15 @@ export function SessionsView({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {!sessionsData || sessionsData.items.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
-            暂未捕获到任何会话。当 ChatGPT 附带{" "}
-            <code>_meta["openai/session"]</code>{" "}
-            调用时，将按不可逆摘要归类建组。
+            {pendingQuestionsOnly ? (
+              "没有待回答的问题。"
+            ) : (
+              <>
+                暂未捕获到任何会话。当 ChatGPT 附带{" "}
+                <code>_meta["openai/session"]</code>{" "}
+                调用时，将按不可逆摘要归类建组。
+              </>
+            )}
           </div>
         ) : (
           sessionsData.items.map((session) => (
@@ -170,6 +188,22 @@ export function SessionsView({
                       {session.lastCall.preview}
                     </p>
                   </div>
+                )}
+                {!!session.pendingQuestions && (
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMessageSession(session.id, "questions");
+                    }}
+                    className="w-full mt-3 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 p-3 text-left cursor-pointer"
+                  >
+                    <span className="block text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                      回答 {session.pendingQuestions} 个问题 →
+                    </span>
+                    <span className="block truncate text-xs mt-1 text-zinc-600 dark:text-zinc-400">
+                      {session.questionPreview}
+                    </span>
+                  </button>
                 )}
               </div>
 

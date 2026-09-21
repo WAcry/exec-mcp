@@ -99,17 +99,13 @@ describe.each([false, true])(
           value.names.filter((name) => !name.startsWith("mcp__")),
         );
         for (const name of headings) expect(description).toContain(name);
-        expect(value.rows).toHaveLength(10);
+        expect(value.rows).toHaveLength(11);
         expect(
           value.rows.every((row) => row.matched && row.same),
           JSON.stringify(value.rows),
         ).toBe(true);
         expect(value.removed).toBe("undefined");
-        for (const name of [
-          "get_user_input",
-          "request_user_input_async",
-          "revoke_file",
-        ]) {
+        for (const name of ["get_user_input", "revoke_file"]) {
           expect(value.names).not.toContain(name);
           expect(description).not.toContain(name);
         }

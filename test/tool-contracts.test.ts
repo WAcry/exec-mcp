@@ -83,6 +83,7 @@ describe("self-contained model-visible contracts", () => {
       "apply_patch",
       "view_image",
       "tool_search",
+      "request_user_input_async",
     ]);
     const description = execDescription(contracts);
     expect(description).toContain("V8 本身");
@@ -165,16 +166,14 @@ describe("self-contained model-visible contracts", () => {
 });
 
 describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
-  it("has no asynchronous question tools or response hooks, even with Web enabled", async () => {
+  it("offers one asynchronous question function and no answer-polling tool", async () => {
     const connection = await connect(
       { web: { enabled: true, host: "127.0.0.1", port: 0 } },
       legacy,
     );
     connections.push(connection);
     const listed = (await connection.client.listTools()).tools;
-    expect(JSON.stringify(listed)).not.toMatch(
-      /request_user_input_async|get_user_input|ack_user_input|用户答复/,
-    );
+    expect(JSON.stringify(listed)).not.toMatch(/get_user_input|ack_user_input/);
     const result = await connection.client.callTool({
       name: "exec",
       arguments: {
@@ -185,7 +184,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     });
     expect(result.isError).not.toBe(true);
     expect(jsonOutput(result)).toEqual({
-      create: "undefined",
+      create: "function",
       read: "undefined",
       names: nativeContracts(resolveShell()).map((tool) => tool.name),
     });

@@ -12,12 +12,14 @@ export interface SessionNote {
   status: "pending" | "attached" | "withdrawn";
   attachedAt?: string;
   callId?: string;
+  questionId?: string;
 }
 
 export interface SessionNotesPage {
   sessionId: string;
   label: string;
   pendingCount: number;
+  pendingQuestions: number;
   items: SessionNote[];
   page: number;
   totalPages: number;

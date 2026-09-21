@@ -20,6 +20,7 @@ import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { modelTextBytes } from "../src/session-notes.js";
 import type { SessionNotesPage } from "../src/session-notes-types.js";
 import type { SessionSummary } from "../src/web/types.js";
+import type { UserQuestionsPage } from "../src/user-questions-types.js";
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -129,12 +130,211 @@ async function fixture(legacy = false) {
 describe.each([false, true])(
   "Web side notes over actual MCP (legacy=%s)",
   (legacy) => {
-    it("keeps all ten tools unchanged, delivers via every outer entry and preserves files/media", async () => {
+    it("submits once from either entry, groups questions by conversation and sends Web answers through user_notes", async () => {
+      const f = await fixture(legacy);
+      const input = {
+        request_key: "database",
+        questions: [
+          { title: "Which database?", options: ["SQLite", "PostgreSQL"] },
+          { title: "How to roll out?", options: ["Tests first", "Deploy now"] },
+        ],
+      };
+      const accepted = jsonOutput<{ accepted: true; request_id: string }>(
+        await f.call("request_user_input_async", input),
+      );
+      expect(accepted).toEqual({
+        accepted: true,
+        request_id: expect.stringMatching(/^ask_/),
+      });
+      const repeated = await f.call("exec", {
+        source: `text(await tools.request_user_input_async(${JSON.stringify(input)}));`,
+      });
+      expect(jsonOutput(repeated)).toEqual(accepted);
+      const grouped = (await (
+        await f.api("/api/sessions?pendingQuestions=true")
+      ).json()) as { pendingQuestionsTotal: number; items: SessionSummary[] };
+      expect(grouped.pendingQuestionsTotal).toBe(2);
+      expect(grouped.items).toHaveLength(1);
+      expect(grouped.items[0]).toMatchObject({
+        id: hashA,
+        pendingQuestions: 2,
+        questionPreview: "Which database?",
+      });
+      const questions = (await (
+        await f.api(`/api/sessions/${hashA}/questions`)
+      ).json()) as UserQuestionsPage;
+      expect(questions.items.map((q) => q.title)).toEqual(
+        input.questions.map((q) => q.title),
+      );
+      expect(questions.items.every((q) => q.pending && !q.answer)).toBe(true);
+      const answer = {
+        id: "choice",
+        option_index: 0,
+        note: "先只实现接口，不要迁移旧数据。\n  保留这行缩进。",
+      };
+      const url = `/api/sessions/${hashA}/questions/${questions.items[0]!.id}/answer`;
+      expect(
+        (
+          await f.api(url, "POST", answer, {
+            Origin: "https://untrusted.example",
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await f.api(url, "POST", {
+            ...answer,
+            title: "browser rewrites original",
+          })
+        ).status,
+      ).toBe(400);
+      const submitted = await f.api(url, "POST", answer);
+      expect(submitted.status).toBe(200);
+      const saved = await submitted.json();
+      expect(await (await f.api(url, "POST", answer)).json()).toEqual(saved);
+      expect(
+        (
+          await f.api(url, "POST", {
+            ...answer,
+            id: "conflicting",
+            option_index: 1,
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await f.api(
+            `/api/sessions/${sessionScopeKey(scopeB)}/questions/${questions.items[0]!.id}/answer`,
+            "POST",
+            answer,
+          )
+        ).status,
+      ).toBe(404);
+      await f.send("after-answer", "其他工作继续");
+      expect(
+        noteBlocks(
+          await f.call("tool_search", { query: "apply_patch" }, scopeB),
+        ),
+      ).toHaveLength(0);
+      const response = await f.call("tool_search", {
+        query: "apply_patch",
+        limit: 1,
+      });
+      expect(response.content).toEqual([]);
+      expect(response.structuredContent).toMatchObject({
+        user_notes: [
+          `问题：Which database?\n选择：SQLite\n补充：${answer.note}`,
+          "其他工作继续",
+        ],
+      });
+      expect(JSON.stringify(response)).not.toContain(questions.items[0]!.id);
+      expect((await f.api(url, "POST", answer)).status).toBe(200); // Lost Web acknowledgements never enqueue again.
+      expect((await f.page()).pendingCount).toBe(0);
+      const second = await f.api(
+        `/api/sessions/${hashA}/questions/${questions.items[1]!.id}/answer`,
+        "POST",
+        { id: "custom", option_index: null, note: "先做影子流量验证。" },
+      );
+      expect(second.status).toBe(200);
+      const failed = await f.call("exec", { source: "const = ;" });
+      expect(failed.isError).toBe(true);
+      expect(noteBlocks(failed)).toEqual([
+        {
+          type: "text",
+          text: "用户额外补充：\n问题：How to roll out?\n选择：以上都不是\n补充：先做影子流量验证。",
+        },
+      ]);
+      const detail = f.activity.getCalls({ tool: "request_user_input_async" });
+      // Audit is deliberately tiny in this fixture; the questions outlive its eviction.
+      expect(detail.total).toBe(0);
+      expect(
+        (await (await f.api(`/api/sessions/${hashA}/questions`)).json())
+          .pendingCount,
+      ).toBe(0);
+    });
+
+    it("requires actual Web availability and a scope, without creating or polling a global question box", async () => {
+      const f = await fixture(legacy);
+      const args = { questions: [{ title: "Choose?", options: ["A", "B"] }] };
+      const missing = await f.client.callTool({
+        name: "request_user_input_async",
+        arguments: args,
+      });
+      expect(missing.isError).toBe(true);
+      expect(JSON.stringify(missing)).toContain("对话标识");
+      const before = await f.api(`/api/sessions/${hashA}/questions`);
+      expect((await before.json()).total).toBe(0);
+      await f.web.close();
+      const unavailable = await f.call("request_user_input_async", args);
+      expect(unavailable.isError).toBe(true);
+      expect(JSON.stringify(unavailable)).toContain("Web");
+      expect(
+        (await f.call("exec", { source: "text('ordinary work continues');" }))
+          .isError,
+      ).not.toBe(true);
+    });
+
+    it("accepts Web answers during a long terminal wait without waking it or leaking answers into another conversation", async () => {
+      const f = await fixture(legacy);
+      await f.call("request_user_input_async", {
+        questions: [
+          { title: "Keep compatibility?", options: ["Keep", "Remove"] },
+        ],
+      });
+      const q = (
+        (await (
+          await f.api(`/api/sessions/${hashA}/questions`)
+        ).json()) as UserQuestionsPage
+      ).items[0]!;
+      const gate = path.join(f.root, "answer-wait-gate");
+      const first = jsonOutput<{ session_id: string }>(
+        await f.call("exec_command", {
+          cmd: nodeCommand(
+            `const fs=require('node:fs');setInterval(()=>{if(fs.existsSync(${JSON.stringify(gate)}))process.exit(0);else console.log('still working');},25);`,
+          ),
+          yield_time_ms: 0,
+        }),
+      );
+      let completed = false;
+      const pending = f
+        .call("write_stdin", { session_id: first.session_id })
+        .finally(() => {
+          completed = true;
+        });
+      await vi.waitFor(
+        () =>
+          expect(
+            f.server.runtime.terminal["sessions"].get(first.session_id)!
+              .exitReady,
+          ).toBeTypeOf("function"),
+        { timeout: 10_000 },
+      );
+      expect(
+        (
+          await f.api(
+            `/api/sessions/${hashA}/questions/${q.id}/answer`,
+            "POST",
+            { id: "during-wait", option_index: 0, note: "Node 20 too." },
+          )
+        ).status,
+      ).toBe(200);
+      expect(completed).toBe(false);
+      await writeFile(gate, "done");
+      const result = await pending;
+      expect(result.structuredContent).toMatchObject({
+        result: { exit_code: 0 },
+        user_notes: [
+          "问题：Keep compatibility?\n选择：Keep\n补充：Node 20 too.",
+        ],
+      });
+    });
+
+    it("delivers notes via every outer entry, including asynchronous questions, and preserves files/media", async () => {
       const f = await fixture(legacy);
       const listed = (await f.client.listTools()).tools;
       expect(listed.map((t) => t.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
       expect(JSON.stringify(listed)).not.toMatch(
-        /ack_user_input|request_user_input_async|get_user_input/,
+        /ack_user_input|get_user_input/,
       );
       const outputFile = path.join(f.root, "output.txt");
       const image = path.join(f.root, "pixel.png");
@@ -181,6 +381,11 @@ describe.each([false, true])(
         },
         view_image: { path: image },
         tool_search: { query: "apply_patch", limit: 1 },
+        request_user_input_async: {
+          questions: [
+            { title: "Use which mode?", options: ["First", "Second"] },
+          ],
+        },
       };
       for (const name of TOP_LEVEL_TOOL_NAMES) {
         await f.send(`note-${name}`, `user supplement for ${name}`);
@@ -206,7 +411,7 @@ describe.each([false, true])(
         expect((await f.page()).pendingCount).toBe(0);
       }
       await f.call("wait", { cell_id: cell, terminate: true });
-      expect((await f.page()).items).toHaveLength(10);
+      expect((await f.page()).items).toHaveLength(TOP_LEVEL_TOOL_NAMES.length);
       expect(
         noteBlocks(await f.call("tool_search", { query: "write_stdin" })),
       ).toHaveLength(0);

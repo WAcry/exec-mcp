@@ -16,8 +16,8 @@ tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先�
 
 ## 决定
 
-顶层 MCP 提供 `exec`、`wait` 及八个本机/发现工具：list_skills、import_file、export_file、
-exec_command、write_stdin、apply_patch、view_image、tool_search。本机工具也保留在 exec 内；
+顶层 MCP 提供 `exec`、`wait` 及本机/发现工具：list_skills、import_file、export_file、
+exec_command、write_stdin、apply_patch、view_image、tool_search、request_user_input_async。本机工具也保留在 exec 内；
 下游工具继续通过 exec 绑定调用，不把整个下游目录注册成顶层工具。
 直接调用不生成 JavaScript，不经过 V8；两种入口共用命令、补丁、文件和发现实现。
 理由是 PowerShell 反引号、嵌套脚本模板和 Markdown 围栏反复撞上外层 JS 语法，
@@ -57,10 +57,10 @@ Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路
 具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
 
 可选独立 Web 管理控制台已交付，见 [ADR-009](adr-009-web-console.md)；不提供 ChatGPT 内嵌 Widget 或下游登录交互。
-不实现同步或异步用户问答、Skill 安装/执行管理，
+不实现同步等待用户、回答轮询工具、Skill 安装/执行管理，
 也不增加 Workspace、子 Agent、持久任务或调度框架。
-需要用户决定时在原 ChatGPT 对话中沟通；不另外维护问题收件箱、答复数据库或浏览器通知。
-操作者主动通过 Web 补充上下文的单向消息见 [ADR-010](adr-010-session-notes.md)，不恢复 Agent 提问流程。
+需要用户决定时可在原 ChatGPT 对话沟通，或异步提交到本会话 Web；不增加答复数据库或浏览器通知。
+主动补充与异步问题的回答统一走现有 User Note 通道，见 [ADR-010](adr-010-session-notes.md)。
 本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。
 原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
 文件既可直接导入/导出也可由 exec 编排，原生绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。

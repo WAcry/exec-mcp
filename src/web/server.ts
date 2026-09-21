@@ -24,8 +24,9 @@ import { configView, mcpServerView } from "./config-view.js";
 import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
-import { inputPreview } from "../tool-names.js";
+import { inputPreview, callPreview } from "../tool-names.js";
 import { SessionNoteError } from "../session-notes.js";
+import { QUESTION_ANSWER_SCHEMA } from "../user-questions.js";
 import { NOTE_MAX_BYTES } from "../session-notes-types.js";
 import {
   WEB_ACTION_HEADER,
@@ -445,10 +446,55 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       runtime.notes.sessions(runtime.activity.sessionSummaries(), {
         page,
         pageSize,
+        pendingQuestionsOnly:
+          reqUrl.searchParams.get("pendingQuestions") === "true",
         ...(search ? { search } : {}),
       }),
     );
     return;
+  }
+
+  const questionRoute =
+    /^\/api\/sessions\/([^/]+)\/questions(?:\/([^/]+)\/answer)?$/.exec(
+      pathname,
+    );
+  if (questionRoute) {
+    let id: string;
+    let questionId: string | undefined;
+    try {
+      id = decodeURIComponent(questionRoute[1]!);
+      questionId =
+        questionRoute[2] === undefined
+          ? undefined
+          : decodeURIComponent(questionRoute[2]);
+    } catch {
+      throw new HttpError(400, "会话或问题 ID 无效。");
+    }
+    if (req.method === "GET" && questionId === undefined) {
+      jsonResponse(
+        res,
+        200,
+        runtime.notes.questions(
+          id,
+          positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
+          reqUrl.searchParams.get("status") === "pending",
+        ),
+      );
+      return;
+    }
+    if (req.method === "POST" && questionId !== undefined) {
+      const parsed = QUESTION_ANSWER_SCHEMA.safeParse(
+        await readJsonBody(req, NOTE_MAX_BYTES * 6 + 2048),
+      );
+      if (!parsed.success)
+        throw new HttpError(
+          400,
+          "答复需要提交 ID、有效选项索引（自定义为 null）和补充文本。",
+        );
+      jsonResponse(res, 200, runtime.notes.answer(id, questionId, parsed.data));
+      return;
+    }
+    throw new HttpError(405, "此问题操作不支持该请求方法。");
   }
 
   const noteRoute = /^\/api\/sessions\/([^/]+)(?:\/notes(?:\/([^/]+))?)?$/.exec(
@@ -560,6 +606,9 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
               : [],
           ),
         ),
+        ...(call.tool === "request_user_input_async"
+          ? { args: { preview: callPreview(call.tool, call.args) } }
+          : {}),
         subcallCount: call.subcalls.length + (call.omittedSubcalls ?? 0),
         truncated: !!call.truncatedFields || !!call.omittedSubcalls,
       })),

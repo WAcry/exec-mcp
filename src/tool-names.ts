@@ -8,6 +8,7 @@ export const NATIVE_TOOL_TITLES = {
   apply_patch: "应用补丁",
   view_image: "查看图片",
   tool_search: "搜索工具",
+  request_user_input_async: "异步询问用户",
 } as const;
 export type NativeToolName = keyof typeof NATIVE_TOOL_TITLES;
 export const TOP_LEVEL_TOOL_NAMES = [
@@ -31,6 +32,12 @@ export function callPreview(
   tool: string,
   args: Record<string, unknown>,
 ): string {
+  if (typeof args.preview === "string") return args.preview;
+  if (tool === "request_user_input_async" && Array.isArray(args.questions)) {
+    const first = args.questions[0] as { title?: unknown } | undefined;
+    if (typeof first?.title === "string")
+      return inputPreview("title", first.title);
+  }
   for (const key of [
     "source",
     "cmd",

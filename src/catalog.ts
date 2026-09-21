@@ -3,6 +3,7 @@ import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import { NATIVE_TOOL_TITLES, type NativeToolName } from "./tool-names.js";
+import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
 import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
@@ -294,6 +295,21 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     schema: SEARCH_SCHEMA,
     description:
       "在本次 ALL_TOOLS 的全部本机及下游工具中进行 BM25 搜索，返回 {tools:[{name,description}],errors}；命中项含完整契约，可在同一 exec 调用。已知名称可直接调用。",
+  },
+  {
+    name: "request_user_input_async",
+    schema: REQUEST_USER_INPUT_SCHEMA,
+    output: {
+      type: "object",
+      properties: {
+        accepted: { const: true, type: "boolean" },
+        request_id: { type: "string" },
+      },
+      required: ["accepted", "request_id"],
+      additionalProperties: false,
+    },
+    description:
+      "在工作中向本对话的 Web 用户询问缺失信息、偏好或约束。问题提交后立即返回 accepted，不等待回答；可继续不依赖答案的工作。用户可选任一选项或‘以上都不是’，并附加补充；题目、选择与补充随后续任一工具响应作为 user_notes 或‘用户额外补充’返回。需已启动 Web 且宿主提供对话标识。",
   },
 ];
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {

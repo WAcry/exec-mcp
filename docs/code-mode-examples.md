@@ -85,7 +85,7 @@ text(await tools.exec_command({
 
 ## 原文参数与 JavaScript 源码
 
-八个本机/发现工具同时支持顶层调用和 exec 内的 tools.*。顶层 exec_command 的 cmd 是 Shell 原文；
+本机/发现工具同时支持顶层调用和 exec 内的 tools.*。顶层 exec_command 的 cmd 是 Shell 原文；
 apply_patch 接收 `{patch,workdir?}`，patch 是补丁原文。传输仍需正常 JSON 编码，但不再增加一层 JavaScript 模板求值。
 因此 PowerShell 的反引号、here-string 中嵌套 JavaScript 的模板及 Markdown 围栏可保留原样。
 

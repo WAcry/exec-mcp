@@ -20,7 +20,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function setup(legacy: boolean, web = true, downstream = false) {
+async function setup(
+  legacy: boolean,
+  web = true,
+  downstream = false,
+  extraTools = 0,
+) {
   const root = await mkdtemp(path.join(tmpdir(), "exec-catalog-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const source = `
@@ -29,7 +34,8 @@ async function setup(legacy: boolean, web = true, downstream = false) {
     serveStdio(()=>{const s=new Server({name:'catalog-fixture',version:'1'},{capabilities:{tools:{}}});
     s.setRequestHandler('tools/list',async()=>({tools:[
       {name:'lookup_fixture',description:'读取夹具数值 / Find a fixture value.',inputSchema:{type:'object',properties:{value:{$ref:'#/$defs/value'}},$defs:{value:{type:'number',minimum:0,description:'待查询数值'}},required:['value'],additionalProperties:false},outputSchema:{type:'object',properties:{value:{type:'number'},name:{type:'string'}},required:['value','name']}},
-      {name:'apply_patch',description:'Provider-specific independent method.',inputSchema:{type:'object'}}]}));
+      {name:'apply_patch',description:'Provider-specific independent method.',inputSchema:{type:'object'}},
+      ...Array.from({length:${extraTools}},(_,i)=>({name:'fixture_'+i,description:'Catalog fixture '+i,inputSchema:{type:'object',properties:{value:{type:'number'}},required:['value'],additionalProperties:false}}))]}));
     s.setRequestHandler('tools/call',async(req)=>({content:[],structuredContent:{value:req.params.arguments?.value,name:req.params.name}}));return s;});`;
   const config = {
     host: "127.0.0.1" as const,
@@ -167,6 +173,34 @@ describe.each([false, true])(
       expect(await readFile(path.join(s.root, "matched.txt"), "utf8")).toBe(
         "matched\n",
       );
+    });
+
+    it("executes the advertised filter example against a large catalog and validates the selected call", async () => {
+      const s = await setup(legacy, false, true, 80);
+      const exec = (await s.client.listTools()).tools.find(
+        (t) => t.name === "exec",
+      )!;
+      const example = exec.description!.match(
+        /目录筛选示例：(text\(ALL_TOOLS\.filter\([^\n]+?\)\))；/,
+      );
+      expect(example).not.toBeNull();
+      const matched = jsonOutput<{ name: string; description: string }[]>(
+        await s.call(example![1]!.replace("关键词", "fixture_79")),
+      );
+      expect(matched).toHaveLength(1);
+      expect(matched[0]!.name).toBe("mcp__fixture__fixture_79");
+      expect(matched[0]!.description).toContain('"required":["value"]');
+      const invoked = await s.call(
+        'const t=ALL_TOOLS.find(t=>t.name==="mcp__fixture__fixture_79");text(await tools[t.name]({value:79}));',
+      );
+      expect(jsonOutput(invoked)).toMatchObject({
+        structuredContent: { value: 79, name: "fixture_79" },
+      });
+      const invalid = await s.call(
+        'await tools.mcp__fixture__fixture_79({value:"invalid"});',
+      );
+      expect(invalid.isError).toBe(true);
+      expect(JSON.stringify(invalid)).toContain("未发送调用");
     });
 
     it("keeps metadata and bindings on an executing cell's snapshot; the next exec sees catalog updates", async () => {

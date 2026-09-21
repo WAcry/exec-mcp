@@ -36,6 +36,9 @@ try {
     path.join(stale, "removed-feature.js"),
     "throw new Error('obsolete module');\n",
   );
+  const staleSearch = path.join(root, "dist", "src", "downstream", "search.js");
+  await mkdir(path.dirname(staleSearch), { recursive: true });
+  await writeFile(staleSearch, "throw new Error('obsolete search');\n");
   const packed = await run(
     process.execPath,
     [npmCli, "pack", "--silent", "--pack-destination", temporary],
@@ -50,6 +53,7 @@ try {
     .split(/\r?\n/)
     .findLast((line) => /^exec-mcp-.*\.tgz$/.test(line));
   assert.ok(filename, "npm pack did not produce a tarball");
+  assert.ok(!(await readdir(path.dirname(staleSearch))).includes("search.js"));
   const isolated = path.join(temporary, "installation");
   await mkdir(isolated);
   await writeFile(

@@ -176,27 +176,23 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
     const value = manager();
     const t = await start(value, tty);
     const waits = vi.spyOn(timing, "waitUntil");
-    let settled = false;
-    const waiting = value
-      .writeStdin({
-        session_id: t.id,
-        chars: tty ? "input\r" : "input\n",
-        ...(tty ? { cols: 80, rows: 30 } : {}),
-      })
-      .finally(() => {
-        settled = true;
-      });
-    await vi.waitFor(() => expect(t.session.exitReady).toBeTypeOf("function"));
+    // The application exits only after release, independently of Windows
+    // ConPTY/profile startup and how quickly close events reach Node.
+    const result = await value.writeStdin({
+      session_id: t.id,
+      chars: tty ? "input\r" : "input\n",
+      ...(tty ? { cols: 80, rows: 30 } : {}),
+    });
     expect(waits).toHaveBeenCalledTimes(1);
-    expect(waits.mock.calls[0]![1]).toBeGreaterThan(150);
-    expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(250);
-    const before = t.session.buffer.bytes;
-    await vi.waitFor(() =>
-      expect(t.session.buffer.bytes).toBeGreaterThan(before),
-    );
-    expect(settled).toBe(false);
+    expect(waits.mock.calls[0]![1]).toBe(250);
+    expect(result.session_id).toBe(t.id);
+    expect(result.output.length).toBeGreaterThan(0);
     await t.release();
-    expect((await waiting).exit_code).toBe(0);
+    const final = await observeTerminal(result, (input) =>
+      value.writeStdin(input),
+    );
+    expect(final.exit_code).toBe(0);
+    expect(plain(final.output)).toContain("FINAL_STDERR\n");
     expect(t.session.exitReady).toBeUndefined();
   });
 
@@ -254,12 +250,18 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
 
 it("returns after a short input window and lets a later read collect EOF-triggered completion", async () => {
   const value = manager();
+  const f = await fixture();
   const first = await value.execCommand(
     {
       cmd: nodeCommand(`
+    const fs=require('node:fs');
     console.log('READY');let input='';
     process.stdin.on('data', c => {input += c;console.log('PROGRESS');});
-    process.stdin.on('end', () => setTimeout(() => {console.log('INPUT:'+input);process.exit(7);}, 350));
+    process.stdin.on('end', () => setInterval(() => {
+      if (fs.existsSync(${JSON.stringify(path.join(f.root, "finish"))})) {
+        console.log('INPUT:'+input);process.exit(7);
+      }
+    }, 20));
   `),
       yield_time_ms: 0,
     },
@@ -272,9 +274,9 @@ it("returns after a short input window and lets a later read collect EOF-trigger
     close_stdin: true,
   });
   expect(waits).toHaveBeenCalledTimes(1);
-  expect(waits.mock.calls[0]![1]).toBeGreaterThan(150);
-  expect(waits.mock.calls[0]![1]).toBeLessThanOrEqual(250);
+  expect(waits.mock.calls[0]![1]).toBe(250);
   expect(result.session_id).toBe(first.session_id);
+  await f.release();
   const final = await observeTerminal(result, (input) =>
     value.writeStdin(input),
   );
@@ -403,24 +405,29 @@ describe.each([false, true])(
   },
 );
 
-it("does not restart a queued read's expired wait budget after another observer releases the session", async () => {
+it("gives each queued input its collection window after acquiring the session, and keeps zero immediate", async () => {
   const value = manager();
   const t = await start(value);
   const waits = vi.spyOn(timing, "waitUntil");
   const first = value.writeStdin({
     session_id: t.id,
-    yield_time_ms: 150,
+    chars: "first",
   });
   const second = value.writeStdin({
     session_id: t.id,
+    chars: "second",
+  });
+  const immediate = value.writeStdin({
+    session_id: t.id,
     yield_time_ms: 0,
   });
-  const results = await Promise.all([first, second]);
-  expect(waits).toHaveBeenCalledTimes(2);
-  expect(waits.mock.calls[1]![1]).toBe(0);
+  const results = await Promise.all([first, second, immediate]);
+  expect(waits.mock.calls.map((call) => call[1])).toEqual([250, 250, 0]);
   expect(results.every((result) => result.session_id === t.id)).toBe(true);
   expect(t.session.exitReady).toBeUndefined();
   expect(t.session.observers).toBe(0);
+  await t.release();
+  expect((await value.writeStdin({ session_id: t.id })).exit_code).toBe(0);
 });
 
 it("continues draining an ended process with the same handle when one response cannot fit all output", async () => {

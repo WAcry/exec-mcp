@@ -15,7 +15,14 @@ import { ArtifactStore } from "../src/files/artifacts.js";
 import { sessionScopeKey } from "../src/code-mode/service.js";
 import { ServiceController } from "../src/service-controller.js";
 import { ConfigEditor } from "../src/web/config-edit.js";
-import { cellId, jsonOutput, nodeCommand, nativeRequest } from "./helpers.js";
+import {
+  cellId,
+  jsonOutput,
+  nodeCommand,
+  nativeRequest,
+  observeTerminal,
+} from "./helpers.js";
+import type { TerminalResult } from "../src/host/terminal.js";
 import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { modelTextBytes } from "../src/session-notes.js";
 import type { SessionNotesPage } from "../src/session-notes-types.js";
@@ -666,11 +673,20 @@ describe.each([false, true])(
 
     it("does not consume a pending note when an in-flight terminal observer is cancelled", async () => {
       const f = await fixture(legacy);
-      const first = jsonOutput<{ session_id: string }>(
+      const gate = path.join(f.root, "cancelled-observer-finish");
+      const first = jsonOutput<TerminalResult>(
         await f.call("exec_command", {
-          cmd: nodeCommand("setInterval(()=>{},1000);"),
+          cmd: nodeCommand(
+            `const fs=require('node:fs');console.log('READY');setInterval(()=>{if(fs.existsSync(${JSON.stringify(gate)}))process.exit(0);},20);`,
+          ),
           yield_time_ms: 0,
         }),
+      );
+      await observeTerminal(
+        first,
+        async (input) =>
+          jsonOutput<TerminalResult>(await f.call("write_stdin", { ...input })),
+        (result) => result.output.includes("READY"),
       );
       const controller = new AbortController();
       const pending = f.client.callTool(
@@ -682,7 +698,7 @@ describe.each([false, true])(
       );
       const rejected = expect(pending).rejects.toThrow();
       const session = f.server.runtime.terminal["sessions"].get(
-        first.session_id,
+        first.session_id!,
       )!;
       await vi.waitFor(() => expect(session.exitReady).toBeTypeOf("function"), {
         timeout: 10_000,
@@ -700,6 +716,15 @@ describe.each([false, true])(
         yield_time_ms: 0,
       });
       expect(noteBlocks(next)).toHaveLength(1);
+      // Cancellation must keep the process alive. Release it explicitly after
+      // that assertion so teardown does not race a still-starting Windows shell.
+      await writeFile(gate, "finish");
+      const final = await observeTerminal(
+        jsonOutput<TerminalResult>(next),
+        async (input) =>
+          jsonOutput<TerminalResult>(await f.call("write_stdin", { ...input })),
+      );
+      expect(final.exit_code).toBe(0);
     });
 
     it("retains messages and manual labels through audit eviction/clear, keeps original text and rejects cross-site changes", async () => {

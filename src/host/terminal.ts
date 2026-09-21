@@ -273,7 +273,9 @@ export class TerminalManager {
               new Promise<void>((resolve) => {
                 session.exitReady = resolve;
               }),
-              Math.max(0, timeoutMs - (performance.now() - started)),
+              // Like Codex, collect after the write/resize and session lock;
+              // input backpressure must not consume the output collection window.
+              timeoutMs,
               signal,
             );
           } finally {

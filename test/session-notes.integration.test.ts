@@ -130,6 +130,62 @@ async function fixture(legacy = false) {
 describe.each([false, true])(
   "Web side notes over actual MCP (legacy=%s)",
   (legacy) => {
+    it("streams one private notification hint for a submitted question request without changing tool acceptance", async () => {
+      const f = await fixture(legacy);
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const stream = await fetch(new URL("/api/events", f.web.loopbackUrl), {
+          signal: controller.signal,
+        });
+        expect(stream.status).toBe(200);
+        const reader = stream.body!.getReader();
+        let buffer = "";
+        const decoder = new TextDecoder();
+        const next = async (): Promise<Record<string, unknown>> => {
+          while (true) {
+            const boundary = buffer.indexOf("\n\n");
+            if (boundary >= 0) {
+              const line = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              if (line.startsWith("data: ")) return JSON.parse(line.slice(6));
+            } else {
+              const chunk = await reader.read();
+              if (chunk.done)
+                throw new Error("Event stream ended before question delivery");
+              buffer += decoder.decode(chunk.value, { stream: true });
+            }
+          }
+        };
+        expect((await next()).type).toBe("connected");
+        const accepted = jsonOutput<{ accepted: boolean; request_id: string }>(
+          await f.call("request_user_input_async", {
+            questions: [
+              {
+                title: "PRIVATE_QUESTION",
+                options: ["PRIVATE_A", "PRIVATE_B"],
+              },
+            ],
+          }),
+        );
+        expect(accepted.accepted).toBe(true);
+        let hint;
+        do {
+          hint = await next();
+        } while (hint.type !== "session:notes");
+        expect(hint).toEqual({
+          type: "session:notes",
+          sessionId: hashA,
+          questionRequest: { id: accepted.request_id, count: 1 },
+        });
+        expect(JSON.stringify(hint)).not.toContain("PRIVATE_");
+        expect(f.server.runtime.notes.questions(hashA).pendingCount).toBe(1);
+        await reader.cancel();
+      } finally {
+        clearTimeout(deadline);
+        controller.abort();
+      }
+    });
     it("submits once from either entry, groups questions by conversation and sends Web answers through user_notes", async () => {
       const f = await fixture(legacy);
       const input = {

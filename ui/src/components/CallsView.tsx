@@ -136,7 +136,7 @@ export function CallsView({
       )}
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-        <form onSubmit={handleSearchSubmit} className="relative flex-1">
+        <form onSubmit={handleSearchSubmit} className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
             type="text"
@@ -147,11 +147,13 @@ export function CallsView({
           />
         </form>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
           {selectedSessionId && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300/80 dark:border-zinc-700 whitespace-nowrap">
+            <div className="flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300/80 dark:border-zinc-700 whitespace-nowrap">
               <Layers className="w-3.5 h-3.5" />
-              <span>{selectedSessionId}</span>
+              <span className="truncate" title={selectedSessionId}>
+                {selectedSessionId}
+              </span>
               <button
                 onClick={() => onSelectSession?.(undefined)}
                 className="hover:text-zinc-900 dark:hover:text-white ml-0.5 font-bold cursor-pointer"
@@ -165,7 +167,7 @@ export function CallsView({
           <select
             value={statusFilter}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">所有状态</option>
             <option value="completed">调用完成</option>
@@ -178,7 +180,7 @@ export function CallsView({
           <select
             value={toolFilter}
             onChange={(e) => handleToolChange(e.target.value)}
-            className="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">所有入口</option>
             {TOP_LEVEL_TOOL_NAMES.map((name) => (

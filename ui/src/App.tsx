@@ -16,6 +16,8 @@ import type { CallSummary, PaginatedResult, SessionPage } from "./types";
 import type { AnswerDraft } from "./components/QuestionCard";
 import { ManagementProvider, useManagement } from "./context/ManagementContext";
 import { RuntimeControl } from "./components/RuntimeControl";
+import { useQuestionNotifications } from "./lib/use-question-notifications";
+import { QuestionNotificationControl } from "./components/QuestionNotificationControl";
 import {
   SessionNotesPanel,
   type NoteDraft,
@@ -48,6 +50,10 @@ function ConsoleApp() {
     setNotesTab(tab);
     setNotesTarget(id);
   };
+  const notifications = useQuestionNotifications(isAuthenticated, (id) =>
+    openConversation(id, "questions"),
+  );
+  const receiveQuestionEvent = notifications.receive;
 
   // Calls state
   const [callsPage, setCallsPage] = useState(1);
@@ -164,7 +170,10 @@ function ConsoleApp() {
             const data = JSON.parse(e.data);
             if (data.type?.startsWith("call:") || data.type === "session:notes")
               scheduleRefresh();
-            if (data.type === "session:notes") setNotesRevision((v) => v + 1);
+            if (data.type === "session:notes") {
+              setNotesRevision((v) => v + 1);
+              receiveQuestionEvent(data);
+            }
           } catch {
             /* ignore ping */
           }
@@ -181,7 +190,13 @@ function ConsoleApp() {
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       eventSource?.close();
     };
-  }, [isAuthenticated, fetchCalls, fetchSessions, refreshStatus]);
+  }, [
+    isAuthenticated,
+    fetchCalls,
+    fetchSessions,
+    refreshStatus,
+    receiveQuestionEvent,
+  ]);
 
   useEffect(() => {
     if (isAuthenticated) return;
@@ -227,6 +242,9 @@ function ConsoleApp() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         online={online}
+        notificationControl={
+          <QuestionNotificationControl notifications={notifications} />
+        }
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5">
@@ -318,7 +336,8 @@ function ConsoleApp() {
           sessionId={notesTarget}
           draft={noteDrafts[notesTarget]}
           revision={notesRevision}
-          initialTab={notesTab}
+          tab={notesTab}
+          onTabChange={setNotesTab}
           answerDrafts={answerDrafts[notesTarget] ?? {}}
           onAnswerDraft={(questionId, draft) =>
             setAnswerDrafts((previous) => ({

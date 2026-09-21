@@ -21,6 +21,7 @@ import {
   NOTE_RETENTION_MS,
   NOTES_RESPONSE_BYTES,
   type SessionNote,
+  type SessionNotesEvent,
   type SessionNotesPage,
 } from "./session-notes-types.js";
 
@@ -86,9 +87,7 @@ export class SessionNotes {
   private conversations = new Map<string, Conversation>();
   private bytes = 0;
   private webUsers = 0;
-  private listeners = new Set<
-    (event: { type: "session:notes"; sessionId: string }) => void
-  >();
+  private listeners = new Set<(event: SessionNotesEvent) => void>();
 
   constructor(
     private readonly maximumBytes = 16 * 1024 * 1024,
@@ -96,9 +95,7 @@ export class SessionNotes {
   ) {}
 
   /** Capture conversation identities only while the management Web server is actually listening. */
-  openWeb(
-    listener: (event: { type: "session:notes"; sessionId: string }) => void,
-  ): () => void {
+  openWeb(listener: (event: SessionNotesEvent) => void): () => void {
     this.webUsers++;
     this.listeners.add(listener);
     let closed = false;
@@ -256,7 +253,7 @@ export class SessionNotes {
     c.requests.push(request);
     c.touched = this.now();
     this.bytes += cost;
-    this.emit(id);
+    this.emit(id, { id: request.id, count: request.questions.length });
     return { accepted: true, request_id: request.id };
   }
 
@@ -560,10 +557,17 @@ export class SessionNotes {
     }
   }
 
-  private emit(id: string): void {
+  private emit(
+    id: string,
+    questionRequest?: SessionNotesEvent["questionRequest"],
+  ): void {
     for (const listener of this.listeners) {
       try {
-        listener({ type: "session:notes", sessionId: id });
+        listener({
+          type: "session:notes",
+          sessionId: id,
+          ...(questionRequest ? { questionRequest } : {}),
+        });
       } catch {
         /* Observers never change delivery. */
       }

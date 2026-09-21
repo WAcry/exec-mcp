@@ -33,7 +33,8 @@ export function SessionNotesPanel({
   onClose,
   onChange,
   revision,
-  initialTab,
+  tab,
+  onTabChange: setTab,
   answerDrafts,
   onAnswerDraft,
   onAnswerSent,
@@ -45,12 +46,12 @@ export function SessionNotesPanel({
   onClose: () => void;
   onChange: () => void;
   revision: number;
-  initialTab: "notes" | "questions";
+  tab: "notes" | "questions";
+  onTabChange: (tab: "notes" | "questions") => void;
   answerDrafts: Record<string, AnswerDraft>;
   onAnswerDraft: (questionId: string, draft: AnswerDraft) => void;
   onAnswerSent: (questionId: string, draftId: string) => void;
 }) {
-  const [tab, setTab] = useState(initialTab);
   const [data, setData] = useState<SessionNotesPage | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");

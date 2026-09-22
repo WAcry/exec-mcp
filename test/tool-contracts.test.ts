@@ -410,7 +410,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
         readFile(path.join(directory, filename)),
       ).rejects.toMatchObject({ code: "ENOENT" });
   });
-  it("runs the exact documented Markdown patch and preserves interpolated delimiters without reparsing them", async () => {
+  it("runs the documented line-array and template patches and preserves their exact contents", async () => {
     const connection = await connect({}, legacy);
     connections.push(connection);
     const directory = await mkdtemp(
@@ -421,17 +421,24 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       new URL("../docs/code-mode-examples.md", import.meta.url),
       "utf8",
     );
-    const section = doc.slice(
-      doc.indexOf("## 在 exec 内构造含 Markdown 的多行补丁"),
+    const heading = "## 在 exec 内构造含 Markdown 的多行补丁";
+    const start = doc.indexOf(heading);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = doc.indexOf("\n## ", start + heading.length);
+    const section = doc.slice(start, end < 0 ? undefined : end);
+    const sources = Array.from(
+      section.matchAll(/^```js\r?\n([\s\S]*?)^```\r?$/gm),
+      (match) => match[1]!,
     );
-    const source = /```js\n([\s\S]*?)\n```/.exec(section)?.[1];
-    expect(source).toBeDefined();
-    const result = await connection.client.callTool({
-      name: "exec",
-      arguments: { workdir: directory, source: source! },
-    });
-    expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    expect(jsonOutput<{ success: boolean }>(result).success).toBe(true);
+    expect(sources).toHaveLength(2);
+    for (const source of sources) {
+      const result = await connection.client.callTool({
+        name: "exec",
+        arguments: { workdir: directory, source },
+      });
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      expect(jsonOutput<{ success: boolean }>(result).success).toBe(true);
+    }
     expect(
       await readFile(path.join(directory, "patch-example.md"), "utf8"),
     ).toBe(
@@ -445,9 +452,16 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
         String.raw`Windows path: C:\work\new\file.txt`,
         String.raw`Regex: Sig\[\d+\]`,
         String.raw`Literal escape: \uXXXX`,
+        "Quotes: \"double\" and 'single'.",
+        "\tTabbed",
+        "    indented",
+        "",
         "",
       ].join("\n"),
     );
+    expect(
+      await readFile(path.join(directory, "template-example.md"), "utf8"),
+    ).toBe("# Notes\nKeep the existing interface.\n");
     // String.raw preserves the escape backslash; template substitutions do not reparse their text.
     const semantics = await connection.client.callTool({
       name: "exec",

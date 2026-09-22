@@ -128,37 +128,68 @@ for (const item of result.contents) {
 
 ## 在 exec 内构造含 Markdown 的多行补丁
 
-exec 的 source 是 JavaScript；Shell 引号、here-string 和嵌套脚本注释不能改变外层 JS 的分隔符语法。
-`String.raw` 保留反斜杠，但模板正文中的反引号仍结束模板，`${...}` 仍执行插值。
-Markdown 的内联代码和围栏使用字符串值插入，字面量 `${name}` 也这样处理；
-插入的值只是文本，不会再次作为 JavaScript 解析。
+`tools.apply_patch(patch)` 接收完整补丁字符串，服务经 stdin 将它传给补丁引擎。
+无论使用哪种 JavaScript 字符串写法，这条调用都不经过 Shell，无需再包一层 heredoc。
+
+```text
+JS source → patch string → tools.apply_patch(patch) → stdin → patch engine
+```
+
+普通引号字符串、模板字面量和 `String.raw` 都能构造补丁。调用者根据正文选择，文件类型和补丁大小不限定写法。
+
+| 构造方式 | 需要留意的语法 |
+| --- | --- |
+| 普通引号字符串，可逐行组成数组后 `.join("\n")` | 反引号和 `${...}` 是普通文本；作为分隔符的引号与反斜杠仍按 JS 转义规则处理。 |
+| 模板字面量 | 可以直接换行；正文中的反引号、`${...}` 与反斜杠有 JS 语义，写入的缩进也会保留。 |
+| `String.raw` 模板 | 保留模板片段中的反斜杠，仍解析反引号和插值；为它们加的转义反斜杠也可能进入补丁。 |
+
+下面用逐行数组展示一份含 Markdown 围栏的补丁。数组在 JS 内拼成字符串后传给工具。
 
 ```js
-const patch = String.raw`*** Begin Patch
-*** Add File: patch-example.md
-+# Review notes
-+Use ${"`"}review${"`"} mode.
-+${"`".repeat(3)}console
-+uv run demo.py
-+${"`".repeat(3)}
-+Literal placeholder: ${"${"}name}
-+Windows path: C:\work\new\file.txt
-+Regex: Sig\[\d+\]
-+Literal escape: \uXXXX
+const patch = [
+  "*** Begin Patch",
+  "*** Add File: patch-example.md",
+  "+# Review notes",
+  "+Use `review` mode.",
+  "+```console",
+  "+uv run demo.py",
+  "+```",
+  "+Literal placeholder: ${name}",
+  "+Windows path: C:\\work\\new\\file.txt",
+  "+Regex: Sig\\[\\d+\\]",
+  "+Literal escape: \\uXXXX",
+  "+Quotes: \"double\" and 'single'.",
+  "+\tTabbed",
+  "+    indented",
+  "+",
+  "*** End Patch",
+  "",
+].join("\n");
+text(await tools.apply_patch(patch));
+```
+
+`.join("\n")` 在各项之间加入真实 LF；`.join("\\n")` 会插入字面量反斜杠和 n。
+普通模板也可直接表达多行正文。
+
+```js
+const patch = `*** Begin Patch
+*** Add File: template-example.md
++# Notes
++Keep the existing interface.
 *** End Patch
 `;
 text(await tools.apply_patch(patch));
 ```
 
-这里的 ``${"`"}`` 通过字符串插值加入反引号，原文中的其他字符保持不变。
-同样适用于更新已有文件和一个补丁内的多个文件。补丁从第一字符的 `*** Begin Patch` 开始，
-标记顶格；新增行的 `+` 后保留文件实际缩进。
+这些方式同样适用于更新文件或在一个补丁中修改多个文件。补丁使用真实换行，以 `*** Begin Patch` 开始，
+标记顶格；新增行的 `+` 后保留文件实际缩进、Tab 和行尾空白。
 
-在 `String.raw` 中用反斜杠转义反引号或美元插值开头，反斜杠也会进入最终文本，不能据此保证原文保真。
-正文已在变量中时直接传递，或把该变量作为一个完整插值值；自动生成 JavaScript 源码时，可由
-`JSON.stringify` 编码已有字符串。它无法修复在求值前就已经语法错误的模板。
-这个例子不需要占位符替换或 Base64；服务也不会猜测改写收到的补丁内容。
-语言语义见 [String.raw](https://tc39.es/ecma262/multipage/text-processing.html#sec-string.raw)。
+已有补丁字符串可直接传入工具。自动生成 JavaScript 源码时，`JSON.stringify` 可编码已有字符串，
+前提是已经取得正确的文本值。Shell 引号、here-string 和其他语言的注释只在各自的解析层生效。
+服务接收构造后的补丁原文，不额外转义或猜测修复。
+语言语义见 [模板字面量](https://tc39.es/ecma262/multipage/ecmascript-language-expressions.html#sec-template-literals)、
+[String.raw](https://tc39.es/ecma262/multipage/text-processing.html#sec-string.raw) 和
+[Array.prototype.join](https://tc39.es/ecma262/multipage/indexed-collections.html#sec-array.prototype.join)。
 
 ## Windows 路径、正则与多行脚本
 

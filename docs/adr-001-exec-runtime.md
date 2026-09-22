@@ -1,83 +1,80 @@
-# ADR-001：执行内核与产品边界
+# ADR-001 执行内核与产品边界
 
-状态：生效。更新：2026-09-22。
+当前生效，2026-09-22 更新。
 
-## 为什么这样选
+## 选择原因
 
-exec-mcp 面向使用 ChatGPT 的开发者，而不是只适用于某个人的一台 Linux 机器。
-每个连接指向用户指定的一台远端机器；工具中的“本机”始终指该机器，不是其他 ChatGPT 容器。
-编排 JS 缺少文件和网络 API，不代表整机离线或 Shell 没有文件权限；能力与信任边界分开描述。
-我们选择贴近 Codex 的调用习惯，同时把机械性的并发、筛选和组合留给代码。
-这是面向目标模型的产品选择，不代表已经证明某种接口对所有模型都最优。
+exec-mcp 供使用 ChatGPT 的开发者在自己的机器上部署。每个连接指向用户指定的一台远端机器，
+工具中的“本机”指这台机器，与 ChatGPT 的其他容器相互独立。
+编排 JS 没有直接文件和网络 API，Shell 及其他工具仍按机器的系统权限访问文件与网络。
 
-目标 ChatGPT 宿主每轮能够发出的外层 tool call 数量有限；具体上限可能随产品变化，
-本决定不依赖某个固定数值。exec-mcp 因此把 `exec` 设计为组合入口：Agent 可以在一次外层
-tool call 中串行或并发执行多个底层工具，并在 JavaScript 内先筛选、转换和聚合结果，
-再只把需要的内容显式交回模型。这样能在有限的外层调用预算内完成更多实际工作，
-并减少仅用于机械编排的模型往返。
+接口参考 Codex，将组合调用和结果筛选交给 JavaScript。目标 ChatGPT 宿主每轮的外层 tool call
+数量有限，具体上限可能变化。Agent 可以在一次 exec 中串行或并发调用多个工具，
+先整理结果，再把需要的部分交回模型，从而减少仅用于编排的往返。
+这项选择面向当前目标模型，效果仍需在实际任务中验证。
 
-## 决定
+## 工具入口与执行顺序
 
-顶层 MCP 只提供 `exec`、`wait`。本机操作与下游 MCP 均绑定为 exec 内的 tools.* 方法，
-本机完整契约直接加入 exec 描述，下游完整契约通过 ALL_TOOLS 按需展示；不保留隐藏的直接工具入口。
-优先贴近目标 Codex 模型的 Code Mode Only 交互，统一编排与输出处理；
-这是对接口一致性的选择，不宣称消除了 JavaScript 字符串构造错误或证明每次调用都更省。
-接受 PowerShell、嵌套模板和 Markdown 增加转义负担；提示中简述多层语言事实，不指定字符串构造算法，
-较长示例留在文档，不引入自创 raw literal、占位符协议或服务端猜测修复。
+顶层 MCP 只提供 exec、wait。本机操作与下游 MCP 均绑定为 exec 内的 tools.* 方法。
+exec 描述包含本机完整契约，下游契约通过 ALL_TOOLS 按需展示，不保留隐藏的直接入口。
+采用 Code Mode Only 是为了贴近目标 Codex 模型的交互方式，并统一处理输出。
+PowerShell、嵌套模板和 Markdown 仍会增加字符串构造难度；描述简述多层语言的语法差异，
+较长示例留在文档。字符串使用 JavaScript 原有语法，服务端不猜测或修复内容。
 
-`exec` 仍是组合与结果处理入口。相互独立的调用可以用
-`Promise.all` 并发；有数据依赖、顺序要求或副作用冲突的调用仍按语义串行，不能为了减少
-外层调用次数而改变正确的执行顺序、错误处理或重试边界。
+独立调用可以用 Promise.all 并发。存在数据依赖或副作用冲突时，按操作要求串行执行，
+保留相应错误处理和重试条件。
 
-四个本机执行原语是 `tools.exec_command`、`tools.write_stdin`、
-`tools.apply_patch`、`tools.view_image`。发现机制另见 [ADR-002](adr-002-tool-discovery.md)。
-读取、搜索、Git 和 worktree 使用系统工具，不再为它们发明产品级生命周期。
+本机执行方法包括 tools.exec_command、tools.write_stdin、tools.apply_patch 和 tools.view_image，
+发现方式见 [ADR-002](adr-002-tool-discovery.md)。读取、搜索及 Git/worktree 操作使用系统工具，
+由调用者安排执行，不另设项目或任务管理功能。
 
-`exec` 的 `source` 是 JavaScript，外层仍是 MCP 对象参数。
-`exec.workdir` 决定本次执行中本机工具的默认目录：省略时为服务用户主目录，
-相对值也以主目录解析；本机工具中的相对路径以本次目录解析。
-`tools.apply_patch` 接收单个完整补丁字符串，通过 stdin 进入固定引擎，不把大补丁塞进命令行参数。
-只有 MCP 外层是 source/workdir/files 对象，不为各本机方法再维护一套对象包装。
-命令可以显式指定自己的目录；Shell 中的 `cd` 不会改变下一次工具调用的默认目录。
-这些规则不改写下游 MCP 的路径、参数或配置。
+## 目录与补丁
 
-保留 Codex patch 语法和执行引擎；工具契约必须包含足够的语法说明，不能只依赖模型记忆。
-补丁可能部分成功，不承诺跨文件原子性。不再为 diff UI 额外生成快照和行统计。
+exec.source 是 JavaScript，MCP 外层使用对象参数。exec.workdir 决定本次本机工具的默认目录，
+省略时使用服务账户主目录，相对值也从主目录解析。本机工具中的相对路径基于本次目录。
+命令可以单独指定目录，Shell 的 cd 只影响该进程；下游 MCP 的路径与参数保持原有语义。
 
-采用 TypeScript/Node 承载 MCP、配置、下游连接和平台适配；
-执行 JavaScript 和应用补丁复用同一明确固定版本的 Codex 组件。
-使用官方 MCP SDK，不启动完整 Codex App Server 或模型循环，不读机器上 Codex 的配置与数据库。
-升级版本是显式依赖更新，需要验证契约；不随系统 Codex 或某个源码 checkout 自动升级。
+tools.apply_patch 接收一个完整补丁字符串，经 stdin 进入固定引擎，避免命令行参数长度限制。
+MCP 外层使用 source/workdir/files 对象，exec 内各方法保留自己的参数形状，不另建直接调用包装。
 
-Windows、Linux、macOS 是正式产品目标，Windows 必须有原生执行路径，不以 WSL 冒充。
-系统路径、Shell、PTY、子进程树与安装位置由平台适配处理；
-实例配置提供 Shell 默认值，命令可单次覆盖且不影响后续调用；默认说明与执行共用同一解析结果，见 [ADR-007](adr-007-command-shell.md)。
-不能把 `bash`、POSIX 信号、systemd 或某台机器的主目录写成共同前提。
-发布必须验证各目标平台的 host、补丁入口和进程清理，不能只检查平台包“存在”。
-具体 OS/CPU 支持矩阵与版本 pin 留在实现和发布事实中，不在 ADR 提前承诺。
+补丁沿用 Codex 的语法和引擎，工具描述提供完整语法。多文件补丁可能部分成功，
+调用者需检查结果；当前不为 diff UI 额外生成快照或行统计。
 
-可选独立 Web 管理控制台已交付，见 [ADR-009](adr-009-web-console.md)；不提供 ChatGPT 内嵌 Widget 或下游登录交互。
-不实现同步等待用户、回答轮询工具、Skill 安装/执行管理，
-也不增加 Workspace、子 Agent、持久任务或调度框架。
-需要用户决定时可在原 ChatGPT 对话沟通，或异步提交到本会话 Web；浏览器通知沿用 ADR-010，不增加答复数据库。
-主动补充与异步问题的回答统一走现有 User Note 通道，见 [ADR-010](adr-010-session-notes.md)。
-本机 Skill 仅提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)；不改变执行内核。
-原生图片/音频内容不属于 UI，仍可由显式输出助手发送。
-文件由 exec 编排，原生绑定和交付通道见 [ADR-005](adr-005-file-transfer.md)。
+## 组件与平台
+
+TypeScript/Node 负责 MCP、配置、下游连接和平台适配。JavaScript 与补丁执行复用同一固定版本的
+Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Server 或模型循环，
+服务也不读取机器上 Codex 的配置与数据库。组件升级通过显式依赖更新，并验证调用契约。
+
+Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。
+系统路径、Shell、PTY 和进程树由平台适配处理，安装位置也按系统选择。
+实例默认 Shell 与单次覆盖见 [ADR-007](adr-007-command-shell.md)，执行器和默认说明共用解析结果。
+各平台分别验证 host、补丁入口和进程清理；bash、POSIX 信号或 systemd 等能力仅用于适用的平台。
+具体 OS/CPU 支持与版本 pin 以实现和对应发布的验证结果为准。
+
+## 产品范围
+
+已提供可选 Web 管理控制台，见 [ADR-009](adr-009-web-console.md)。控制台独立于 ChatGPT，
+不提供内嵌 Widget 或下游登录交互。需要用户决定时，可以在原 ChatGPT 对话沟通，
+或把问题异步提交到本会话 Web；回答与主动补充共用 User Note 通道，见 [ADR-010](adr-010-session-notes.md)。
+问题立即提交返回，服务不同步等待用户，也没有答案轮询工具或答复数据库。
+
+本机 Skill 只提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)。
+Skill 安装与执行管理、Workspace、子 Agent、持久任务及调度框架均不在当前范围内。
+原生图片和音频可由输出助手显式发送；文件由 exec 编排，交付方式见 [ADR-005](adr-005-file-transfer.md)。
 
 ## 接受的代价
 
-exec 描述包含本机完整契约，比单纯编排说明更长，但无需新 Agent 额外发现常用工具。
-原生 host 成为全部模型工具操作的执行依赖；其不可用时没有绕过 V8 的命令或文件入口。
-复用二进制减少重造成本，却仍有协议、包装方式和版本兼容成本；
-旧 codex-mcp 已验证的取消、结果保真和连接机制可以选择性复用，旧产品约束不能整体继承。
+exec 描述包含本机完整契约，篇幅较长，但新 Agent 可以直接使用常用工具。
+全部模型工具操作依赖原生 host，host 不可用时也无法执行命令或文件操作。
+复用二进制减少了开发量，同时需要维护协议和版本兼容。旧 codex-mcp 的实现按功能选用，
+取消、结果保真和连接机制仍需验证，旧项目的产品约束只在明确采纳后沿用。
 
-## 事实依据
+## 参考源码
 
-参考 Codex 快照 `8b78600dc85cc265d7e7e827f6aa903875405287`：
+参考 Codex 快照 `8b78600dc85cc265d7e7e827f6aa903875405287`。
 [补丁工具](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
-是 freeform；[Code Mode 契约转换](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
-把 freeform 参数映射成字符串。
+采用 freeform，[Code Mode 契约转换](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
+将其映射为字符串参数。
 [平台包装脚本](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-cli/scripts/build_npm_package.py)
-可用于核对平台分发，但不构成 exec-mcp 已完成跨平台验证的证据。
-这些是决策参考，不是对运行版本的隐式 pin。
+用于核对上游平台分发；exec-mcp 的跨平台支持仍需单独验证。运行版本由项目依赖显式固定。

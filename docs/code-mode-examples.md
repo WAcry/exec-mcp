@@ -2,19 +2,19 @@
 
 以下片段是 `exec.source` 中的 JavaScript；Shell 代码放在 `tools.exec_command({cmd})` 中。
 调用发生在 exec-mcp 的实际机器，与其他独立容器的文件、进程和网络不共享。
-示例展示可行写法，不是强制流程；完整参数和返回契约以工具描述为准。
+示例供按需参考，完整参数和返回契约以工具描述为准。
 
 ## 输出先在代码里筛选
 
-最终返回模型的文本合计上限为 36,000 UTF-8 字节。这是针对实际宿主输出窗口的保守保护，不是精确 token 计数，
-也不是嵌套工具结果的上限。先处理原始结果，再决定 text 哪些部分：
+最终返回模型的文本合计最多 36,000 UTF-8 字节，按目标宿主的输出容量设置，token 数仍取决于模型。
+嵌套工具先返回原值，脚本再选择要用 text 展示的部分。
 
 ```js
 const result = await tools.exec_command({ cmd: "git status --short" });
 text(result);
 ```
 
-较大的日志可以先保存和查找，再只输出摘要：
+较大的日志可以先保存，再查找错误并输出摘要。
 
 ```js
 const result = await tools.exec_command({ cmd: "your-build-command" });
@@ -29,7 +29,7 @@ text({
 });
 ```
 
-后续可从 `load("build-result")` 分段取内容。store 依赖当前 ChatGPT 对话关联，是临时内存，不是持久文件。
+后续可从 `load("build-result")` 分段取内容。store 按当前 ChatGPT 对话关联，保存在临时内存中。
 上限保护只保留最终文本首尾，被省略内容不会由 wait 自动补发；在结束前保存需要复用的数据。
 终端每次最多交回 4 MiB，未读内容用同一 session_id 的 write_stdin 续取；每个进程默认缓冲 16 MiB。
 超过缓冲后中间日志会丢弃并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
@@ -38,10 +38,10 @@ text({
 ## 终端收集窗口与外层等待
 
 `tools.write_stdin` 省略 `chars` 或传空字符串时只收集未读输出，默认 5 秒；非空输入默认 250 毫秒。
-两者都在进程结束或窗口到期时返回，已有和新增日志不提前结束窗口。有效范围分别为 5000–300000、250–30000 毫秒，
+两者都在进程结束或窗口到期时返回，已有和新增日志不提前结束窗口。有效范围分别为 5000 至 300000、250 至 30000 毫秒，
 另保留显式 `0` 立即读取。超时不终止进程；返回 session_id 时后续继续使用该句柄。
 
-长任务可以在一个 exec 中等待更久，并在结果返回前筛选：
+长任务可以在一个 exec 中等待更久，返回结果前再筛选内容。
 
 ```js
 const result = await tools.write_stdin({ session_id: "之前的句柄", yield_time_ms: 300000 });
@@ -52,13 +52,13 @@ exec 本身仍可能先交回 `cell_id`，此后由外层 `wait` 续取。内层
 外层 wait 超时也不重启或重放内层调用。不要重新执行原命令来续取结果。
 等待不扩大日志或模型输出预算；已退出但剩余输出超过单次读取上限时，同样需要继续读取。
 
-## 脚本完成与命令成功是两件事
+## 判断脚本与命令结果
 
 `Script completed` 只表示 JavaScript 已结束；嵌套命令仍可能返回 `exit_code: 1`。
 `exit_code` 是 Shell 退出码，管道的 `stderr_bytes` 表示累计收到的错误流字节（包括可能已滚动移除的内容），
 错误流也可能只是进度或警告；PTY 本身合并流，没有独立错误流计数。
 
-例如 PowerShell：
+下面的 PowerShell 命令会先输出错误，再输出成功文字。
 
 ```js
 text(await tools.exec_command({
@@ -66,7 +66,8 @@ text(await tools.exec_command({
 }));
 ```
 
-这里可能 `exit_code: 0`，但错误文本和 stderr_bytes 仍然存在。需要遇到 PowerShell 错误即停止时，由调用方显式设定：
+这里可能返回 `exit_code: 0`，错误文本和 stderr_bytes 仍然存在。
+需要遇到 PowerShell 错误即停止时，可以显式设置错误策略。
 
 ```js
 text(await tools.exec_command({
@@ -79,7 +80,7 @@ text(await tools.exec_command({
 ## 在 exec 中查阅下游工具
 
 `ALL_TOOLS` 是 `{name, description}[]`；description 包含完整的输入、返回契约，工具名称与 `tools` 上的绑定一致。
-按名称或描述筛选并显式输出，或只列名称缩小范围：
+可按名称或描述筛选后输出，也可只列名称缩小范围。
 
 ```js
 text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.description)));
@@ -90,8 +91,8 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 
 ## MCP 资源
 
-资源是下游服务提供的数据，不是 ALL_TOOLS 中的可调用方法。比如文档原文、数据库结构或参数化查询上下文。
-三个资源辅助方法仍在 exec 内，不增加顶层工具。已有资源 URI 可以直接读取；只有不清楚目录时才需要列出：
+资源是下游服务提供的数据，如文档原文、数据库结构或参数化上下文；ALL_TOOLS 则列出可调用方法。
+三个资源辅助方法在 exec 内使用。已知 URI 可以直接读取，需要查目录时可先列出资源。
 
 ```js
 const result = await tools.list_mcp_resources({});
@@ -99,14 +100,15 @@ text(result);
 ```
 
 每条目录带 `server`。以下以已配置的 `docs` 服务为例，指定服务只取一页；
-`nextCursor` 是不透明值，和同一个服务、同一种列表一起原样传回：
+续页时把 `nextCursor` 原样传回同一个服务、同一种列表。
 
 ```js
 const page = await tools.list_mcp_resources({ server: "docs" });
 text(page);
 ```
 
-用列表或工具返回的资源 URI 读取。返回的 `contents` 是资源条目，不是 MCP 工具的 `content`：
+用列表或工具返回的 URI 读取资源，返回条目在 `contents` 字段中。
+MCP 工具结果使用的 `content` 是另一个字段，读取时按各自结构处理。
 
 ```js
 const result = await tools.read_mcp_resource({
@@ -148,7 +150,7 @@ const patch = String.raw`*** Begin Patch
 text(await tools.apply_patch(patch));
 ```
 
-这里的 ``${"`"}`` 是字符串插值，不是占位符替换；没有需要保证“不出现在正文里”的特殊符号。
+这里的 ``${"`"}`` 通过字符串插值加入反引号，原文中的其他字符保持不变。
 同样适用于更新已有文件和一个补丁内的多个文件。补丁从第一字符的 `*** Begin Patch` 开始，
 标记顶格；新增行的 `+` 后保留文件实际缩进。
 
@@ -173,11 +175,11 @@ $matched = 'Sig[42]' | Select-String -Pattern $pattern
 text(await tools.exec_command({ cmd }));
 ```
 
-String.raw 模板仍有 JavaScript 的反引号和 `${...}` 语义，不能当作任意文本的无条件转义器。
+String.raw 模板中的反引号和 `${...}` 仍按 JavaScript 语法处理。
 复杂脚本也可以通过 apply_patch 创建脚本文件后执行，避免多层语言嵌套。
 
 不同字段的 PowerShell 对象连续输出时，默认表格格式可能只显示首个对象的列。
-面向代码的输出可分别转 JSON，避免把格式化空白误认为数据丢失：
+需要程序读取这些对象时，可分别转成 JSON，以保留各自字段。
 
 ```js
 text(await tools.exec_command({ cmd: String.raw`
@@ -189,7 +191,7 @@ text(await tools.exec_command({ cmd: String.raw`
 ## 语法定位和重试
 
 原生 host 报 SyntaxError 后，服务对实际收到的 source 做辅助解析，附请求 ID、源码 SHA-256 和可定位时的行列/短片段。
-辅助检查不替代 V8，不据此判定 V8 有 bug，也不预先执行另一份修改过的脚本。
+辅助检查只提供定位，语法是否可执行仍由 V8 判断；服务不预先执行修改后的源码。
 Code Mode 前置代码不改变返回的原始 source 定位。若仅宿主拒绝了构造复杂的请求且确认未执行，
 可以在检查请求后简化或拆分；组合独立操作则能减少外层 tool call，两者由实际任务权衡。
 

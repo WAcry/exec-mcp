@@ -1,54 +1,54 @@
-# ADR-008：个人实例的环境继承、代理与 Node 20
+# ADR-008 个人实例的环境继承、代理与 Node 20
 
-状态：生效。更新：2026-09-22。
+当前生效，2026-09-22 更新。
 
-## 继承环境，不制造秘密隔离
+## 完整继承环境
 
-实例由受信任的个人部署并使用。Shell/PTY、下游 stdio MCP、Code Mode host、补丁进程都继承
-服务进程的完整环境，不按变量名称、API key、代理、函数样式值做 allowlist/denylist。
-只忽略不存在的 undefined 值；下游的显式 env 配置按字段覆盖继承值，Windows 遵循大小写不敏感语义。
-给 PTY 的是完整副本，避免依赖对 process.env 对象做特殊清洗；终端本身维护 PWD/TERM 等原生行为不改写。
-不为了证明继承而把全部环境预先展示给模型或写日志，但也不对用户明确执行的命令结果做环境变量脱敏过滤。
+实例由受信任的个人部署和使用。Shell/PTY、下游 stdio MCP、Code Mode host 和补丁进程
+都继承服务进程的完整环境，不按变量名称或值建立 allowlist/denylist。
+仅忽略 undefined，显式 env 配置覆盖同名值，Windows 按大小写不敏感规则处理。
+PTY 使用完整副本，PWD/TERM 等字段仍由终端按原生规则维护。
+服务不主动输出整个环境，用户明确执行的命令结果也不作环境变量脱敏。
 
-登录模式和继承不是同一件事。保留 login=false 默认与已有配置/单次覆盖：
-继承已有环境不需要执行 profile；默认加载 profile 反而可能覆盖 PATH/代理、输出启动文字或等待输入。
-需要 profile 的用户显式启用，不为本次需求改变所有既有命令的启动副作用。
+默认 login=false，继承环境无需加载 profile。profile 可能覆盖 PATH 或代理，
+也可能输出文字或等待输入，需要这些行为的调用者可通过配置或单次参数启用。
 
-## 本服务的外部 HTTP 尊重用户代理
+## 本服务的 HTTP 代理
 
-下游 HTTP MCP 的所有 SDK 请求（包括连接协商和 SSE）以及原生附件下载，统一使用受生命周期管理的
-Undici 环境代理 transport。读取 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 及小写形式，按库语义小写优先；
-HTTPS_PROXY 缺失时可继承 HTTP_PROXY，NO_PROXY 支持主机、域名后缀、端口和 *。
-不在不同 Node 版本间切换不同代理策略，不依赖用户额外设置 NODE_USE_ENV_PROXY，
-不全局替换 fetch/HTTP agent，不注入 NODE_OPTIONS，也不禁用 TLS 证书或主机名校验。
-私有 CA 可使用 Node 的 NODE_EXTRA_CA_CERTS，代理凭据只用于代理，不转发给目标或写进错误提示。
-代理失败不能悄悄直连重放可能有副作用的请求；调用取消和服务关闭要释放连接。
+下游 HTTP MCP 的 SDK 请求，包括协商和 SSE，以及原生附件下载，共用 Undici 环境代理 transport。
+它读取 HTTP_PROXY、HTTPS_PROXY、NO_PROXY 及小写名称，小写优先；
+HTTPS_PROXY 缺失时继承 HTTP_PROXY，NO_PROXY 支持主机、域名后缀、端口及 *。
+各 Node 版本使用相同策略，无需额外启用 NODE_USE_ENV_PROXY。
 
-文件下载保持 HTTPS、无跳转、原始字节流、显式大小与取消规则。
-直连由自定义 DNS lookup 固定已验证的公网地址；使用代理时由用户指定的受信任代理解析目标，
-不能再要求本机也有外网 DNS，也不声称客户端能约束代理的 DNS/路由。
-字面量私网/本机目标仍不作为宿主附件下载地址接受；这些文件来源规则不是环境变量过滤。
+代理只用于本服务的请求，不全局替换 fetch/HTTP agent 或注入 NODE_OPTIONS。
+TLS 证书和主机名校验保持开启，私有 CA 通过 NODE_EXTRA_CA_CERTS 配置。
+代理凭据仅发给代理，目标服务及错误提示均不接收它。代理失败就返回错误，不直连重放请求，
+以免重复产生副作用；取消调用或关闭服务时释放连接。
 
-本地 Code Mode gRPC 只是父进程到自有子进程的回环 IPC，明确直连，不把它转交给 HTTP 代理。
-这不修改环境，也不对用户指定的下游 localhost HTTP 地址做隐式 NO_PROXY；需要绕过时由用户设置。
+附件保持 HTTPS 和原始字节流传输，遵循大小、取消与禁止重定向的规则。
+直连时由自定义 DNS lookup 固定已验证的公网地址。使用代理时，目标解析和路由交给该代理，
+本机无需具备外网 DNS，也无法控制代理的解析结果。字面量私网或本机地址仍不得用作宿主附件来源。
 
-## 环境代理不是系统级流量劫持
+Code Mode gRPC 是父子进程间的回环 IPC，始终直连，服务环境变量保持不变。
+用户配置的下游 localhost HTTP 地址仍按 NO_PROXY 处理，服务不隐式增加例外。
 
-所有用户子进程都会取得完整代理变量，但是否采用由各自网络栈决定；不能仅靠继承变量强迫任意
-Node/Python 程序、PowerShell、UDP 或忽略代理的二进制都走 HTTP 代理。
-不偷偷给用户代码注入预加载脚本、替换网络 API 或安装透明转发层；确需所有流量统一路由，应使用系统级网络配置。
-OpenAI tunnel-client 仍由操作者独立运行，也可通过 with-token 显式启动以注入凭据；
-该包装不重配 profile 或接管既有进程，其代理能力仍由供应商决定。
-资源/URL 下载对用户的响应是入站请求的返回路径，不是本服务新发起的外部连接。
+## 子进程与 Tunnel
 
-## Node 20 兼容，不倒退到过时的运行时 API
+用户子进程取得完整代理变量，是否采用由自身网络栈决定。
+exec-mcp 不修改用户代码或网络 API，也不安装透明转发层；需要统一路由所有流量时，
+应由用户设置系统网络。忽略代理的程序和 UDP 等流量需按各自方式处理。
 
-支持 Node 20.19+；测试矩阵加入 Node 20，与 Node 22/24 共用实现。
-代理使用兼容 Node 20 的 Undici 7 分支；文件类型识别选用支持 Node 20 的 file-type 21，
-并用 Node 20 类型和真实二进制验证，而不只是修改 engines 后宣称支持。
-Node 20 在上游已经结束维护；这是兼容承诺，不是推荐新部署继续选用 EOL 版本。
-保留现有 Codex 固定组件、Shell 行为、工具数量与资源边界，不添加新的代理管理工具或 UI。
+OpenAI tunnel-client 由用户独立运行，也可通过 with-token 显式启动并注入凭据。
+该包装保留 profile 与已有进程，网络代理能力由供应商客户端决定。
+文件下载响应通过入站连接返回给用户，不再发起出站连接。
 
-参考：[Node 企业网络配置](https://nodejs.org/en/learn/http/enterprise-network-configuration)、
-[Undici 环境代理](https://github.com/nodejs/undici/blob/v7.29.1/docs/docs/api/EnvHttpProxyAgent.md)、
+## Node 20 兼容
+
+支持 Node 20.19+，与 Node 22/24 共用实现。代理采用兼容 Node 20 的 Undici 7，
+文件类型识别采用 file-type 21。类型检查和真实二进制测试共同验证兼容性。
+Node 20 已结束上游维护，本项目保留兼容，新部署应选择仍受维护的版本。
+固定 Codex 组件、Shell 行为和资源限制保持原样，当前不增加代理管理工具或 UI。
+
+相关接口见 [Node 企业网络配置](https://nodejs.org/en/learn/http/enterprise-network-configuration)、
+[Undici 环境代理](https://github.com/nodejs/undici/blob/v7.29.1/docs/docs/api/EnvHttpProxyAgent.md) 和
 [Node 版本状态](https://nodejs.org/en/about/previous-releases)。

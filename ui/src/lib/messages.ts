@@ -2,7 +2,12 @@
 export const messages = {
   "app.title": { en: "EXEC MCP Console", zh: "EXEC MCP 控制台" },
   "language.label": { en: "Interface language", zh: "界面语言" },
-  "language.auto": { en: "Auto", zh: "跟随浏览器" },
+  "language.auto": { en: "Auto", zh: "自动" },
+  "language.help": {
+    en: "Auto follows your browser. Changes apply immediately.",
+    zh: "自动跟随浏览器语言，切换立即生效。",
+  },
+  "preferences.title": { en: "Interface preferences", zh: "界面偏好" },
   "common.retry": { en: "Retry", zh: "重试" },
   "common.refresh": { en: "Refresh", zh: "刷新" },
   "common.copy": { en: "Copy", zh: "复制" },
@@ -268,7 +273,7 @@ export const messages = {
   "nav.mcp": { en: "MCP servers", zh: "下游 MCP" },
   "nav.skills": { en: "Skills", zh: "Skills 目录" },
   "nav.artifacts": { en: "Files", zh: "产物附件" },
-  "nav.config": { en: "Settings", zh: "服务配置" },
+  "nav.config": { en: "Settings", zh: "设置" },
   "header.disconnected": { en: "Disconnected", zh: "已断开" },
   "header.restarting": { en: "Restarting", zh: "重启中" },
   "header.error": { en: "Needs attention", zh: "需检查" },

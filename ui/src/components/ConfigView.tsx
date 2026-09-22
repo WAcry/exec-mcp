@@ -6,6 +6,7 @@ import { ConfigResponse } from "../types";
 import { CodeBlock } from "./CodeBlock";
 import { useManagement } from "../context/ManagementContext";
 import { ConfigToggle } from "./ConfigToggle";
+import { InterfacePreferences } from "./LanguageControl";
 import {
   Settings,
   Globe,
@@ -84,6 +85,7 @@ export function ConfigView() {
 
   return (
     <div className="space-y-4">
+      <InterfacePreferences />
       {management.data?.available && (
         <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
           <h3 className="text-xs font-bold">{t("config.switches")}</h3>

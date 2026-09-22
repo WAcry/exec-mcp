@@ -1,6 +1,5 @@
 import { useLocale } from "../context/LocaleContext";
 import { useTheme } from "../context/ThemeContext";
-import { LanguageControl } from "./LanguageControl";
 import { useAuth } from "../context/AuthContext";
 import { VERSION } from "../../../src/version";
 import type { ReactNode } from "react";
@@ -113,7 +112,6 @@ export function Header({
 
           {/* Right Actions: SSE Status & Theme Toggle */}
           <div className="flex items-center gap-2 shrink-0">
-            <LanguageControl />
             {notificationControl}
             <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200/80 dark:border-zinc-800 whitespace-nowrap shrink-0">
               <span

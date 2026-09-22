@@ -2,7 +2,7 @@ import { useLocale } from "../context/LocaleContext";
 import { message, feedback, type Feedback } from "../lib/locale";
 import React, { useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import { LanguageControl } from "./LanguageControl";
+import { LoginLanguageControl } from "./LanguageControl";
 import { ShieldAlert, KeyRound, ArrowRight, Server, Lock } from "lucide-react";
 
 export function AuthModal() {
@@ -29,9 +29,9 @@ export function AuthModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-      <div className="w-full max-w-md p-6 bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex justify-end mb-3">
-          <LanguageControl />
+      <div className="relative w-full max-w-md p-6 bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+        <div className="absolute right-3 top-3">
+          <LoginLanguageControl />
         </div>
         <div className="flex items-center justify-center w-10 h-10 mb-4 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 mx-auto">
           <Lock className="w-5 h-5" />

@@ -396,10 +396,10 @@ export function execDescription(
   contracts: readonly NativeContract[],
   idleHours = SESSION_IDLE_MS / 3_600_000,
 ): string {
-  return `Run JavaScript code to orchestrate/compose tool calls.
+  return `Run JavaScript code to orchestrate/compose tool calls on this connection's specific remote machine.
 - Evaluates source in a fresh V8 isolate as an async module. The MCP argument is an object whose source field contains JavaScript.
 - All nested tools are available on the global tools object, for example await tools.exec_command(...). apply_patch takes a string; other local tools take an object. Tool return types are described below. Independent calls can run concurrently with Promise.all.
-- The isolate has no Node.js, filesystem, network, console or module imports. Tools perform external operations on the connected machine; separate ChatGPT containers do not share its files or network environment.
+- Only the orchestration JS isolate lacks Node.js, filesystem, network, console and module imports. Tools access the remote machine's filesystem and network; separate ChatGPT containers do not share that environment.
 - When the code is fully evaluated, the isolate's lifetime ends and unawaited promises are discarded. Ordinary JS variables do not persist across exec calls.
 - workdir supplies the local tools' default directory. A shell's cd affects only that process. Nested JS, shell and other languages each interpret quoting, interpolation, escapes, argument boundaries and whitespace.
 - Optional first-line pragma: // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}. Explicit MCP arguments take precedence.

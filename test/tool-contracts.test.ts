@@ -91,11 +91,15 @@ describe("self-contained model-visible contracts", () => {
     expect(description).toContain("fresh V8 isolate as an async module");
     expect(description).toContain(FILE_EDIT_RULE);
     expect(description.split("## Local tools")[0]).toContain(MULTILINE_RULE);
+    expect(description).toContain("this connection's specific remote machine");
     expect(description).toContain(
-      "Tools perform external operations on the connected machine",
+      "Only the orchestration JS isolate lacks Node.js, filesystem, network",
     );
     expect(description).toContain(
-      "ChatGPT containers do not share its files or network environment",
+      "Tools access the remote machine's filesystem and network",
+    );
+    expect(description).toContain(
+      "ChatGPT containers do not share that environment",
     );
     expect(description).toContain(
       "Failures and cancellation do not undo side effects",
@@ -253,6 +257,13 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       "Downstream MCP methods return CallToolResult",
     );
     const instructions = connection.client.getInstructions()!;
+    expect(instructions).toContain("one specific remote machine");
+    expect(listed[0]!.description).toContain(
+      "Only the orchestration JS isolate lacks",
+    );
+    expect(listed[0]!.description).toContain(
+      "Tools access the remote machine's filesystem and network",
+    );
     expect(instructions).toContain("user_notes");
     expect(instructions).toContain("this conversation's Web UI");
     expect(instructions).not.toMatch(/\p{Script=Han}/u);

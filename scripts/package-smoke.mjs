@@ -90,6 +90,11 @@ try {
   const manifest = JSON.parse(
     await readFile(path.join(installed, "package.json"), "utf8"),
   );
+  const sourceManifest = JSON.parse(
+    await readFile(path.join(root, "package.json"), "utf8"),
+  );
+  assert.equal(manifest.version, sourceManifest.version);
+  assert.equal(filename, `exec-mcp-${manifest.version}.tgz`);
   assert.ok(!manifest.dependencies["better-sqlite3"]);
   assert.ok(!manifest.devDependencies["@types/better-sqlite3"]);
   assert.ok(!(await readdir(path.dirname(cli))).includes("user-input"));
@@ -112,6 +117,7 @@ try {
       })
     ).stdout;
   assert.match(await executeCli(["--help"]), /init\|serve\|doctor/);
+  assert.equal((await executeCli(["--version"])).trim(), manifest.version);
   const installationAlias = path.join(temporary, "installation alias");
   await symlink(
     isolated,
@@ -237,6 +243,7 @@ enabled = true
     { versionNegotiation: { mode: "auto" } },
   );
   await client.connect(new StreamableHTTPClientTransport(new URL(started.mcp)));
+  assert.equal(client.getServerVersion().version, manifest.version);
   const valueOf = (result) => {
     assert.ok(!result.isError, JSON.stringify(result));
     const value = result.content.findLast(
@@ -265,7 +272,9 @@ enabled = true
   assert.match(await webPage.text(), /EXEC MCP 控制台/);
   const webStatus = await fetch(new URL("/api/status", started.web));
   assert.equal(webStatus.status, 200);
-  assert.equal((await webStatus.json()).status, "ready");
+  const status = await webStatus.json();
+  assert.equal(status.status, "ready");
+  assert.equal(status.version, manifest.version);
   assert.deepEqual(
     (await client.listTools()).tools.map((tool) => tool.name),
     ["exec", "wait"],

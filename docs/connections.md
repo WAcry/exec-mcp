@@ -2,7 +2,7 @@
 
 本文供操作者配置与连接；身份提供方选择、凭据来源和优先级的生效决定见 [ADR-004](adr-004-connectivity-trust.md)。
 
-所有方式都使用同一套 exec/wait、终端、文件资源和 Skills。`serve` 只启动本机 MCP；
+所有方式都使用同一套 exec/wait、终端、文件资源和 Skills。`serve` 启动本机 MCP 及配置启用的 Web/下载入口；
 `tunnel` 另开一个前台供应商客户端，不安装系统服务、不替你登录或接管已有 Tunnel。
 下面用 `exec-mcp` 表示 CLI；按 README 从源码安装时，在仓库目录将它替换为 `node dist/src/cli.js`。
 公共 npm 包仍是后续计划，不需要为使用这些连接方式先进行全局安装。
@@ -12,6 +12,39 @@
 | OpenAI Secure MCP Tunnel | 已有 OpenAI Tunnel 权限 | 保留原有私有路径，不要求额外应用认证 |
 | Cloudflare Named Tunnel | 有 Cloudflare 账户和固定域名 | exec-mcp 验证每个 MCP 请求，Cloudflare 只负责传输 |
 | Tailscale Funnel | 已有 Tailscale 节点，希望使用 `.ts.net` 地址 | exec-mcp 验证每个 MCP 请求；Funnel 不是私有 tailnet Serve |
+
+## OpenAI Secure MCP Tunnel
+
+按 [OpenAI 官方指南](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+安装 tunnel-client、创建属于自己的 Tunnel，并取得 Runtime API key。
+该 Tunnel 需关联目标 ChatGPT 工作区；Tunnel 权限与 ChatGPT 开发者模式权限分别准备。
+
+保持 exec-mcp 的默认私有配置和 serve 运行，在另一个终端创建独立 profile：
+
+```sh
+tunnel-client init --profile exec-mcp --tunnel-id YOUR_TUNNEL_ID --mcp-server-url http://127.0.0.1:8891/mcp
+```
+
+按官方说明为该终端设置 CONTROL_PLANE_API_KEY，或使用下方的[token 文件启动器](#token-文件的轻量保护)。
+不要把真实 key 写入命令参数或仓库；已有同名 profile 时选择新名称，不覆盖其他配置。
+
+```sh
+tunnel-client doctor --profile exec-mcp
+tunnel-client run --profile exec-mcp
+```
+
+在 ChatGPT 的开发者连接中选择 Tunnel 及对应实例；连接和调用期间两个进程都需运行。
+MCP 端口改变时同步修改自己的 profile。私有 Tunnel 不提供通用浏览器文件下载地址。
+
+## 刷新与排障
+
+升级工具契约后，重启 exec-mcp 并在 ChatGPT 连接设置中刷新工具元数据，再开新对话验证。
+新聊天可能仍使用旧连接的描述；不要把旧描述误判成运行时没有更新。
+具体入口以 [OpenAI 连接与刷新指南](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata) 为准。
+
+连接失败时先检查 serve 和 Tunnel 的终端日志、MCP 的 /readyz、供应商 doctor、登录状态及配置端口。
+OpenAI Tunnel 不可见时核对工作区关联与使用权限；公网方式还需核对 DNS、证书和 OAuth 配置。
+完整用户设置见[配置指南](configuration.md)。
 
 ## 公网模式先配置认证
 
@@ -112,7 +145,7 @@ token_env = "EXEC_MCP_ACCESS_TOKEN"
 已有密文可只读挂载。Linux/macOS 新密文权限为 0600；Windows 使用本账户的私人目录及其 ACL。
 加密不擦除已有备份/快照，不扫描其他文件，不改变普通环境变量的继承，也不保护运行时内存里的明文。
 
-对于单独启动的 OpenAI `tunnel-client`，先按 README 创建原有 profile，把 Runtime API key 放进自己的文件，然后改用：
+对于单独启动的 OpenAI `tunnel-client`，先按[上面的步骤](#openai-secure-mcp-tunnel)创建 profile，把 Runtime API key 放进自己的文件，然后改用：
 
 ```sh
 exec-mcp with-token CONTROL_PLANE_API_KEY ./secrets/openai-token.txt -- tunnel-client doctor --profile exec-mcp

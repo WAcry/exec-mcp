@@ -1,7 +1,8 @@
-# Code Mode 的结果筛选与 PowerShell 示例
+# Code Mode 用法示例
 
 以下片段是 `exec.source` 中的 JavaScript；Shell 代码放在 `tools.exec_command({cmd})` 中。
 调用发生在 exec-mcp 的实际机器，与其他独立容器的文件、进程和网络不共享。
+示例展示可行写法，不是强制流程；完整参数和返回契约以工具描述为准。
 
 ## 输出先在代码里筛选
 
@@ -154,7 +155,7 @@ text(await tools.apply_patch(patch));
 在 `String.raw` 中用反斜杠转义反引号或美元插值开头，反斜杠也会进入最终文本，不能据此保证原文保真。
 正文已在变量中时直接传递，或把该变量作为一个完整插值值；自动生成 JavaScript 源码时，可由
 `JSON.stringify` 编码已有字符串。它无法修复在求值前就已经语法错误的模板。
-不默认采用全局 `replaceAll`、Base64 或服务端猜测修复，避免误改正文、增加另一层编码或改变补丁内容。
+这个例子不需要占位符替换或 Base64；服务也不会猜测改写收到的补丁内容。
 语言语义见 [String.raw](https://tc39.es/ecma262/multipage/text-processing.html#sec-string.raw)。
 
 ## Windows 路径、正则与多行脚本
@@ -190,4 +191,19 @@ text(await tools.exec_command({ cmd: String.raw`
 原生 host 报 SyntaxError 后，服务对实际收到的 source 做辅助解析，附请求 ID、源码 SHA-256 和可定位时的行列/短片段。
 辅助检查不替代 V8，不据此判定 V8 有 bug，也不预先执行另一份修改过的脚本。
 Code Mode 前置代码不改变返回的原始 source 定位。若仅宿主拒绝了构造复杂的请求且确认未执行，
-可将其拆成几个简单片段；通常仍优先在一次 exec 组合独立操作，减少外层 tool call。
+可以在检查请求后简化或拆分；组合独立操作则能减少外层 tool call，两者由实际任务权衡。
+
+## 异步提问
+
+```js
+text(await tools.request_user_input_async({
+  questions: [{
+    title: "这个新模块使用哪种存储？",
+    options: ["SQLite：本机持久化", "仅内存：重启清空"]
+  }]
+}));
+```
+
+await 只等待提交成功，不等待人回答。Web 需要已经启动，宿主需要提供对话标识。
+用户选择、题目和补充随该对话的正常 exec/wait 响应送达，与主动补充使用同一通道；没有答案轮询工具。
+问题提交后仍可继续不依赖答案的工作；答案不会撤回已经执行的操作。

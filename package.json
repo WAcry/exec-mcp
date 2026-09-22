@@ -1,6 +1,6 @@
 {
   "name": "exec-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "An MCP server for orchestrating tools on your own machine through Code Mode.",

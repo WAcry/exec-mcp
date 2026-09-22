@@ -11,6 +11,20 @@ import { configDirectory } from "../src/host/platform.js";
 import { codexTarget } from "../src/codex-package.js";
 
 describe("configuration and platform boundaries", () => {
+  it("accepts every TOML example in the user configuration guide", async () => {
+    const guide = await readFile(
+      new URL("../docs/configuration.md", import.meta.url),
+      "utf8",
+    );
+    const examples = [...guide.matchAll(/^```toml\r?\n([\s\S]*?)^```/gm)];
+    expect(examples.length).toBeGreaterThan(0);
+    for (const [, example] of examples) {
+      const input = /^\[server\]/m.test(example!)
+        ? example!
+        : `${CONFIG_TEMPLATE}\n${example}`;
+      expect(() => parseConfig(input, "config.toml")).not.toThrow();
+    }
+  });
   it("keeps the Web console loopback-only by default and validates explicit exposure", () => {
     expect(parseConfig(CONFIG_TEMPLATE, "config.toml").web).toBeUndefined();
     expect(

@@ -64,7 +64,7 @@ export function ConfigView() {
       );
       setRegeneratedLanUrls(result.lanUrls);
       await refreshStatus();
-      alert("局域网动态密钥已重新生成！");
+      alert("局域网访问密钥已重新生成，旧登录已失效。");
     } catch (err) {
       alert("重新生成失败: " + String(err));
     } finally {

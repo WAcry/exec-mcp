@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Client,
   StreamableHTTPClientTransport,
@@ -33,6 +33,7 @@ beforeEach(async () => {
   root = await realpath(await mkdtemp(path.join(tmpdir(), "exec-web-")));
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   await rm(root, { recursive: true, force: true });
 });
@@ -227,10 +228,196 @@ async function authenticate(web: WebServerInstance, host: string) {
     "SameSite=Strict",
   );
   expect(response.headers["set-cookie"]?.join(";")).toContain("Path=/api");
+  expect(response.headers["set-cookie"]?.join(";")).toContain(
+    "Max-Age=2592000",
+  );
+  expect(cookie(response)).not.toContain(web.token);
   return cookie(response);
 }
 
 describe("Web console access boundary", () => {
+  it("slides authenticated status cookies, rejects idle expiry, and never trusts a raw token cookie", async () => {
+    const { web } = await startWeb({ host: "0.0.0.0" });
+    const host = `device.local:${web.port}`;
+    const day = 86400000;
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let session = await authenticate(web, host);
+    for (let visit = 0; visit < 4; visit++) {
+      now += 29 * day;
+      const renewed = await request(web, "/api/status", {
+        host,
+        headers: { Cookie: session },
+      });
+      expect(renewed.status).toBe(200);
+      expect(cookie(renewed)).not.toBe(session);
+      expect(renewed.headers["set-cookie"]?.join(";")).toContain(
+        "Max-Age=2592000",
+      );
+      session = cookie(renewed);
+    }
+    now += 30 * day;
+    const expired = await request(web, "/api/status", {
+      host,
+      headers: { Cookie: session },
+    });
+    expect(expired.status).toBe(401);
+    expect(expired.headers["set-cookie"]).toBeUndefined();
+    expect(
+      (
+        await request(web, "/api/status", {
+          host,
+          headers: { Cookie: `exec_web_session=${web.token}` },
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(web, "/api/status", {
+          host,
+          headers: { "x-exec-token": web.token },
+        })
+      ).status,
+    ).toBe(200);
+    await authenticate(web, host);
+  });
+
+  it("retains remembered login after restarting the Web server and rotating explicitly revokes it", async () => {
+    const { web, mcp, configPath, publicDir } = await startWeb({
+      host: "0.0.0.0",
+    });
+    const session = await authenticate(web, `device.local:${web.port}`);
+    const oldToken = web.token;
+    await web.close();
+    const restarted = await startWebServer(mcp.runtime, baseConfig(), {
+      host: "0.0.0.0",
+      port: 0,
+      configPath,
+      publicDir,
+    });
+    cleanups.push(() => restarted.close());
+    const host = `device.local:${restarted.port}`;
+    expect(restarted.token).toBe(oldToken);
+    expect(
+      (
+        await request(restarted, "/api/status", {
+          host,
+          headers: { Cookie: session },
+        })
+      ).status,
+    ).toBe(200);
+    // An old bookmarked fragment does not invalidate an already authenticated browser.
+    expect(
+      (
+        await request(restarted, "/api/auth/verify", {
+          method: "POST",
+          host,
+          headers: actionHeaders({ Cookie: session }),
+          body: { token: "outdated-fragment" },
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(restarted, "/api/auth/regenerate-token", {
+          method: "POST",
+          headers: actionHeaders(),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(restarted, "/api/status", {
+          host,
+          headers: { Cookie: session },
+        })
+      ).status,
+    ).toBe(401);
+  });
+
+  it("does not renew an invalid or cross-origin request's cookie", async () => {
+    const { web } = await startWeb({ host: "0.0.0.0" });
+    const host = `device.local:${web.port}`;
+    const session = await authenticate(web, host);
+    const requests = [
+      { host, headers: { Cookie: session, "x-exec-token": "wrong" } },
+      { host, origin: "https://elsewhere.test", headers: { Cookie: session } },
+      { host, headers: { Cookie: `${session}corrupted` } },
+    ];
+    for (const options of requests) {
+      const result = await request(web, "/api/status", options);
+      expect([401, 403]).toContain(result.status);
+      expect(result.headers["set-cookie"]).toBeUndefined();
+    }
+  });
+
+  it("rechecks a remembered login after reading the body so rotation cannot be bypassed by a slow request", async () => {
+    const { web } = await startWeb({ host: "0.0.0.0" });
+    const host = `device.local:${web.port}`;
+    const session = await authenticate(web, host);
+    const body = JSON.stringify({ token: "not-the-bootstrap-token" });
+    let arrived!: () => void;
+    const started = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    web.server.once("request", arrived);
+    let outgoing!: ReturnType<typeof httpRequest>;
+    const response = new Promise<number>((resolve, reject) => {
+      outgoing = httpRequest(
+        {
+          host: "127.0.0.1",
+          port: web.port,
+          method: "POST",
+          path: "/api/auth/verify",
+          headers: {
+            Host: host,
+            Cookie: session,
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(body),
+            ...actionHeaders(),
+          },
+        },
+        (response) => {
+          response.resume();
+          response.on("end", () => resolve(response.statusCode!));
+        },
+      );
+      outgoing.on("error", reject);
+      outgoing.write(body.slice(0, 1));
+    });
+    cleanups.push(async () => {
+      outgoing.destroy();
+    });
+    await started;
+    const rotated = await request(web, "/api/auth/regenerate-token", {
+      method: "POST",
+      headers: actionHeaders(),
+    });
+    expect(rotated.status).toBe(200);
+    outgoing.end(body.slice(1));
+    expect(await response).toBe(401);
+  });
+
+  it("closes an expired cookie's event stream before sending more events", async () => {
+    const { web, activity } = await startWeb({ host: "0.0.0.0" });
+    const host = `device.local:${web.port}`;
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const session = await authenticate(web, host);
+    const stream = openEventStream(web, { host, cookie: session });
+    cleanups.push(async () => {
+      stream.close();
+    });
+    await stream.ready;
+    now += 31 * 86400000;
+    activity.startCall({
+      tool: "exec",
+      sessionId: "expired-stream",
+      args: { source: "text(1)" },
+    });
+    await stream.ended;
+  });
+
   it("does not collect hidden audit copies when the Web console is disabled", async () => {
     const mcp = await startServer({
       ...baseConfig(),

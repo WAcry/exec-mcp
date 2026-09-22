@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { isIP } from "node:net";
 
 export const WEB_COOKIE = "exec_web_session";
+export const WEB_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 export const WEB_ACTION_HEADER = "x-exec-web";
 
 export function isLoopbackAddress(ip: string | undefined): boolean {
@@ -84,7 +85,7 @@ export function parseCookies(
 }
 
 export function webCookie(value: string, clear = false): string {
-  return `${WEB_COOKIE}=${clear ? "" : encodeURIComponent(value)}; Path=/api; HttpOnly; SameSite=Strict${clear ? "; Max-Age=0" : ""}`;
+  return `${WEB_COOKIE}=${clear ? "" : encodeURIComponent(value)}; Path=/api; HttpOnly; SameSite=Strict; Max-Age=${clear ? 0 : WEB_SESSION_MAX_AGE_SECONDS}`;
 }
 
 export function applyWebSecurityHeaders(

@@ -103,6 +103,7 @@ async function fixture(legacy = false) {
   const web = await startWebServer(server.runtime, config, {
     port: 0,
     publicDir: root,
+    configPath: path.join(root, "config.toml"),
   });
   cleanups.push(() => web.close());
   const client = await clientFor(server.url, legacy);
@@ -808,6 +809,7 @@ it("keeps the same notes store across an execution-service restart, not a new co
     port: 0,
     controller,
     publicDir: root,
+    configPath,
   });
   cleanups.push(() => web.close());
   const api = webApi(web.loopbackUrl);

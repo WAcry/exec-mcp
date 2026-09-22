@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 
 export class SseBroker {
-  private clients = new Set<ServerResponse>();
+  private clients = new Map<ServerResponse, () => boolean>();
   private heartbeatTimer?: NodeJS.Timeout | undefined;
   private readonly maxClients: number;
 
@@ -13,7 +13,10 @@ export class SseBroker {
     this.heartbeatTimer.unref();
   }
 
-  addClient(res: ServerResponse): boolean {
+  addClient(
+    res: ServerResponse,
+    authorized: () => boolean = () => true,
+  ): boolean {
     if (this.clients.size >= this.maxClients) return false;
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -31,7 +34,7 @@ export class SseBroker {
       return true;
     }
 
-    this.clients.add(res);
+    this.clients.set(res, authorized);
 
     res.on("close", () => {
       this.clients.delete(res);
@@ -41,9 +44,9 @@ export class SseBroker {
 
   broadcast(event: unknown): void {
     const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const client of this.clients) {
+    for (const [client, authorized] of this.clients) {
       try {
-        if (!client.write(payload)) {
+        if (!authorized() || !client.write(payload)) {
           this.clients.delete(client);
           client.end();
         }
@@ -54,9 +57,9 @@ export class SseBroker {
   }
 
   private ping(): void {
-    for (const client of this.clients) {
+    for (const [client, authorized] of this.clients) {
       try {
-        if (!client.write(": ping\n\n")) {
+        if (!authorized() || !client.write(": ping\n\n")) {
           this.clients.delete(client);
           client.end();
         }
@@ -67,7 +70,7 @@ export class SseBroker {
   }
 
   disconnectClients(): void {
-    for (const client of this.clients) {
+    for (const client of this.clients.keys()) {
       try {
         client.end();
       } catch {

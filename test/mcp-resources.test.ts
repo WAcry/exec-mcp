@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DownstreamMcpRegistry } from "../src/downstream/registry.js";
@@ -437,6 +440,8 @@ describe.each([false, true])(
   "resources through real Code Mode MCP (legacy=%s)",
   (legacy) => {
     it("advertises all three contracts inside exec, reads template contents and preserves media and Web audit", async () => {
+      const directory = await mkdtemp(path.join(tmpdir(), "resource-web-"));
+      cleanup.push(() => rm(directory, { recursive: true, force: true }));
       const f = await fixture();
       const t = await connect(
         {
@@ -455,7 +460,7 @@ describe.each([false, true])(
           access: "openai-tunnel",
           mcpServers: [f.config],
         },
-        { port: 0 },
+        { port: 0, configPath: path.join(directory, "config.toml") },
       );
       cleanup.push(() => web.close());
       const listed = (await t.client.listTools()).tools;

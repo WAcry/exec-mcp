@@ -58,7 +58,9 @@ async function setup(
   const server = await startServer(config);
   cleanups.push(() => server.close());
   const console = web
-    ? await startWebServer(server.runtime, config)
+    ? await startWebServer(server.runtime, config, {
+        configPath: path.join(root, "config.toml"),
+      })
     : undefined;
   if (console) cleanups.push(() => console.close());
   const client = new Client(

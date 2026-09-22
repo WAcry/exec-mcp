@@ -80,10 +80,11 @@ cloudflared 原生 token 比 token-file 优先；之前直接拒绝冲突会迫�
 目标只是避免普通明文扫描直接匹配 token，不是抵抗了解本程序、能读取其代码或进程环境的攻击者。
 使用 Node 内建 AES-256-GCM、随机 nonce 和版本前缀，密钥由代码中公开稳定的常量派生；
 这是可逆的静态保护，不是秘密保险库，不增加主密码、系统钥匙串、密钥服务或平台专属依赖。
+Web 的实例级登录密钥也复用此文件保护；浏览器长期 Cookie 与轮换边界见 [ADR-009](adr-009-web-console.md)。
 前缀与解码密钥属于兼容格式，升级不能随意变更后让旧文件不可读。
 
-只处理显式选择的单 token 文件：auth.token_file、Cloudflare token_file/TUNNEL_TOKEN_FILE，
-以及 with-token 启动器的指定文件。普通环境变量、配置中的 headers/env、供应商 profile/证书及 Tailscale 状态都不扫描或改写。
+只处理显式选择的单 token 文件（auth.token_file、Cloudflare token_file/TUNNEL_TOKEN_FILE、with-token 指定文件）
+及本服务生成的 Web 凭据。普通环境变量、配置中的 headers/env、供应商 profile/证书及 Tailscale 状态都不扫描或改写。
 首次实际读取到明文时，在同目录写入仅含密文的临时文件，完成后原子替换目标；不生成明文备份或临时解密文件。
 识别已有前缀则只在内存解密；未知版本或校验失败报错，不当作新的明文重新加密。
 用户更新凭据仍是把新明文粘贴覆盖原文件，再重启对应服务/客户端；无 watcher、无逐请求解密。

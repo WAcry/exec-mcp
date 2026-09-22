@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import type { SystemStatus } from "../types";
@@ -43,29 +44,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const statusRequest = useRef<AbortController | null>(null);
+  const loggingOut = useRef(false);
 
   const fetchStatus = useCallback(async () => {
+    if (loggingOut.current) return;
+    statusRequest.current?.abort();
+    const controller = new AbortController();
+    statusRequest.current = controller;
     try {
       const response = await fetch("/api/status", {
         credentials: "same-origin",
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (response.status === 401) {
         setIsAuthenticated(false);
         setSystemStatus(null);
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      setSystemStatus((await response.json()) as SystemStatus);
+      const status = (await response.json()) as SystemStatus;
+      if (controller.signal.aborted) return;
+      setSystemStatus(status);
       setIsAuthenticated(true);
     } catch {
       // A transient offline state does not erase a valid browser session.
     } finally {
-      setIsVerifying(false);
+      if (!controller.signal.aborted) setIsVerifying(false);
     }
   }, []);
 
   const verifyToken = useCallback(
     async (testToken: string): Promise<boolean> => {
+      loggingOut.current = false;
+      statusRequest.current?.abort();
       setIsVerifying(true);
       try {
         const response = await fetch("/api/auth/verify", {
@@ -92,6 +105,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    loggingOut.current = true;
+    statusRequest.current?.abort();
+    setIsAuthenticated(false);
+    setSystemStatus(null);
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
@@ -113,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const requireAuth = () => {
+      statusRequest.current?.abort();
       setIsAuthenticated(false);
       setSystemStatus(null);
     };
@@ -123,7 +141,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     const timer = window.setInterval(() => void fetchStatus(), 15_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      statusRequest.current?.abort();
+    };
   }, [fetchStatus, isAuthenticated]);
 
   return (

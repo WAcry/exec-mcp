@@ -330,7 +330,10 @@ describe.each([false, true])(
 
     it("keeps cmd and freeform patch inputs visible as subcalls in Web, including failures", async () => {
       const t = await setup(legacy);
-      const web = await startWebServer(t.server.runtime, t.config, { port: 0 });
+      const web = await startWebServer(t.server.runtime, t.config, {
+        port: 0,
+        configPath: path.join(t.root, "config.toml"),
+      });
       cleanups.push(() => web.close());
       const sourcePatch = patch("web.md", "# Web `raw`\n");
       const result = await t.exec(

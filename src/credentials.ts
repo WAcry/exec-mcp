@@ -79,7 +79,7 @@ function decode(text: string): string {
   );
 }
 
-function encode(token: string): string {
+export function encodeTokenFile(token: string): string {
   const nonce = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", KEY, nonce, {
     authTagLength: 16,
@@ -115,7 +115,7 @@ function protect(
   try {
     fd = openSync(temporary, "wx", 0o600);
     created = true;
-    writeFileSync(fd, encode(token), "utf8");
+    writeFileSync(fd, encodeTokenFile(token), "utf8");
     fsyncSync(fd);
     closeSync(fd);
     fd = undefined;

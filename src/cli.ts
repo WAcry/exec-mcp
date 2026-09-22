@@ -220,7 +220,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const webMsg = webServer
     ? `\nWeb UI 控制台：\n  - 本机访问：${webServer.loopbackUrl}${
         webServer.lanUrls.length
-          ? `\n  - 局域网访问（链接片段含本次启动密钥）：\n${webServer.lanUrls.map((url) => `    ${url}`).join("\n")}`
+          ? `\n  - 局域网访问（链接片段含访问密钥）：\n${webServer.lanUrls.map((url) => `    ${url}`).join("\n")}`
           : ""
       }`
     : "";

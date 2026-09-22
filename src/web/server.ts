@@ -6,7 +6,6 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { networkInterfaces } from "node:os";
-import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -15,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import type { ExecRuntime } from "../runtime.js";
 import { defaultConfigPath, type Config } from "../config.js";
 import { SseBroker } from "./events.js";
+import { WebSessionAuth } from "./session-auth.js";
 import { VERSION } from "../version.js";
 import { discoverSkills } from "../skills/discover.js";
 import { characterCount, renderSkills } from "../skills/render.js";
@@ -103,9 +103,9 @@ export async function startWebServer(
     ...(options.host === undefined ? {} : { host: options.host }),
     ...(options.port === undefined ? {} : { port: options.port }),
   };
-  let token = options.token ?? randomBytes(32).toString("base64url");
   let closePromise: Promise<void> | undefined;
   const configPath = options.configPath ?? defaultConfigPath();
+  const auth = new WebSessionAuth(configPath, options.token);
   const mcpUrl = options.mcpUrl ? new URL(options.mcpUrl) : undefined;
   const exposed = webIsExposed(web);
   const sse = new SseBroker();
@@ -180,8 +180,13 @@ export async function startWebServer(
     const bearer = req.headers.authorization?.startsWith("Bearer ")
       ? req.headers.authorization.slice(7).trim()
       : undefined;
-    const clientToken = headerToken ?? bearer ?? cookies[WEB_COOKIE];
-    const authorized = isLocal || tokenMatches(clientToken, token);
+    const clientToken = headerToken ?? bearer;
+    const sessionValid = auth.verifyCookie(cookies[WEB_COOKIE]);
+    const authorized =
+      isLocal ||
+      (clientToken === undefined
+        ? sessionValid
+        : tokenMatches(clientToken, auth.token));
     const isUnsafe = !new Set(["GET", "HEAD", "OPTIONS"]).has(
       req.method ?? "GET",
     );
@@ -193,8 +198,12 @@ export async function startWebServer(
       }
       try {
         const body = (await readJsonBody(req)) as { token?: unknown };
-        if (typeof body.token === "string" && tokenMatches(body.token, token)) {
-          res.setHeader("Set-Cookie", webCookie(token));
+        if (
+          auth.verifyCookie(cookies[WEB_COOKIE]) ||
+          (typeof body.token === "string" &&
+            tokenMatches(body.token, auth.token))
+        ) {
+          res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
           jsonResponse(res, 200, { valid: true });
         } else {
           jsonResponse(res, 401, { valid: false, message: "密钥不正确" });
@@ -237,6 +246,10 @@ export async function startWebServer(
 
     if (pathname.startsWith("/api/")) {
       try {
+        // The UI already requests status on entry and while open. Renew there,
+        // without adding a refresh poll or issuing cookies on long-lived streams.
+        if (pathname === "/api/status" && req.method === "GET" && sessionValid)
+          res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
         const current = options.controller?.current;
         const activeRuntime = current?.server.runtime ?? runtime;
         if (activeRuntime.activity !== observedActivity) {
@@ -260,11 +273,14 @@ export async function startWebServer(
           loopbackUrl: loopbackUrlFor(web.host, actualPort),
           mcpUrl: current ? new URL(current.server.url) : mcpUrl,
           ...(options.controller ? { controller: options.controller } : {}),
-          lanUrls: () => lanUrlsFor(token),
-          regenerateToken: () => {
-            token = randomBytes(32).toString("base64url");
-            return token;
-          },
+          lanUrls: () => lanUrlsFor(auth.token),
+          regenerateToken: () => auth.rotate(),
+          sessionCookie: () => webCookie(auth.issueCookie()),
+          eventAuthorized: () =>
+            isLocal ||
+            (clientToken === undefined
+              ? auth.verifyCookie(cookies[WEB_COOKIE])
+              : tokenMatches(clientToken, auth.token)),
         });
       } catch (error) {
         if (error instanceof ConfigEditError && !res.headersSent) {
@@ -312,10 +328,10 @@ export async function startWebServer(
     exposed,
     loopbackUrl,
     get lanUrls() {
-      return lanUrlsFor(token);
+      return lanUrlsFor(auth.token);
     },
     get token() {
-      return token;
+      return auth.token;
     },
     async close() {
       closePromise ??= (async () => {
@@ -375,6 +391,8 @@ interface RouteContext {
   mcpUrl?: URL | undefined;
   lanUrls(): string[];
   regenerateToken(): string;
+  sessionCookie(): string;
+  eventAuthorized(): boolean;
   controller?: ServiceController;
 }
 
@@ -427,7 +445,7 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   }
 
   if (pathname === "/api/events" && req.method === "GET") {
-    if (!sse.addClient(res))
+    if (!sse.addClient(res, context.eventAuthorized))
       jsonResponse(res, 503, { error: "too_many_event_clients" });
     return;
   }
@@ -795,11 +813,11 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
   if (pathname === "/api/auth/regenerate-token" && req.method === "POST") {
     if (!isLocal)
       throw new HttpError(403, "仅本机回环访问可以换新局域网密钥。");
-    const newToken = context.regenerateToken();
+    context.regenerateToken();
     // Existing EventSource responses were authorized with the previous token.
     // Close them now so a rotated credential actually revokes live observers.
     sse.disconnectClients();
-    res.setHeader("Set-Cookie", webCookie(newToken));
+    res.setHeader("Set-Cookie", context.sessionCookie());
     jsonResponse(res, 200, {
       success: true,
       lanUrls: context.lanUrls(),

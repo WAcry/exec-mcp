@@ -535,9 +535,19 @@ enabled = true
   );
   for (const route of ["/api/user-input", "/api/user-input/old-request"])
     assert.equal((await fetch(new URL(route, started.web))).status, 404);
+  const webCredentials = path.join(temporary, ".exec-mcp");
+  assert.deepEqual(
+    await readdir(webCredentials),
+    [`${path.basename(config)}.web-token`],
+    "Only remembered Web credentials are persisted, not a question database",
+  );
   assert.ok(
-    !(await readdir(temporary)).includes(".exec-mcp"),
-    "CLI must not create a question database",
+    (
+      await readFile(
+        path.join(webCredentials, `${path.basename(config)}.web-token`),
+        "utf8",
+      )
+    ).startsWith("exec-mcp:token:v1:"),
   );
   // Verify native PTY after a clean tarball installation, not only in the checkout.
   const processFixture = path.join(project, "process fixture.cjs");

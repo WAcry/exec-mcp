@@ -13,7 +13,7 @@ export function AuthModal() {
     setErrorMsg("");
     const ok = await verifyToken(inputToken.trim());
     if (!ok) {
-      setErrorMsg("密钥不正确或已失效，请检查终端启动日志中的一次性密钥。");
+      setErrorMsg("密钥不正确或已失效，请检查终端启动日志中的访问密钥。");
     } else {
       setInputToken("");
     }
@@ -33,15 +33,23 @@ export function AuthModal() {
           当前请求未通过 Web UI 鉴权。请输入服务启动日志中的本次访问密钥，
           或重新打开带有 <code>#token=…</code> 片段的局域网链接。
         </p>
+        <p className="mt-2 text-xs text-center text-zinc-500 dark:text-zinc-400">
+          登录后此浏览器自动保持登录；连续 30 天未访问才过期。 退出登录、清除
+          Cookie 或换新密钥后需重新登录。
+        </p>
 
         <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1">
+            <label
+              htmlFor="web-access-token"
+              className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1"
+            >
               访问密钥 (Token)
             </label>
             <div className="relative">
               <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
+                id="web-access-token"
                 type="password"
                 placeholder="例如: a3f89e2c..."
                 value={inputToken}

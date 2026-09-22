@@ -49,7 +49,7 @@ export class ActivityStore {
       enabled?: boolean;
     } = {},
   ) {
-    this.maxCalls = options.maxCalls ?? 200;
+    this.maxCalls = options.maxCalls ?? 10_000;
     this.maxSubcalls = options.maxSubcalls ?? 50;
     this.enabled = options.enabled ?? true;
     if (!Number.isSafeInteger(this.maxCalls) || this.maxCalls < 1)
@@ -104,14 +104,6 @@ export class ActivityStore {
     this.calls.unshift(call);
     this.callsById.set(id, call);
 
-    if (this.calls.length > this.maxCalls) {
-      const removed = this.calls.pop();
-      if (removed) {
-        this.callsById.delete(removed.id);
-        this.rebuildSession(removed.sessionId);
-      }
-    }
-
     let session = this.sessions.get(sessionId);
     if (!session) {
       session = {
@@ -132,6 +124,17 @@ export class ActivityStore {
       timestamp: startedAt,
       preview: this.extractPreview(params.tool, args),
     };
+
+    if (this.calls.length > this.maxCalls) {
+      const removed = this.calls.pop();
+      if (removed) {
+        this.callsById.delete(removed.id);
+        // Rebuild after counting the new call. When both calls belong to the
+        // same session, rebuilding first and incrementing afterward counts the
+        // new call twice.
+        this.rebuildSession(removed.sessionId);
+      }
+    }
 
     this.emit({ type: "call:start", callId: id, sessionId });
 

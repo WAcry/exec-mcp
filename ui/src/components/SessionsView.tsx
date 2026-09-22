@@ -157,7 +157,7 @@ export function SessionsView({
 
                 <div className="space-y-1.5 mb-3 text-xs">
                   <div className="flex items-center justify-between text-zinc-500">
-                    <span>累计调用</span>
+                    <span>当前保留调用</span>
                     <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
                       {session.callCount} 次
                     </span>

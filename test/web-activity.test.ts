@@ -96,6 +96,45 @@ describe("bounded Web activity audit", () => {
     expect(JSON.stringify(activity.getSessions())).not.toContain("late");
   });
 
+  it("keeps the retained session count exact when the same session rolls over", () => {
+    const activity = new ActivityStore({ maxCalls: 2, maxSubcalls: 2 });
+    for (let index = 0; index < 3; index++) {
+      const tracker = activity.startCall({
+        tool: "exec",
+        sessionId: "same-session",
+        args: { source: "text(" + index + ")" },
+      });
+      tracker.finish({ status: "completed" });
+    }
+
+    expect(activity.getCalls()).toMatchObject({ total: 2 });
+    expect(activity.getSessions().items).toEqual([
+      expect.objectContaining({
+        id: "same-session",
+        callCount: 2,
+        errorCount: 0,
+      }),
+    ]);
+  });
+
+  it("retains ten thousand calls by default", () => {
+    const activity = new ActivityStore();
+    for (let index = 0; index < 10_001; index++) {
+      const tracker = activity.startCall({
+        tool: "exec",
+        sessionId: "large-session",
+        args: { source: "void 0;" },
+      });
+      tracker.finish({ status: "completed" });
+    }
+
+    expect(activity.getStats().totalCalls).toBe(10_000);
+    expect(activity.getSessions().items[0]).toMatchObject({
+      id: "large-session",
+      callCount: 10_000,
+    });
+  });
+
   it("validates retention settings and clears all derived indexes", () => {
     expect(() => new ActivityStore({ maxCalls: 0 })).toThrow("maxCalls");
     expect(() => new ActivityStore({ maxSubcalls: 1 })).toThrow("maxSubcalls");

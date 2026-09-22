@@ -8,7 +8,7 @@ interface StatsOverviewProps {
 export function StatsOverview({ stats }: StatsOverviewProps) {
   const cards = [
     {
-      label: "总调用次数",
+      label: "当前保留调用",
       value: stats.totalCalls,
       unit: "次",
       icon: Activity,

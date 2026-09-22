@@ -13,7 +13,7 @@ import { codexTarget } from "../src/codex-package.js";
 describe("configuration and platform boundaries", () => {
   it("accepts every TOML example in the user configuration guide", async () => {
     const guide = await readFile(
-      new URL("../docs/configuration.md", import.meta.url),
+      new URL("../docs/guides/configuration.md", import.meta.url),
       "utf8",
     );
     const examples = [...guide.matchAll(/^```toml\r?\n([\s\S]*?)^```/gm)];

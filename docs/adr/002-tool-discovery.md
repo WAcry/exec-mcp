@@ -52,7 +52,7 @@ URI 与游标原样传递，由下游解析；已知 URI 可直接读取，来�
 资源正文在请求时读取；当前不缓存正文，也未加入订阅、模板补全或资源管理页。
 使用 SDK 单页请求保留 nextCursor，读取时绕过缓存。enabled_tools 仅筛选工具，停用服务才排除它的资源。
 结果先交给 JS 处理，沿用传输与并发保护，模型 token 预算在最终输出时生效。
-本实例向宿主交付 export_file 的方向相反，见 [ADR-005](adr-005-file-transfer.md)。
+本实例向宿主交付 export_file 的方向相反，见 [ADR-005](005-file-transfer.md)。
 
 ## 模型契约与产品文档
 
@@ -65,8 +65,8 @@ Agent 第一次阅读应能确定参数、默认值和返回类型，并知道�
 工具描述与示例文档说明嵌套语言的语法风险；示例展示可行写法，具体构造方式由调用者选择。
 Skill 的 explicit-only 来自用户元数据；压缩后的目录自行说明路径别名和省略方式。
 
-完整语法和 schema 从代码生成。用户操作示例见 [Code Mode 示例](code-mode-examples.md)，
-配置方法见[配置指南](configuration.md)，工具描述无需重复这些教程。
+完整语法和 schema 从代码生成。用户操作示例见 [Code Mode 示例](../guides/code-mode-examples.md)，
+配置方法见[配置指南](../guides/configuration.md)，工具描述无需重复这些教程。
 
 ## Codex 参考与适配
 

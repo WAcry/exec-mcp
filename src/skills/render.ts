@@ -1,5 +1,5 @@
 // Description allocation and lossless path aliases adapted from OpenAI Codex
-// 7498521d288b9b3b96ffba4eedf089d8d6e06a84 (Apache-2.0). See THIRD_PARTY_NOTICES.md.
+// 7498521d288b9b3b96ffba4eedf089d8d6e06a84 (Apache-2.0). See proto/LICENSE.
 import type { SkillCatalog } from "./types.js";
 import { DEFAULT_SKILL_MAX_CHARS } from "./types.js";
 

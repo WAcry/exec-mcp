@@ -1,3 +1,5 @@
+// Tool descriptions and patch grammar adapted from OpenAI Codex (Apache-2.0),
+// rust-v0.155.1 and 6149914a0e59363b6777080b3e953b05d592dbac; see proto/LICENSE.
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";

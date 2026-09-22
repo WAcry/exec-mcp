@@ -23,7 +23,7 @@
 普通账户启动时保持原权限，不自动提权或降权。操作系统、外部服务及 ChatGPT 自身的授权要求继续生效。
 workdir 只决定路径解析位置，V8 的 API 限制只作用于编排 JS，Shell 仍可按账户权限访问机器。
 需要隔离不可信代码时，由操作者配置操作系统或容器。
-子进程完整继承服务环境，出站代理的范围见 [ADR-008](adr-008-environment-and-proxy.md)。
+子进程完整继承服务环境，出站代理的范围见 [ADR-008](008-environment-and-proxy.md)。
 
 ## 可达性与认证
 
@@ -53,7 +53,7 @@ Tailscale 启动前核对节点 DNS 和既有端口，保持前台运行，不�
 供应商终端输出保留，授权提示由用户回答。
 
 token 文件和父进程环境由操作者管理，服务只主动打印连接地址及状态，不打印凭据。
-安装和身份提供方要求见 [连接方式](connections.md)。取消与响应须按实际协议实现，
+安装和身份提供方要求见 [连接方式](../guides/connections.md)。取消与响应须按实际协议实现，
 某项宿主能力要经过验证后才能在契约中声明。
 
 ## 身份提供方与凭据来源
@@ -72,14 +72,14 @@ cloudflared 原生的 token 优先级高于 token-file，因此文件模式只�
 让用户可以保留其他用途的全局变量。父进程环境及其余变量不变。
 文件由本服务在内存中解密，原生客户端只接收环境值，token 不进入命令参数或打印计划。
 纯环境模式直接继承；显式文件失败时停止，避免误连其他 Tunnel。
-该适配沿用 [ADR-008](adr-008-environment-and-proxy.md) 的完整环境继承规则。
+该适配沿用 [ADR-008](008-environment-and-proxy.md) 的完整环境继承规则。
 
 ## 轻量 token 文件保护
 
 token 文件采用可逆保护，目的是减少普通明文扫描直接匹配凭据的机会。
 实现使用 Node 内建 AES-256-GCM、随机 nonce 和版本前缀，密钥由代码中的公开常量派生。
 了解程序或能读其运行环境的进程仍可取得明文。当前不引入主密码、系统钥匙串或独立密钥服务。
-Web 登录密钥也使用同一保护，长期 Cookie 和轮换规则见 [ADR-009](adr-009-web-console.md)。
+Web 登录密钥也使用同一保护，长期 Cookie 和轮换规则见 [ADR-009](009-web-console.md)。
 前缀与解码密钥属于兼容格式，升级时须继续支持旧文件。
 
 只处理明确选定的单 token 文件，包括 auth.token_file、Cloudflare token_file/TUNNEL_TOKEN_FILE、
@@ -101,7 +101,7 @@ CONTROL_PLANE_API_KEY 可由此取得，供应商 profile 保持原样，MCP 也
 ## 文档与安装
 
 本 ADR 记录身份提供方、凭据来源和冲突优先级的取舍。
-[connections.md](connections.md) 供用户查阅 Auth0 设置与启动步骤，并与这里的决定保持一致。
+[connections.md](../guides/connections.md) 供用户查阅 Auth0 设置与启动步骤，并与这里的决定保持一致。
 
 配置、密钥和运行数据存放于平台对应的用户目录，与旧 codex-mcp 分开。
 安装步骤不得依赖开发者主目录、公司 Devspace 或特定 Shell profile。安装和卸载只管理自己的文件与进程，
@@ -110,12 +110,12 @@ CONTROL_PLANE_API_KEY 可由此取得，供应商 profile 保持原样，MCP 也
 服务自身不把凭据写进 Git、日志或工具说明；用户明确输出的环境变量和命令结果仍原样保留。
 调用账户按入口规则认证，访问外部 MCP 还需获得对应授权。下游工具与资源可代理，
 UI、sampling、elicitation 及文件绑定暂不提供透明代理。
-本服务的文件绑定及独立下载入口见 [ADR-005](adr-005-file-transfer.md)，下载入口只能公开显式导出的文件，
+本服务的文件绑定及独立下载入口见 [ADR-005](005-file-transfer.md)，下载入口只能公开显式导出的文件，
 不得连同无认证的执行入口一起公开。
 
 README 写已可用的安装和连接步骤，未交付能力注明状态。
-独立 Web 控制台见 [ADR-009](adr-009-web-console.md)，下游登录仍在供应商客户端完成。
-下游启动检查和失败处理见 [ADR-002](adr-002-tool-discovery.md)。
+独立 Web 控制台见 [ADR-009](009-web-console.md)，下游登录仍在供应商客户端完成。
+下游启动检查和失败处理见 [ADR-002](002-tool-discovery.md)。
 
 ## 版本与发布
 

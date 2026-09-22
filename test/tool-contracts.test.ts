@@ -418,7 +418,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     );
     directories.push(directory);
     const doc = await readFile(
-      new URL("../docs/code-mode-examples.md", import.meta.url),
+      new URL("../docs/guides/code-mode-examples.md", import.meta.url),
       "utf8",
     );
     const heading = "## 在 exec 内构造含 Markdown 的多行补丁";

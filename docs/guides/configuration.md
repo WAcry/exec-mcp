@@ -1,7 +1,7 @@
 # 配置与运行
 
 本页供安装和维护 exec-mcp 时查阅，配置片段按需加入同一份 config.toml。
-首次启动见 [README](../README.md)，Tunnel、Auth0 和 token 文件见[连接指南](connections.md)。
+首次启动见 [README](../../README.md)，Tunnel、Auth0 和 token 文件见[连接指南](connections.md)。
 
 ## 配置文件
 

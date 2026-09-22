@@ -73,9 +73,7 @@
     "dist/src",
     "proto",
     "README.md",
-    "THIRD_PARTY_NOTICES.md",
     "AGENTS.md",
-    "ARCHITECTURE.md",
     "docs"
   ]
 }

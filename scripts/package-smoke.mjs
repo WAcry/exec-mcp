@@ -25,6 +25,16 @@ const temporary = await mkdtemp(path.join(tmpdir(), "exec-mcp-package-"));
 const run = promisify(execFile);
 const npmCli = process.env.npm_execpath;
 if (!npmCli) throw new Error("请通过 npm run test:package 执行。");
+async function relativeFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      for (const child of await relativeFiles(path.join(directory, entry.name)))
+        files.push(path.join(entry.name, child));
+    } else files.push(entry.name);
+  }
+  return files.sort();
+}
 let child;
 let client;
 let exited;
@@ -98,11 +108,29 @@ try {
   assert.ok(!manifest.dependencies["better-sqlite3"]);
   assert.ok(!manifest.devDependencies["@types/better-sqlite3"]);
   assert.ok(!(await readdir(path.dirname(cli))).includes("user-input"));
-  assert.ok(
-    !(await readdir(path.join(installed, "docs"))).includes(
-      "adr-010-async-user-input.md",
-    ),
+  const documents = await relativeFiles(path.join(root, "docs"));
+  assert.deepEqual(
+    await relativeFiles(path.join(installed, "docs")),
+    documents,
+    "Installed documentation must match the current directory layout",
   );
+  const rootDocuments = sourceManifest.files.filter((file) =>
+    file.endsWith(".md"),
+  );
+  assert.deepEqual(
+    (await readdir(installed)).filter((file) => file.endsWith(".md")).sort(),
+    [...rootDocuments].sort(),
+  );
+  for (const file of [
+    ...rootDocuments,
+    ...documents.map((file) => path.join("docs", file)),
+    path.join("proto", "LICENSE"),
+  ])
+    assert.deepEqual(
+      await readFile(path.join(installed, file)),
+      await readFile(path.join(root, file)),
+      "Packaged document differs from source: " + file,
+    );
   assert.ok(
     !(await readdir(path.join(isolated, "node_modules"))).includes(
       "better-sqlite3",

@@ -1,6 +1,6 @@
 # 连接方式
 
-本页提供连接步骤，身份提供方和凭据优先级的选择原因见 [ADR-004](adr-004-connectivity-trust.md)。
+本页提供连接步骤，身份提供方和凭据优先级的选择原因见 [ADR-004](../adr/004-connectivity-trust.md)。
 
 所有方式都使用同一套 exec/wait、终端、文件资源和 Skills。`serve` 启动本机 MCP 及配置启用的 Web/下载入口；
 `tunnel` 单独启动前台供应商客户端，登录与系统服务安装由你处理，已有 Tunnel 保持不变。

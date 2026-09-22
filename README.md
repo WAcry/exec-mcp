@@ -51,11 +51,11 @@ MCP 默认地址为 `http://127.0.0.1:8891/mcp`，Web 为 `http://127.0.0.1:8893
 | **Cloudflare Named Tunnel** | 固定域名、cloudflared，以及 exec-mcp 的公网认证配置。 |
 | **Tailscale Funnel** | 已登录的 Tailscale 节点和 Funnel 权限，以及 exec-mcp 的公网认证配置。 |
 
-按[连接指南](docs/connections.md)选择一种方式完成配置；公网接入提供 Auth0 示例。
+按[连接指南](docs/guides/connections.md)选择一种方式完成配置；公网接入提供 Auth0 示例。
 **不要将默认的无认证私有 MCP 端口直接转发到公网。** Web 管理界面也不会随 MCP Tunnel 自动公开。
 
 连接后，告诉 ChatGPT 要操作的项目路径，例如请它检查 `C:/git/my-project`，运行测试并修复失败。
-需要第三方 MCP 时，先在[配置中添加已有服务](docs/configuration.md#下游-mcp)。
+需要第三方 MCP 时，先在[配置中添加已有服务](docs/guides/configuration.md#下游-mcp)。
 所有启用服务都连接并验证成功后，exec-mcp 才报告就绪；需要登录的服务应先在本机完成登录。
 
 ## Web 控制台
@@ -81,7 +81,7 @@ Skills、下游工具目录，以及导出的文件。会话默认显示哈希�
 需要保持页面打开并连接。浏览器不支持、权限被拒绝或系统勿扰时，仍可在页面查看和作答。
 
 控制台可开关已有 MCP 和 Skill、调整已有设置并“重启执行服务”。保存配置与重启生效分开，
-不提供任意命令输入框或通用配置编辑器。局域网访问和关闭 Web 的设置见[配置指南](docs/configuration.md#web-控制台)。
+不提供任意命令输入框或通用配置编辑器。局域网访问和关闭 Web 的设置见[配置指南](docs/guides/configuration.md#web-控制台)。
 
 ## 文件、Skills 与长期运行
 
@@ -89,10 +89,10 @@ Skills、下游工具目录，以及导出的文件。会话默认显示哈希�
 导入默认不覆盖已有文件；导出默认使用私有资源，至多 32 MiB。
 更大文件可配置独立 HTTPS 下载入口，导入和 URL 导出默认单文件上限为 512 MiB。
 文件链接会过期，持有公开链接的人都可下载；实际附件展示由 ChatGPT 决定，不承诺挂载到 sandbox。
-详见[文件交付配置](docs/configuration.md#文件交付)。
+详见[文件交付配置](docs/guides/configuration.md#文件交付)。
 
 Skills 是工作流程文档，可放在用户目录或项目目录，也支持软链接。
-你可以启用或禁用 Skill，或将其设为仅在明确要求时调用，详见[Skills 配置](docs/configuration.md#skills)。
+你可以启用或禁用 Skill，或将其设为仅在明确要求时调用，详见[Skills 配置](docs/guides/configuration.md#skills)。
 
 任务执行、会话消息和审计只在当前进程内保存，各项清理操作的影响如下。
 
@@ -106,7 +106,7 @@ Skills 是工作流程文档，可放在用户目录或项目目录，也支持�
 终端缓冲与模型输出都有上限；很大的结果会标注裁剪，重要数据应保存成文件。
 补充和回答按序使用响应剩余空间，长消息可能继续排队。“已附入响应”只记录发送状态，
 模型是否读到并执行，仍需从后续回复和操作确认。
-具体可调选项与边界见[配置指南](docs/configuration.md#容量与临时状态)。
+具体可调选项与边界见[配置指南](docs/guides/configuration.md#容量与临时状态)。
 
 ## 升级与排障
 
@@ -122,10 +122,10 @@ node dist/src/cli.js serve
 ```
 
 已有配置不被覆盖。工具契约更新后，在 ChatGPT 的连接设置中刷新工具元数据；
-只开一个新聊天窗口不一定更新旧描述，步骤见[连接指南](docs/connections.md#刷新与排障)。
+只开一个新聊天窗口不一定更新旧描述，步骤见[连接指南](docs/guides/connections.md#刷新与排障)。
 
 服务启动失败时检查终端日志、配置和下游登录状态；MCP 正常而 Web 失败时，检查 Web 端口。
-默认 Shell、环境代理和 token 文件轮换分别见[配置指南](docs/configuration.md)与[连接指南](docs/connections.md)。
+默认 Shell、环境代理和 token 文件轮换分别见[配置指南](docs/guides/configuration.md)与[连接指南](docs/guides/connections.md)。
 命令、代码与结果可能交给 ChatGPT 或你调用的外部服务，自托管时也应按这一范围管理数据。
 
 ## 开发与后续计划
@@ -136,8 +136,8 @@ npm run test:package
 ```
 
 检查包括测试、类型检查与构建；独立安装验证只在临时目录打包安装，不发布 npm 包。
-开发者阅读[架构边界](ARCHITECTURE.md)，编码 Agent 从 [AGENTS.md](AGENTS.md) 开始，
-具体调用示例见 [Code Mode 示例](docs/code-mode-examples.md)。
+开发者阅读[架构边界](docs/architecture.md)，编码 Agent 从 [AGENTS.md](AGENTS.md) 开始，
+具体调用示例见 [Code Mode 示例](docs/guides/code-mode-examples.md)。
 
-未交付计划见 [Backlog](docs/BACKLOG.md)，第三方归属见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+未交付计划见 [Backlog](docs/backlog.md)。
 本项目尚未授予公开开源许可，公共 npm 分发需另行确定许可与发布流程。

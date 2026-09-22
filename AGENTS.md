@@ -27,15 +27,17 @@ README、ADR 等文档使用中文，Web UI 和现有运行错误指引也保持
 
 文档应留下选择原因和放弃其他方案的代价，以及仅看代码难以理解的约束。
 每项信息只在一处维护，其他文档链接过去。
+README.md 和 AGENTS.md 留在根目录，供用户和 Agent 进入项目。其余文档放在 docs，
+操作指南归入 guides，决策记录归入 adr；架构说明与后续计划各保留一份。
 
 | 文档 | 读者与职责 |
 | --- | --- |
 | README.md | 向用户介绍产品用途、安装与连接，并说明权限和使用限制。 |
-| docs/configuration.md、docs/connections.md | 供用户按需查阅配置和连接步骤。 |
+| [配置指南](docs/guides/configuration.md)、[连接指南](docs/guides/connections.md)及[用法示例](docs/guides/code-mode-examples.md) | 供用户和调用者按需查阅操作方法。 |
 | AGENTS.md | 供 Agent 查阅开发规则和阅读入口。 |
-| ARCHITECTURE.md | 向开发者与 Agent 说明长期职责划分。函数和文件关系直接读代码。 |
-| docs/adr-*.md | 主要供 Agent 查阅当前生效的选择、理由和代价。 |
-| [docs/BACKLOG.md](docs/BACKLOG.md) | 记录用户明确保留、尚未交付的计划与前置条件。 |
+| [架构说明](docs/architecture.md) | 向开发者与 Agent 说明长期职责划分。函数和文件关系直接读代码。 |
+| docs/adr/ | 主要供 Agent 查阅当前生效的选择、理由和代价。 |
+| [后续计划](docs/backlog.md) | 记录用户明确保留、尚未交付的计划与前置条件。 |
 
 ADR 正文保持当前有效，同一主题通常原地更新，历史由 Git 保存。
 新 ADR 替代旧决定时，标明替代关系并更新本索引，避免同时保留相反决定。
@@ -49,16 +51,16 @@ ADR 正文保持当前有效，同一主题通常原地更新，历史由 Git �
 
 | 任务 | 生效决定 |
 | --- | --- |
-| 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001 执行内核与产品边界](docs/adr-001-exec-runtime.md) |
-| ALL_TOOLS、契约发现、英文模型描述、下游 MCP | [ADR-002 工具发现与契约](docs/adr-002-tool-discovery.md) |
-| JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003 结果与执行生命周期](docs/adr-003-results-lifecycle.md) |
-| Tunnel、认证、安装、发布及机器权限 | [ADR-004 接入与信任边界](docs/adr-004-connectivity-trust.md) |
-| 原生附件、文件导入导出、资源读取与下载 URL | [ADR-005 文件传输与交付边界](docs/adr-005-file-transfer.md) |
-| Skill 发现、软链接、显式调用策略与目录预算 | [ADR-006 一次发现的 Skill 目录](docs/adr-006-skill-catalog.md) |
-| Shell 默认值、单次覆盖及精简动态契约 | [ADR-007 默认命令 Shell 与单次覆盖](docs/adr-007-command-shell.md) |
-| 完整环境继承、出站代理与 Node 20 兼容 | [ADR-008 环境、代理与 Node 20](docs/adr-008-environment-and-proxy.md) |
-| Web 控制台、局域网认证、审计边界与前端交付 | [ADR-009 可选的本机 Web 管理控制台](docs/adr-009-web-console.md) |
-| 会话备注、异步提问、Web 作答与 User Note FIFO | [ADR-010 Web 会话补充与异步提问](docs/adr-010-session-notes.md) |
+| 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001 执行内核与产品边界](docs/adr/001-exec-runtime.md) |
+| ALL_TOOLS、契约发现、英文模型描述、下游 MCP | [ADR-002 工具发现与契约](docs/adr/002-tool-discovery.md) |
+| JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003 结果与执行生命周期](docs/adr/003-results-lifecycle.md) |
+| Tunnel、认证、安装、发布及机器权限 | [ADR-004 接入与信任边界](docs/adr/004-connectivity-trust.md) |
+| 原生附件、文件导入导出、资源读取与下载 URL | [ADR-005 文件传输与交付边界](docs/adr/005-file-transfer.md) |
+| Skill 发现、软链接、显式调用策略与目录预算 | [ADR-006 一次发现的 Skill 目录](docs/adr/006-skill-catalog.md) |
+| Shell 默认值、单次覆盖及精简动态契约 | [ADR-007 默认命令 Shell 与单次覆盖](docs/adr/007-command-shell.md) |
+| 完整环境继承、出站代理与 Node 20 兼容 | [ADR-008 环境、代理与 Node 20](docs/adr/008-environment-and-proxy.md) |
+| Web 控制台、局域网认证、审计边界与前端交付 | [ADR-009 可选的本机 Web 管理控制台](docs/adr/009-web-console.md) |
+| 会话备注、异步提问、Web 作答与 User Note FIFO | [ADR-010 Web 会话补充与异步提问](docs/adr/010-session-notes.md) |
 
 ## 实现与验证
 

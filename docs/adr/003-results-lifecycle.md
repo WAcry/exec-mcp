@@ -10,7 +10,7 @@ structuredContent 与等价 JSON 文本只保留一份。处理下游结果时�
 结构化数据仍需结合 isError 判断，字段缺失也须与合法 null、数组或标量分别处理。
 
 本机函数将原值交给 JS，下游保留 CallToolResult。脚本通过 text/image/audio/generatedImage 显式输出，
-导出链接独立附带，见 [ADR-005](adr-005-file-transfer.md)。显式输出只发送一次，省去无实际消费者的兼容镜像。
+导出链接独立附带，见 [ADR-005](005-file-transfer.md)。显式输出只发送一次，省去无实际消费者的兼容镜像。
 
 大结果由 Agent 在 Code Mode 中筛选，或用 store 保存后分段 load；需要持久内容时可显式写文件。
 服务不自动把通用结果写盘，以免增加重读、路径解析和结果清理步骤。
@@ -23,8 +23,8 @@ wait 不继承 exec 的显式值。token 数量使用轻量估算，状态、句
 输入过大在操作前拒绝，结果过大则可能发生在操作之后，此时不能自动重试。
 
 用户补充与普通结果使用同一文本通道，只占剩余额度。完整消息放不下就继续排队，
-不压缩普通结果，见 [ADR-010](adr-010-session-notes.md)。
-默认值和可调项见[配置指南](configuration.md#容量与临时状态)，精确限制以 schema 和实现为准。
+不压缩普通结果，见 [ADR-010](010-session-notes.md)。
+默认值和可调项见[配置指南](../guides/configuration.md#容量与临时状态)，精确限制以 schema 和实现为准。
 编码载荷大小与进程内存分别检查，SDK 缓冲、并发请求和短期副本都会增加内存占用。
 
 ## 终端日志

@@ -25,7 +25,7 @@ PowerShell、嵌套模板和 Markdown 仍会增加字符串构造难度；描述
 保留相应错误处理和重试条件。
 
 本机执行方法包括 tools.exec_command、tools.write_stdin、tools.apply_patch 和 tools.view_image，
-发现方式见 [ADR-002](adr-002-tool-discovery.md)。读取、搜索及 Git/worktree 操作使用系统工具，
+发现方式见 [ADR-002](002-tool-discovery.md)。读取、搜索及 Git/worktree 操作使用系统工具，
 由调用者安排执行，不另设项目或任务管理功能。
 
 ## 目录与补丁
@@ -45,23 +45,24 @@ MCP 外层使用 source/workdir/files 对象，exec 内各方法保留自己的�
 TypeScript/Node 负责 MCP、配置、下游连接和平台适配。JavaScript 与补丁执行复用同一固定版本的
 Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Server 或模型循环，
 服务也不读取机器上 Codex 的配置与数据库。组件升级通过显式依赖更新，并验证调用契约。
+Codex 组件及协议的许可见 [Apache-2.0 原文](../../proto/LICENSE)，依赖自带的许可证与 NOTICE 保留。
 
 Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。
 系统路径、Shell、PTY 和进程树由平台适配处理，安装位置也按系统选择。
-实例默认 Shell 与单次覆盖见 [ADR-007](adr-007-command-shell.md)，执行器和默认说明共用解析结果。
+实例默认 Shell 与单次覆盖见 [ADR-007](007-command-shell.md)，执行器和默认说明共用解析结果。
 各平台分别验证 host、补丁入口和进程清理；bash、POSIX 信号或 systemd 等能力仅用于适用的平台。
 具体 OS/CPU 支持与版本 pin 以实现和对应发布的验证结果为准。
 
 ## 产品范围
 
-已提供可选 Web 管理控制台，见 [ADR-009](adr-009-web-console.md)。控制台独立于 ChatGPT，
+已提供可选 Web 管理控制台，见 [ADR-009](009-web-console.md)。控制台独立于 ChatGPT，
 不提供内嵌 Widget 或下游登录交互。需要用户决定时，可以在原 ChatGPT 对话沟通，
-或把问题异步提交到本会话 Web；回答与主动补充共用 User Note 通道，见 [ADR-010](adr-010-session-notes.md)。
+或把问题异步提交到本会话 Web；回答与主动补充共用 User Note 通道，见 [ADR-010](010-session-notes.md)。
 问题立即提交返回，服务不同步等待用户，也没有答案轮询工具或答复数据库。
 
-本机 Skill 只提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](adr-006-skill-catalog.md)。
+本机 Skill 只提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](006-skill-catalog.md)。
 Skill 安装与执行管理、Workspace、子 Agent、持久任务及调度框架均不在当前范围内。
-原生图片和音频可由输出助手显式发送；文件由 exec 编排，交付方式见 [ADR-005](adr-005-file-transfer.md)。
+原生图片和音频可由输出助手显式发送；文件由 exec 编排，交付方式见 [ADR-005](005-file-transfer.md)。
 
 ## 接受的代价
 

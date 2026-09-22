@@ -1,3 +1,5 @@
+import { useLocale } from "../context/LocaleContext";
+import { message, feedback, type Feedback } from "../lib/locale";
 import { useEffect, useRef, useState } from "react";
 import { Copy, Send, X, Pencil, Check, MessageSquare } from "lucide-react";
 import { apiFetch } from "../lib/api";
@@ -52,9 +54,11 @@ export function SessionNotesPanel({
   onAnswerDraft: (questionId: string, draft: AnswerDraft) => void;
   onAnswerSent: (questionId: string, draftId: string) => void;
 }) {
+  const { t, locale } = useLocale();
+
   const [data, setData] = useState<SessionNotesPage | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [error, setError] = useState<Feedback>("");
+  const [notice, setNotice] = useState<Feedback>("");
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
   const [label, setLabel] = useState<string | null>(null);
@@ -143,15 +147,14 @@ export function SessionNotesPanel({
         setRefresh((v) => v + 1);
         setNotice(
           saved.status === "pending"
-            ? "已保存，等待本对话的工具响应。"
+            ? message("notes.saved")
             : saved.status === "attached"
-              ? "该消息已附入工具响应。"
-              : "该消息已撤回；再次发送请创建新消息。",
+              ? message("notes.alreadyAttached")
+              : message("notes.alreadyWithdrawn"),
         );
       }
     } catch (e) {
-      if (mounted.current)
-        setError(`发送未确认：${String(e)}。草稿已保留；相同内容重试会去重。`);
+      if (mounted.current) setError(message("notes.sendFailed", String(e)));
     } finally {
       pendingSend.current = false;
       if (mounted.current) setSending(false);
@@ -194,9 +197,9 @@ export function SessionNotesPanel({
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      if (mounted.current) setNotice("已复制，可粘贴到原 ChatGPT 对话。");
+      if (mounted.current) setNotice(message("notes.copied"));
     } catch {
-      if (mounted.current) setError("复制失败，请手动选择消息文本。");
+      if (mounted.current) setError(message("notes.copyFailed"));
     }
   };
 
@@ -208,7 +211,7 @@ export function SessionNotesPanel({
       <section
         role="dialog"
         aria-modal="true"
-        aria-label="会话补充消息"
+        aria-label={t("notes.dialog")}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-xl h-full bg-white dark:bg-zinc-950 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col text-zinc-900 dark:text-zinc-100"
       >
@@ -216,11 +219,11 @@ export function SessionNotesPanel({
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
-              会话沟通
+              {t("notes.title")}
             </h2>
             <button
               className={actionClass}
-              aria-label="关闭补充消息"
+              aria-label={t("notes.close")}
               onClick={onClose}
             >
               <X className="w-4 h-4" />
@@ -235,7 +238,7 @@ export function SessionNotesPanel({
           {label === null ? (
             <div className="flex items-center gap-2">
               <span className="text-xs break-all">
-                {data?.label || "未设置备注名"}
+                {data?.label || t("notes.noLabel")}
               </span>
               <button
                 className={actionClass}
@@ -243,44 +246,42 @@ export function SessionNotesPanel({
                 onClick={() => setLabel(data?.label ?? "")}
               >
                 <Pencil className="w-3 h-3" />
-                备注名
+                {t("notes.label")}
               </button>
             </div>
           ) : (
             <div className="flex gap-2 items-center">
               <input
-                aria-label="会话备注名"
+                aria-label={t("notes.labelInput")}
                 value={label}
                 maxLength={256}
                 onChange={(e) => setLabel(e.target.value)}
-                placeholder="只在本机显示，留空恢复哈希"
+                placeholder={t("notes.labelPlaceholder")}
                 className="min-w-0 flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-transparent px-2 py-1.5 text-xs"
               />
               <button
                 className={actionClass}
                 disabled={saving || bytes(label) > NOTE_LABEL_BYTES}
                 onClick={() => void rename()}
-                aria-label="保存备注名"
+                aria-label={t("notes.labelSave")}
               >
                 <Check className="w-3 h-3" />
               </button>
               <button
                 className={actionClass}
                 onClick={() => setLabel(null)}
-                aria-label="取消编辑备注名"
+                aria-label={t("notes.labelCancel")}
               >
                 <X className="w-3 h-3" />
               </button>
             </div>
           )}
-          <p className="text-xs text-zinc-500">
-            只发给此对话；随工具自然返回附带，不打断正在执行的命令。
-          </p>
+          <p className="text-xs text-zinc-500">{t("notes.delivery")}</p>
         </header>
 
         <div
           role="tablist"
-          aria-label="会话沟通内容"
+          aria-label={t("notes.tabs")}
           className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 px-4"
         >
           <button
@@ -289,8 +290,10 @@ export function SessionNotesPanel({
             onClick={() => setTab("questions")}
             className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "questions" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
           >
-            问题
-            {data?.pendingQuestions ? ` · ${data.pendingQuestions} 待回答` : ""}
+            {t("notes.questions")}
+            {data?.pendingQuestions
+              ? t("notes.questionsPending", data.pendingQuestions)
+              : ""}
           </button>
           <button
             role="tab"
@@ -298,7 +301,10 @@ export function SessionNotesPanel({
             onClick={() => setTab("notes")}
             className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "notes" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
           >
-            补充消息{data?.pendingCount ? ` · ${data.pendingCount} 待附带` : ""}
+            {t("notes.messages")}
+            {data?.pendingCount
+              ? t("notes.messagesPending", data.pendingCount)
+              : ""}
           </button>
         </div>
         {tab === "questions" && (
@@ -308,7 +314,7 @@ export function SessionNotesPanel({
                 role="alert"
                 className="px-5 pt-3 text-xs text-rose-600 break-words"
               >
-                {error}
+                {feedback(error, t)}
               </p>
             )}
             <SessionQuestions
@@ -325,14 +331,14 @@ export function SessionNotesPanel({
           <>
             <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
               <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>消息记录</span>
-                <span>{data?.pendingCount ?? 0} 条待附带</span>
+                <span>{t("notes.history")}</span>
+                <span>{t("notes.pendingCount", data?.pendingCount ?? 0)}</span>
               </div>
               {!data ? (
-                <p className="text-xs text-zinc-500">正在读取…</p>
+                <p className="text-xs text-zinc-500">{t("common.loading")}</p>
               ) : data.items.length === 0 ? (
                 <p className="text-xs text-zinc-500 py-10 text-center">
-                  补充上下文、约束或改变主意，直接写在这里。
+                  {t("notes.empty")}
                 </p>
               ) : (
                 data.items.map((note) => (
@@ -344,14 +350,14 @@ export function SessionNotesPanel({
                     <div className="flex justify-between flex-wrap gap-1 text-[11px] text-zinc-500">
                       <span>
                         #{note.sequence} ·{" "}
-                        {new Date(note.createdAt).toLocaleString()}
+                        {new Date(note.createdAt).toLocaleString(locale)}
                       </span>
                       <span>
                         {note.status === "pending"
-                          ? "待附带"
+                          ? t("notes.pending")
                           : note.status === "attached"
-                            ? "已附入工具响应"
-                            : "已撤回"}
+                            ? t("notes.attached")
+                            : t("notes.withdrawn")}
                       </span>
                     </div>
                     <p className="text-sm whitespace-pre-wrap break-words max-h-64 overflow-auto">
@@ -359,7 +365,8 @@ export function SessionNotesPanel({
                     </p>
                     {note.callId && (
                       <p className="text-[10px] font-mono text-zinc-500 break-all">
-                        响应记录：{note.callId}
+                        {t("notes.call")}
+                        {note.callId}
                       </p>
                     )}
                     <div className="flex gap-2">
@@ -368,14 +375,14 @@ export function SessionNotesPanel({
                         onClick={() => void copy(note.text)}
                       >
                         <Copy className="w-3 h-3" />
-                        复制
+                        {t("common.copy")}
                       </button>
                       {note.status === "pending" && (
                         <button
                           className={actionClass}
                           onClick={() => void withdraw(note.id)}
                         >
-                          撤回
+                          {t("notes.withdraw")}
                         </button>
                       )}
                     </div>
@@ -389,7 +396,7 @@ export function SessionNotesPanel({
                     disabled={page <= 1}
                     onClick={() => setPage((v) => v - 1)}
                   >
-                    较新
+                    {t("notes.newer")}
                   </button>
                   <span>
                     {page} / {data.totalPages}
@@ -399,7 +406,7 @@ export function SessionNotesPanel({
                     disabled={page >= data.totalPages}
                     onClick={() => setPage((v) => v + 1)}
                   >
-                    更早
+                    {t("notes.older")}
                   </button>
                 </div>
               )}
@@ -411,7 +418,7 @@ export function SessionNotesPanel({
                   role="alert"
                   className="text-xs text-rose-600 dark:text-rose-400 break-words"
                 >
-                  {error}
+                  {feedback(error, t)}
                 </p>
               )}
               {notice && (
@@ -419,11 +426,11 @@ export function SessionNotesPanel({
                   role="status"
                   className="text-xs text-zinc-600 dark:text-zinc-400"
                 >
-                  {notice}
+                  {feedback(notice, t)}
                 </p>
               )}
               <label htmlFor="note-body" className="text-xs font-medium">
-                发送补充
+                {t("notes.send")}
               </label>
               <textarea
                 ref={input}
@@ -433,15 +440,16 @@ export function SessionNotesPanel({
                 maxLength={NOTE_MAX_BYTES}
                 disabled={sending}
                 rows={4}
-                placeholder="例如：先保留现有配置；测试完成后再修改默认值。"
+                placeholder={t("notes.placeholder")}
                 className="w-full resize-y max-h-60 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
               />
               <div className="flex items-center justify-between">
                 <span
                   className={`text-[11px] font-mono ${bodyBytes > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
                 >
-                  {bodyBytes.toLocaleString()} /{" "}
-                  {NOTE_MAX_BYTES.toLocaleString()} UTF-8 字节
+                  {bodyBytes.toLocaleString(locale)} /{" "}
+                  {NOTE_MAX_BYTES.toLocaleString(locale)}{" "}
+                  {t("common.utf8Bytes")}
                 </span>
                 <button
                   className={actionClass}
@@ -454,12 +462,11 @@ export function SessionNotesPanel({
                   onClick={() => void send()}
                 >
                   <Send className="w-3 h-3" />
-                  {sending ? "保存中…" : "发送补充"}
+                  {sending ? t("common.saving") : t("notes.send")}
                 </button>
               </div>
               <p className="text-[11px] leading-relaxed text-zinc-500">
-                按顺序利用响应剩余额度，长消息可能继续排队；已附带不代表已读。临时保留
-                72 小时，程序退出后丢失。可随时复制到原对话。
+                {t("notes.retention")}
               </p>
             </footer>
           </>

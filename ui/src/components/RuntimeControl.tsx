@@ -1,7 +1,10 @@
+import { useLocale } from "../context/LocaleContext";
 import { RotateCw } from "lucide-react";
 import { useManagement } from "../context/ManagementContext";
 
 export function RuntimeControl() {
+  const { t } = useLocale();
+
   const { data, busy, error, restart } = useManagement();
   if (!data?.available) return null;
   return (
@@ -16,26 +19,26 @@ export function RuntimeControl() {
             }
           >
             {data.state === "restarting"
-              ? "正在重新加载执行服务…"
+              ? t("runtime.reloading")
               : data.pending
-                ? "配置已保存，重启后生效"
-                : "运行配置已生效"}
+                ? t("runtime.pending")
+                : t("runtime.applied")}
           </span>
-          <span className="ml-3 hidden sm:inline">
-            重启将清空临时会话、终端和内存，重新加载 MCP / Skills。
-          </span>
+          <span className="ml-3 hidden sm:inline">{t("runtime.help")}</span>
         </div>
         <button
           type="button"
           disabled={busy}
           onClick={() => void restart()}
-          title="停止当前执行并重新加载配置；会话存储、终端及导出链接会失效"
+          title={t("runtime.restartTitle")}
           className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
         >
           <RotateCw
             className={`h-3.5 w-3.5 ${data.state === "restarting" ? "animate-spin" : ""}`}
           />
-          {data.state === "restarting" ? "重启中" : "重启执行服务"}
+          {data.state === "restarting"
+            ? t("header.restarting")
+            : t("runtime.restart")}
         </button>
       </div>
       {(error || data.error) && (
@@ -43,12 +46,13 @@ export function RuntimeControl() {
           role="alert"
           className="break-words text-rose-600 dark:text-rose-400"
         >
-          {error || data.error} 修正后可再次重启。
+          {error || data.error}
+          {t("runtime.retry")}
         </p>
       )}
       {data.settings?.web === false && data.pending && (
         <p className="text-amber-700 dark:text-amber-400">
-          本次重启将关闭 Web UI；再次启用需编辑配置并从终端启动。
+          {t("runtime.webClosing")}
         </p>
       )}
     </section>

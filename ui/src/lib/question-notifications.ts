@@ -1,4 +1,5 @@
 import type { SessionNotesEvent } from "../../../src/session-notes-types.js";
+import { createTranslator, type Translate } from "./locale.js";
 
 export const QUESTION_NOTIFICATION_SETTING = "exec-mcp:question-notifications";
 const HISTORY_KEY = "exec-mcp:question-notifications:seen";
@@ -25,6 +26,7 @@ export class QuestionNotifications {
   constructor(
     private readonly openSession: (id: string) => void,
     private readonly changed: () => void,
+    private readonly t: Translate = createTranslator("zh-CN"),
   ) {
     this.refresh();
   }
@@ -79,10 +81,7 @@ export class QuestionNotifications {
 
   test(): void {
     if (this.closed || this.state !== "enabled") return;
-    this.show(
-      "这是测试通知；新问题到达时会在这里提醒。",
-      "exec-mcp-question-test",
-    );
+    this.show(this.t("notification.testBody"), "exec-mcp-question-test");
   }
 
   async receive(event: SessionNotesEvent): Promise<void> {
@@ -104,7 +103,7 @@ export class QuestionNotifications {
       const shortId = `${event.sessionId.slice(0, 8)}…${event.sessionId.slice(-4)}`;
       if (
         !this.show(
-          `会话 ${shortId} 有 ${request.count} 个新问题，点击作答。`,
+          this.t("notification.newQuestions", shortId, request.count),
           `exec-mcp-question-${request.id}`,
           event.sessionId,
         )
@@ -152,10 +151,13 @@ export class QuestionNotifications {
 
   private show(body: string, tag: string, sessionId?: string): boolean {
     try {
-      const notification = new window.Notification("EXEC MCP · 提问提醒", {
-        body,
-        tag,
-      });
+      const notification = new window.Notification(
+        this.t("notification.title"),
+        {
+          body,
+          tag,
+        },
+      );
       this.active.add(notification);
       if (this.active.size > 32) {
         const oldest = this.active.values().next().value!;

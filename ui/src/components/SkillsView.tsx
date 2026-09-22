@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import { useState, useEffect, useCallback } from "react";
 import type { SkillsResponse } from "../types";
 import { apiFetch } from "../lib/api";
@@ -12,6 +13,8 @@ import {
 } from "lucide-react";
 
 export function SkillsView() {
+  const { t } = useLocale();
+
   const management = useManagement();
   const [data, setData] = useState<SkillsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,26 +51,23 @@ export function SkillsView() {
         <div>
           <h2 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
             <FileCode2 className="w-3.5 h-3.5 text-zinc-400" />
-            Skills 目录
+            {t("nav.skills")}
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            显示已发现的 Skill，包括已停用项；开关保存到配置，重启后对 Agent
-            生效。
+            {t("skills.help")}
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0">
           <div className="flex items-center gap-2 text-xs font-mono text-zinc-500 dark:text-zinc-400 bg-zinc-50 dark:bg-zinc-950 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800">
-            <span>预算:</span>
+            <span>{t("skills.budget")}</span>
             <div className="w-16 h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
               <div
                 className="h-full bg-zinc-600 dark:bg-zinc-400 rounded-full transition-all"
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <span>
-              {totalChars}/{maxChars} 字符 ({pct}%)
-            </span>
+            <span>{t("skills.characters", totalChars, maxChars, pct)}</span>
           </div>
           <button
             onClick={fetchSkills}
@@ -76,7 +76,7 @@ export function SkillsView() {
             <RefreshCw
               className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
             />
-            刷新
+            {t("common.refresh")}
           </button>
         </div>
       </div>
@@ -89,10 +89,10 @@ export function SkillsView() {
         className="flex gap-2"
       >
         <input
-          aria-label="Skill 项目目录"
+          aria-label={t("skills.directory")}
           value={workdir}
           onChange={(event) => setWorkdir(event.target.value)}
-          placeholder="可选：项目工作目录；留空扫描用户级 Skills"
+          placeholder={t("skills.placeholder")}
           className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-900"
         />
         <button
@@ -100,7 +100,7 @@ export function SkillsView() {
           disabled={loading}
           className="rounded-lg border border-zinc-200 px-3 text-xs dark:border-zinc-700"
         >
-          查看目录
+          {t("skills.view")}
         </button>
       </form>
       {error && (
@@ -113,7 +113,7 @@ export function SkillsView() {
         <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300 space-y-1">
           <div className="font-semibold flex items-center gap-1.5">
             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            Skills 扫描提示:
+            {t("skills.warnings")}
           </div>
           <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px]">
             {data.warnings.map((w, i) => (
@@ -126,7 +126,7 @@ export function SkillsView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {!data || data.skills.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
-            未在所选范围发现 Skill。
+            {t("skills.empty")}
           </div>
         ) : (
           data.skills.map((skill) => (
@@ -144,19 +144,18 @@ export function SkillsView() {
                   </h3>
                   {!skill.implicit && (
                     <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 whitespace-nowrap">
-                      仅显式调用
+                      {t("skills.explicit")}
                     </span>
                   )}
                 </div>
 
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  {skill.description ||
-                    "仅在用户明确指定时读取；触发描述未向模型公开。"}
+                  {skill.description || t("skills.explicitHelp")}
                 </p>
                 {management.data?.available && (
                   <div className="mt-3">
                     <ConfigToggle
-                      label={`启用 Skill ${skill.name}`}
+                      label={t("skills.enable", skill.name)}
                       checked={skill.enabled !== false}
                       disabled={management.busy}
                       onChange={(enabled) =>

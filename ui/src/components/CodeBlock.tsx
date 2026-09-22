@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import React, { useState } from "react";
 import { Copy, Check } from "lucide-react";
 import Prism from "prismjs";
@@ -19,6 +20,8 @@ export function CodeBlock({
   className = "",
   maxHeight = "max-h-96",
 }: CodeBlockProps) {
+  const { t } = useLocale();
+
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
@@ -48,19 +51,19 @@ export function CodeBlock({
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-700 transition-colors cursor-pointer"
-          title="复制内容"
+          title={t("common.copyContent")}
         >
           {copyState === "copied" ? (
             <>
               <Check className="w-3 h-3 text-emerald-400" />
-              <span className="text-emerald-400">已复制</span>
+              <span className="text-emerald-400">{t("common.copied")}</span>
             </>
           ) : copyState === "failed" ? (
-            <span className="text-rose-400">复制失败</span>
+            <span className="text-rose-400">{t("common.copyFailed")}</span>
           ) : (
             <>
               <Copy className="w-3 h-3" />
-              <span>复制</span>
+              <span>{t("common.copy")}</span>
             </>
           )}
         </button>

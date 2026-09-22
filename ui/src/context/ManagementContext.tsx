@@ -115,6 +115,6 @@ export function ManagementProvider({ children }: { children: ReactNode }) {
 }
 export function useManagement() {
   const value = useContext(Context);
-  if (!value) throw new Error("缺少管理状态上下文。");
+  if (!value) throw new Error("Missing ManagementProvider");
   return value;
 }

@@ -1,3 +1,4 @@
+import { useLocale } from "./context/LocaleContext";
 import { useState, useEffect, useCallback } from "react";
 import { Header } from "./components/Header";
 import { StatsOverview } from "./components/StatsOverview";
@@ -31,6 +32,8 @@ export function App() {
   );
 }
 function ConsoleApp() {
+  const { t } = useLocale();
+
   const management = useManagement();
   const { isAuthenticated, isVerifying, systemStatus, refreshStatus } =
     useAuth();
@@ -208,13 +211,13 @@ function ConsoleApp() {
   }, [isAuthenticated]);
 
   const handleClearHistory = async () => {
-    if (!confirm("确定清空调用审计吗？会话备注和补充消息保留。")) return;
+    if (!confirm(t("app.clearConfirm"))) return;
     try {
       await apiFetch("/api/calls", { method: "DELETE" });
       setCallsPage(1);
       await Promise.all([fetchCalls(), fetchSessions(), refreshStatus()]);
     } catch (err) {
-      alert("清空失败: " + String(err));
+      alert(t("app.clearFailed") + String(err));
     }
   };
 
@@ -230,7 +233,7 @@ function ConsoleApp() {
   if (isVerifying) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-[#09090b] flex items-center justify-center text-xs text-zinc-500">
-        正在检查 Web UI 访问权限…
+        {t("app.checkingAuth")}
       </div>
     );
   }
@@ -259,8 +262,10 @@ function ConsoleApp() {
             }}
             className="w-full mb-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 px-4 py-3 text-left text-sm text-indigo-700 dark:text-indigo-300 cursor-pointer"
           >
-            {sessionsData.pendingQuestionsTotal} 个问题待回答
-            <span className="ml-2 text-xs opacity-80">查看所属会话 →</span>
+            {t("app.pendingQuestions", sessionsData.pendingQuestionsTotal)}
+            <span className="ml-2 text-xs opacity-80">
+              {t("app.viewConversations")}
+            </span>
           </button>
         )}
         <MemoryWatermark memory={systemStatus?.memory} />
@@ -270,7 +275,7 @@ function ConsoleApp() {
         {activeTab === "calls" && callsFilters.sessionId && (
           <div className="mb-3 flex items-center justify-between gap-2 text-xs">
             <span className="font-mono text-zinc-500 truncate">
-              会话：
+              {t("app.session")}
               {sessionsData?.items.find((s) => s.id === callsFilters.sessionId)
                 ?.label || callsFilters.sessionId}
             </span>
@@ -279,7 +284,7 @@ function ConsoleApp() {
               onClick={() => openConversation(callsFilters.sessionId!)}
               className="shrink-0 px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 disabled:opacity-40 cursor-pointer"
             >
-              发送补充
+              {t("notes.send")}
             </button>
           </div>
         )}
@@ -373,7 +378,7 @@ function ConsoleApp() {
       )}
 
       <footer className="border-t border-zinc-200/80 dark:border-zinc-800/80 py-5 text-center text-xs text-zinc-400 dark:text-zinc-500">
-        <p>EXEC MCP • 本机工具代码执行与审计控制台</p>
+        <p>{t("app.footer")}</p>
       </footer>
     </div>
   );

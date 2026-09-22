@@ -21,7 +21,7 @@ export async function apiFetch<T>(
     throw new Error("UNAUTHORIZED");
   }
   if (!response.ok) {
-    let message = `请求失败：HTTP ${response.status}`;
+    let message = `Request failed: HTTP ${response.status}`;
     try {
       const body = (await response.json()) as {
         message?: unknown;

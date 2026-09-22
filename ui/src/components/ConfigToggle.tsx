@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 export function ConfigToggle({
   checked,
   disabled,
@@ -9,6 +10,8 @@ export function ConfigToggle({
   label: string;
   onChange(value: boolean): void;
 }) {
+  const { t } = useLocale();
+
   return (
     <button
       type="button"
@@ -26,7 +29,9 @@ export function ConfigToggle({
           className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0"}`}
         />
       </span>
-      <span className="text-zinc-500">{checked ? "已启用" : "已停用"}</span>
+      <span className="text-zinc-500">
+        {checked ? t("common.enabled") : t("common.disabled")}
+      </span>
     </button>
   );
 }

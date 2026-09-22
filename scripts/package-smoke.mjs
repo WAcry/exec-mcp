@@ -297,7 +297,15 @@ enabled = true
   assert.match(JSON.stringify(direct.content), /PACKAGED_DIRECT_CALL/);
   const webPage = await fetch(started.web);
   assert.equal(webPage.status, 200);
-  assert.match(await webPage.text(), /EXEC MCP 控制台/);
+  const webHtml = await webPage.text();
+  assert.ok(webHtml.includes("<title>EXEC MCP Console</title>"));
+  const uiScript = /<script[^>]+src="([^"]+[.]js)"/.exec(webHtml)?.[1];
+  assert.ok(uiScript, "Packaged console must load its language catalog");
+  const uiBundleResponse = await fetch(new URL(uiScript, started.web));
+  assert.equal(uiBundleResponse.status, 200);
+  const uiBundle = await uiBundleResponse.text();
+  assert.ok(uiBundle.includes("Interface language"));
+  assert.ok(uiBundle.includes("界面语言"));
   const webStatus = await fetch(new URL("/api/status", started.web));
   assert.equal(webStatus.status, 200);
   const status = await webStatus.json();

@@ -1,4 +1,5 @@
 import type { CallRecord } from "../types.js";
+import { createTranslator, type Translate } from "./locale.js";
 
 /** Preserve actual input keys and false/zero/empty values; source text has its own readable view. */
 export function callInput(call: Pick<CallRecord, "tool" | "args">) {
@@ -40,19 +41,20 @@ export function hasSubcalls(call: CallRecord): boolean {
 
 export function callStatusLabel(
   call: Pick<CallRecord, "tool" | "status" | "output">,
+  t: Translate = createTranslator("zh-CN"),
 ): string {
   const codeMode = call.tool === "exec" || call.tool === "wait";
   switch (call.status) {
     case "running":
-      return "调用中";
+      return t("status.running");
     case "completed":
-      return codeMode ? "脚本完成" : "调用完成";
+      return codeMode ? t("status.completed") : t("calls.completed");
     case "terminated":
-      return "已终止";
+      return t("common.stopped");
     case "error":
-      return "报错 / 非零退出";
+      return t("detail.failed");
     case "yielding": {
-      if (codeMode) return "脚本仍在运行";
+      if (codeMode) return t("status.yielding");
       const output =
         call.output && typeof call.output === "object"
           ? (call.output as Record<string, unknown>)
@@ -67,8 +69,8 @@ export function callStatusLabel(
           ? structured.result
           : structured;
       return value && typeof value === "object" && "exit_code" in value
-        ? "进程已退出，输出待取"
-        : "终端运行或输出待取";
+        ? t("status.exited")
+        : t("status.terminal");
     }
   }
 }

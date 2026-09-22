@@ -1,4 +1,6 @@
+import { useLocale } from "../context/LocaleContext";
 import { useTheme } from "../context/ThemeContext";
+import { LanguageControl } from "./LanguageControl";
 import { useAuth } from "../context/AuthContext";
 import { VERSION } from "../../../src/version";
 import type { ReactNode } from "react";
@@ -29,23 +31,25 @@ export function Header({
   online,
   notificationControl,
 }: HeaderProps) {
+  const { t } = useLocale();
+
   const { theme, setTheme } = useTheme();
   const { systemStatus, logout } = useAuth();
 
   const navItems = [
-    { id: "calls", label: "调用审计流", icon: Activity },
-    { id: "sessions", label: "会话组", icon: Layers },
-    { id: "terminals", label: "活动终端", icon: Terminal },
-    { id: "mcp", label: "下游 MCP", icon: Wrench },
-    { id: "skills", label: "Skills 目录", icon: FileCode2 },
-    { id: "artifacts", label: "产物附件", icon: HardDrive },
-    { id: "config", label: "服务配置", icon: Settings },
+    { id: "calls", label: t("nav.calls"), icon: Activity },
+    { id: "sessions", label: t("nav.sessions"), icon: Layers },
+    { id: "terminals", label: t("nav.terminals"), icon: Terminal },
+    { id: "mcp", label: t("nav.mcp"), icon: Wrench },
+    { id: "skills", label: t("nav.skills"), icon: FileCode2 },
+    { id: "artifacts", label: t("nav.artifacts"), icon: HardDrive },
+    { id: "config", label: t("nav.config"), icon: Settings },
   ];
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200/80 dark:border-zinc-800/80 bg-white/95 dark:bg-[#09090b]/95 backdrop-blur-md transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-15 gap-3">
+        <div className="flex flex-wrap sm:flex-nowrap items-center justify-between min-h-15 py-2 gap-2">
           {/* Brand & Instance Info */}
           <div className="flex items-center gap-3 shrink-0">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-mono font-bold text-xs tracking-wider shadow-xs border border-zinc-800 dark:border-zinc-200 shrink-0">
@@ -69,12 +73,12 @@ export function Header({
                   />
                   <span className="whitespace-nowrap">
                     {!online
-                      ? "已断开"
+                      ? t("header.disconnected")
                       : systemStatus?.status === "restarting"
-                        ? "重启中"
+                        ? t("header.restarting")
                         : systemStatus?.status === "error"
-                          ? "需检查"
-                          : "就绪"}
+                          ? t("header.error")
+                          : t("header.ready")}
                   </span>
                 </span>
                 <span className="text-zinc-300 dark:text-zinc-700">•</span>
@@ -109,19 +113,24 @@ export function Header({
 
           {/* Right Actions: SSE Status & Theme Toggle */}
           <div className="flex items-center gap-2 shrink-0">
+            <LanguageControl />
             {notificationControl}
             <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-mono bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200/80 dark:border-zinc-800 whitespace-nowrap shrink-0">
               <span
                 className={`w-1.5 h-1.5 rounded-full shrink-0 ${online ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
               />
-              <span>{online ? "事件流已连接" : "事件流已断开"}</span>
+              <span>
+                {online
+                  ? t("header.eventsConnected")
+                  : t("header.eventsDisconnected")}
+              </span>
             </div>
 
             {systemStatus && !systemStatus.isLoopback && (
               <button
                 onClick={() => void logout()}
                 className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                title="退出 Web UI"
+                title={t("header.logout")}
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
@@ -136,7 +145,7 @@ export function Header({
                     ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs"
                     : "hover:text-zinc-900 dark:hover:text-zinc-100"
                 }`}
-                title="亮色模式"
+                title={t("theme.light")}
               >
                 <Sun className="w-3.5 h-3.5" />
               </button>
@@ -147,7 +156,7 @@ export function Header({
                     ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs"
                     : "hover:text-zinc-900 dark:hover:text-zinc-100"
                 }`}
-                title="暗色模式"
+                title={t("theme.dark")}
               >
                 <Moon className="w-3.5 h-3.5" />
               </button>
@@ -158,7 +167,7 @@ export function Header({
                     ? "bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-xs"
                     : "hover:text-zinc-900 dark:hover:text-zinc-100"
                 }`}
-                title="跟随系统"
+                title={t("theme.system")}
               >
                 <Laptop className="w-3.5 h-3.5" />
               </button>

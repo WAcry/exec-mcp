@@ -1,3 +1,5 @@
+import { useLocale } from "../context/LocaleContext";
+import { message, feedback, type Feedback } from "../lib/locale";
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Send } from "lucide-react";
 import { apiFetch } from "../lib/api";
@@ -34,8 +36,10 @@ export function QuestionCard({
   onSent: (id: string) => void;
   onChange: () => void;
 }) {
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const { t, locale } = useLocale();
+
+  const [error, setError] = useState<Feedback>("");
+  const [notice, setNotice] = useState<Feedback>("");
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -62,9 +66,9 @@ export function QuestionCard({
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      if (mounted.current) setNotice("已复制，可粘贴到原对话。");
+      if (mounted.current) setNotice(message("question.copied"));
     } catch {
-      if (mounted.current) setError("复制失败，请手动选择答复文本。");
+      if (mounted.current) setError(message("question.copyFailed"));
     }
   };
   const submit = async () => {
@@ -88,12 +92,12 @@ export function QuestionCard({
       if (mounted.current)
         setNotice(
           saved.status === "withdrawn"
-            ? "这份答复已撤回，可以重新作答。"
-            : "答复已保存，将随本对话的工具响应附带。",
+            ? message("question.previousWithdrawn")
+            : message("question.saved"),
         );
     } catch (e) {
       if (mounted.current)
-        setError(`提交未确认：${String(e)}。草稿已保留；同一提交重试会去重。`);
+        setError(message("question.submitFailed", String(e)));
       onChange();
     } finally {
       inFlight.current = false;
@@ -111,7 +115,7 @@ export function QuestionCard({
         { method: "DELETE" },
       );
       onChange();
-      if (mounted.current) setNotice("答复已撤回，可以重新作答。");
+      if (mounted.current) setNotice(message("question.withdrawn"));
     } catch (e) {
       if (mounted.current) setError(String(e));
     } finally {
@@ -126,7 +130,8 @@ export function QuestionCard({
     >
       <div className="flex justify-between items-center gap-2 text-[11px] text-zinc-500">
         <span>
-          Agent 提问 · {new Date(question.createdAt).toLocaleString()}
+          {t("question.fromAgent")}{" "}
+          {new Date(question.createdAt).toLocaleString(locale)}
         </span>
         <span
           className={
@@ -135,7 +140,7 @@ export function QuestionCard({
               : ""
           }
         >
-          {question.pending ? "待回答" : "已回答"}
+          {question.pending ? t("question.pending") : t("question.answered")}
         </span>
       </div>
       <h3 className="text-sm font-semibold whitespace-pre-wrap break-words">
@@ -144,13 +149,13 @@ export function QuestionCard({
       {question.pending ? (
         <>
           {question.delivery === "withdrawn" && (
-            <p className="text-xs text-zinc-500">
-              上一份答复已撤回，请重新选择。
-            </p>
+            <p className="text-xs text-zinc-500">{t("question.selectAgain")}</p>
           )}
           <fieldset disabled={busy} className="space-y-2">
-            <legend className="sr-only">{question.title}：选择答案</legend>
-            {[...question.options, "以上都不是"].map((option, index) => {
+            <legend className="sr-only">
+              {t("question.legend", question.title)}
+            </legend>
+            {[...question.options, t("question.none")].map((option, index) => {
               const value = index === question.options.length ? null : index;
               const selected = choice !== undefined && choice === value;
               return (
@@ -170,7 +175,7 @@ export function QuestionCard({
                   </span>
                   {index === 0 && (
                     <span className="text-[10px] shrink-0 text-indigo-600 dark:text-indigo-400">
-                      推荐
+                      {t("question.recommended")}
                     </span>
                   )}
                 </label>
@@ -181,7 +186,7 @@ export function QuestionCard({
             className="block text-xs font-medium"
             htmlFor={`answer-note-${question.id}`}
           >
-            {choice === null ? "你的回答（必填）" : "补充说明（可选）"}
+            {choice === null ? t("question.required") : t("question.optional")}
           </label>
           <textarea
             id={`answer-note-${question.id}`}
@@ -190,15 +195,18 @@ export function QuestionCard({
             maxLength={NOTE_MAX_BYTES}
             disabled={busy}
             onChange={(e) => change({ note: e.target.value })}
-            placeholder="例如：采用这个方案，但先不要迁移现有数据。"
+            placeholder={t("question.placeholder")}
             className="w-full resize-y max-h-72 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
           <div className="flex flex-wrap justify-between items-center gap-2">
             <span
               className={`text-[11px] ${byteLength > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
             >
-              完整答复 {byteLength.toLocaleString()} /{" "}
-              {NOTE_MAX_BYTES.toLocaleString()} 字节
+              {t(
+                "question.bytes",
+                byteLength.toLocaleString(locale),
+                NOTE_MAX_BYTES.toLocaleString(locale),
+              )}
             </span>
             <button
               className={`${button} bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 hover:bg-zinc-700 dark:hover:bg-zinc-200`}
@@ -206,7 +214,7 @@ export function QuestionCard({
               onClick={() => void submit()}
             >
               <Send className="w-3 h-3" />
-              {busy ? "保存中…" : "提交答复"}
+              {busy ? t("common.saving") : t("question.submit")}
             </button>
           </div>
         </>
@@ -218,7 +226,7 @@ export function QuestionCard({
                 <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
                 <span className="whitespace-pre-wrap break-words">
                   {question.answer.option_index === null
-                    ? "以上都不是"
+                    ? t("question.none")
                     : question.options[question.answer.option_index]}
                 </span>
               </p>
@@ -231,10 +239,10 @@ export function QuestionCard({
             <div className="flex flex-wrap justify-between items-center gap-2 text-xs text-zinc-500">
               <span>
                 {question.delivery === "attached"
-                  ? "已附入工具响应"
+                  ? t("notes.attached")
                   : question.delivery === "pending"
-                    ? "已保存，待附入工具响应"
-                    : "答复记录已过期"}
+                    ? t("question.queued")
+                    : t("question.expired")}
               </span>
               <div className="flex gap-2">
                 <button
@@ -250,7 +258,7 @@ export function QuestionCard({
                   }
                 >
                   <Copy className="w-3 h-3" />
-                  复制答复
+                  {t("question.copy")}
                 </button>
                 {question.delivery === "pending" && (
                   <button
@@ -258,7 +266,7 @@ export function QuestionCard({
                     disabled={busy}
                     onClick={() => void withdraw()}
                   >
-                    撤回答复
+                    {t("question.withdraw")}
                   </button>
                 )}
               </div>
@@ -266,7 +274,7 @@ export function QuestionCard({
             {draft && (
               <div className="rounded-lg border border-amber-200 dark:border-amber-900 p-3 space-y-2">
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  此问题已有答复；你的未提交草稿仍保留，可以复制为补充消息。
+                  {t("question.conflict")}
                 </p>
                 <pre className="text-xs whitespace-pre-wrap break-words max-h-40 overflow-auto">
                   {composed || note}
@@ -276,10 +284,10 @@ export function QuestionCard({
                     className={button}
                     onClick={() => void copy(composed || note)}
                   >
-                    复制草稿
+                    {t("question.copyDraft")}
                   </button>
                   <button className={button} onClick={() => onSent(draft.id)}>
-                    丢弃草稿
+                    {t("question.discard")}
                   </button>
                 </div>
               </div>
@@ -292,12 +300,12 @@ export function QuestionCard({
           role="alert"
           className="text-xs text-rose-600 dark:text-rose-400 break-words"
         >
-          {error}
+          {feedback(error, t)}
         </p>
       )}
       {notice && (
         <p role="status" className="text-xs text-zinc-500">
-          {notice}
+          {feedback(notice, t)}
         </p>
       )}
     </article>

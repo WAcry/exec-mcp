@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import { useState, useEffect } from "react";
 import type {
   SessionSummary,
@@ -32,6 +33,8 @@ export function SessionsView({
   pendingQuestionsOnly,
   onPendingQuestionsChange,
 }: SessionsViewProps) {
+  const { t, locale } = useLocale();
+
   const [query, setQuery] = useState("");
   const [nativeMap, setNativeMap] = useState<Record<string, NativeSessionItem>>(
     {},
@@ -65,7 +68,7 @@ export function SessionsView({
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
             type="text"
-            placeholder="搜索会话哈希、备注名或最近调用..."
+            placeholder={t("sessions.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
@@ -77,10 +80,10 @@ export function SessionsView({
             checked={pendingQuestionsOnly}
             onChange={(e) => onPendingQuestionsChange(e.target.checked)}
           />
-          仅看待回答
+          {t("sessions.pendingOnly")}
         </label>
         <div className="text-xs text-zinc-500 font-mono whitespace-nowrap">
-          共 {sessionsData?.total ?? 0} 个对话分组
+          {t("sessions.count", sessionsData?.total ?? 0)}
         </div>
       </div>
 
@@ -88,13 +91,9 @@ export function SessionsView({
         {!sessionsData || sessionsData.items.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
             {pendingQuestionsOnly ? (
-              "没有待回答的问题。"
+              t("sessions.noPending")
             ) : (
-              <>
-                暂未捕获到任何会话。当 ChatGPT 附带{" "}
-                <code>_meta["openai/session"]</code>{" "}
-                调用时，将按不可逆摘要归类建组。
-              </>
+              <>{t("sessions.empty")}</>
             )}
           </div>
         ) : (
@@ -120,8 +119,8 @@ export function SessionsView({
                   </div>
                   <span className="text-[10px] text-zinc-500 whitespace-nowrap">
                     {(nativeMap[session.id]?.activeCellCount ?? 0) > 0
-                      ? "有执行待收尾"
-                      : "可继续使用"}
+                      ? t("sessions.unfinished")
+                      : t("sessions.usable")}
                   </span>
                 </div>
 
@@ -145,33 +144,38 @@ export function SessionsView({
                         }`}
                       />
                       <span>
-                        原生会话:{" "}
-                        {nativeMap[session.id]!.users > 0 ? "占用中" : "空闲"}
+                        {t("sessions.native")}{" "}
+                        {nativeMap[session.id]!.users > 0
+                          ? t("common.busy")
+                          : t("common.idle")}
                       </span>
                     </span>
                     <span className="text-zinc-500 dark:text-zinc-400">
-                      {nativeMap[session.id]!.activeCellCount} 个未收尾 cell
+                      {t(
+                        "sessions.cells",
+                        nativeMap[session.id]!.activeCellCount,
+                      )}
                     </span>
                   </div>
                 )}
 
                 <div className="space-y-1.5 mb-3 text-xs">
                   <div className="flex items-center justify-between text-zinc-500">
-                    <span>当前保留调用</span>
+                    <span>{t("stats.calls")}</span>
                     <span className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
-                      {session.callCount} 次
+                      {session.callCount.toLocaleString(locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-zinc-500">
-                    <span>首次接入</span>
+                    <span>{t("sessions.firstSeen")}</span>
                     <span className="font-mono text-[11px]">
-                      {new Date(session.firstSeen).toLocaleDateString("zh-CN")}
+                      {new Date(session.firstSeen).toLocaleDateString(locale)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-zinc-500">
-                    <span>最后活动</span>
+                    <span>{t("sessions.lastActive")}</span>
                     <span className="font-mono text-[11px]">
-                      {new Date(session.lastActive).toLocaleTimeString("zh-CN")}
+                      {new Date(session.lastActive).toLocaleTimeString(locale)}
                     </span>
                   </div>
                 </div>
@@ -198,7 +202,7 @@ export function SessionsView({
                     className="w-full mt-3 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 p-3 text-left cursor-pointer"
                   >
                     <span className="block text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                      回答 {session.pendingQuestions} 个问题 →
+                      {t("sessions.answer", session.pendingQuestions)}
                     </span>
                     <span className="block truncate text-xs mt-1 text-zinc-600 dark:text-zinc-400">
                       {session.questionPreview}
@@ -209,7 +213,7 @@ export function SessionsView({
 
               <div className="mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between text-xs text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 font-medium">
                 <span className="flex items-center gap-1">
-                  查看会话调用流
+                  {t("sessions.viewCalls")}
                   <ArrowRight className="w-3.5 h-3.5" />
                 </span>
                 <button
@@ -220,12 +224,12 @@ export function SessionsView({
                   }}
                   title={
                     session.canMessage
-                      ? "给此对话发送补充或设置备注名"
-                      : "缺少可用的对话标识"
+                      ? t("sessions.sendTitle")
+                      : t("sessions.noScope")
                   }
                   className="px-2 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  发送补充
+                  {t("notes.send")}
                   {session.pendingNotes ? ` · ${session.pendingNotes}` : ""}
                 </button>
               </div>
@@ -237,7 +241,7 @@ export function SessionsView({
       {sessionsData && sessionsData.totalPages > 1 && (
         <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500">
           <div>
-            第 {sessionsData.page} / {sessionsData.totalPages} 页
+            {t("sessions.page", sessionsData.page, sessionsData.totalPages)}
           </div>
           <div className="flex items-center gap-1.5">
             <button

@@ -1,9 +1,12 @@
+import { useLocale } from "../context/LocaleContext";
 import { useState, useEffect } from "react";
 import { ArtifactItem } from "../types";
 import { apiFetch } from "../lib/api";
 import { HardDrive, Trash2, Clock, FileText, RefreshCw } from "lucide-react";
 
 export function ArtifactsView() {
+  const { t, locale } = useLocale();
+
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +30,7 @@ export function ArtifactsView() {
   }, []);
 
   const handleRevoke = async (id: string) => {
-    if (!confirm("确定要主动撤销此产物快照？")) return;
+    if (!confirm(t("artifacts.revokeConfirm"))) return;
     try {
       await apiFetch("/api/artifacts/revoke", {
         method: "POST",
@@ -36,7 +39,7 @@ export function ArtifactsView() {
       });
       fetchArtifacts();
     } catch (err) {
-      alert("撤销失败: " + String(err));
+      alert(t("artifacts.revokeFailed") + String(err));
     }
   };
 
@@ -46,11 +49,10 @@ export function ArtifactsView() {
         <div>
           <h2 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
             <HardDrive className="w-3.5 h-3.5 text-zinc-400" />
-            临时产物与显式导出附件 (tools.export_file)
+            {t("artifacts.title")}
           </h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            二进制文件快照与 cell 隔离，默认配置短期 TTL。支持 MCP Resource
-            和下载 URL。
+            {t("artifacts.help")}
           </p>
         </div>
         <button
@@ -60,15 +62,14 @@ export function ArtifactsView() {
           <RefreshCw
             className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
           />
-          刷新
+          {t("common.refresh")}
         </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {artifacts.length === 0 ? (
           <div className="col-span-full p-12 text-center rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 text-zinc-400 text-xs">
-            暂无已导出的文件快照。当执行 <code>tools.export_file</code>{" "}
-            时，这里将列出活跃的资源句柄与过期时间。
+            {t("artifacts.empty")}
           </div>
         ) : (
           artifacts.map((item) => (
@@ -89,7 +90,7 @@ export function ArtifactsView() {
                   <button
                     onClick={() => handleRevoke(item.id)}
                     className="p-1 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"
-                    title="立即主动撤销"
+                    title={t("artifacts.revoke")}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -97,19 +98,20 @@ export function ArtifactsView() {
 
                 <div className="mt-2.5 space-y-1 text-xs text-zinc-500 font-mono">
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-400">大小</span>
+                    <span className="text-zinc-400">{t("artifacts.size")}</span>
                     <span>{(item.size / 1024).toFixed(1)} KB</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-400">MIME 类型</span>
+                    <span className="text-zinc-400">{t("artifacts.mime")}</span>
                     <span>{item.mime_type}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-zinc-400 flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> 过期时间
+                      <Clock className="w-3 h-3" />
+                      {t("artifacts.expiry")}
                     </span>
                     <span className="text-[11px]">
-                      {new Date(item.expires_at).toLocaleTimeString("zh-CN")}
+                      {new Date(item.expires_at).toLocaleTimeString(locale)}
                     </span>
                   </div>
                 </div>

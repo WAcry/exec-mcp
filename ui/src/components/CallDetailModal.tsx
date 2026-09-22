@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import { useEffect, useState } from "react";
 import { CallRecord } from "../types";
 import { CodeBlock } from "./CodeBlock";
@@ -31,6 +32,8 @@ export function CallDetailModal({
   refreshError,
   onRefresh,
 }: CallDetailModalProps) {
+  const { t, locale } = useLocale();
+
   const [selectedTab, setActiveTab] = useState<
     "overview" | "input" | "subcalls" | "output"
   >("overview");
@@ -70,17 +73,18 @@ export function CallDetailModal({
                 <StatusBadge call={call} />
               </div>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                会话:{" "}
+                {t("detail.session")}{" "}
                 <span className="font-mono break-all text-zinc-700 dark:text-zinc-300">
                   {call.sessionId}
                 </span>{" "}
-                • 开始于: {new Date(call.startedAt).toLocaleString("zh-CN")}
+                {t("detail.started")}{" "}
+                {new Date(call.startedAt).toLocaleString(locale)}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            aria-label="关闭详情"
+            aria-label={t("detail.close")}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
@@ -98,7 +102,7 @@ export function CallDetailModal({
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
             }`}
           >
-            总览元数据
+            {t("detail.overview")}
           </button>
           <button
             onClick={() => setActiveTab("input")}
@@ -109,7 +113,7 @@ export function CallDetailModal({
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
             }`}
           >
-            输入参数
+            {t("detail.input")}
           </button>
           {showSubcalls && (
             <button
@@ -121,7 +125,7 @@ export function CallDetailModal({
                   : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
               }`}
             >
-              <span>工具内部调用流</span>
+              <span>{t("detail.subcalls")}</span>
               <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 font-mono text-zinc-600 dark:text-zinc-400">
                 {call.subcalls.length}
                 {call.omittedSubcalls ? `+${call.omittedSubcalls}` : ""}
@@ -137,7 +141,7 @@ export function CallDetailModal({
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
             }`}
           >
-            返回结果 / 异常
+            {t("detail.output")}
           </button>
         </div>
 
@@ -148,12 +152,13 @@ export function CallDetailModal({
               role="alert"
               className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
             >
-              详情刷新失败，当前显示上次记录：{refreshError}
+              {t("detail.refreshFailed")}
+              {refreshError}
               <button
                 onClick={onRefresh}
                 className="ml-2 underline cursor-pointer"
               >
-                重新读取
+                {t("detail.reload")}
               </button>
             </div>
           )}
@@ -162,7 +167,7 @@ export function CallDetailModal({
               role="note"
               className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
             >
-              审计副本部分内容已裁剪，复制内容可能不完整；实际调用不受审计裁剪影响。
+              {t("detail.truncated")}
             </div>
           )}
           {activeTab === "overview" && (
@@ -170,17 +175,19 @@ export function CallDetailModal({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
                   <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Clock className="w-3.5 h-3.5" /> 耗时
+                    <Clock className="w-3.5 h-3.5" />
+                    {t("common.duration")}
                   </span>
                   <span className="text-base font-mono font-semibold text-zinc-900 dark:text-zinc-100">
                     {call.durationMs !== undefined
                       ? `${call.durationMs} ms`
-                      : "运行中..."}
+                      : t("common.runningEllipsis")}
                   </span>
                 </div>
                 <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
                   <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Layers className="w-3.5 h-3.5" /> 会话 Scope
+                    <Layers className="w-3.5 h-3.5" />
+                    {t("detail.scope")}
                   </span>
                   <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100 truncate block">
                     {call.sessionId}
@@ -188,14 +195,15 @@ export function CallDetailModal({
                 </div>
                 <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
                   <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Zap className="w-3.5 h-3.5" /> 调用入口
+                    <Zap className="w-3.5 h-3.5" />
+                    {t("detail.entry")}
                   </span>
                   <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                     {call.tool === "exec"
-                      ? "Code Mode 编排"
+                      ? t("detail.exec")
                       : call.tool === "wait"
-                        ? "Code Mode 等待"
-                        : "直接工具调用"}
+                        ? t("detail.wait")
+                        : t("detail.direct")}
                   </span>
                 </div>
               </div>
@@ -209,13 +217,12 @@ export function CallDetailModal({
             <div className="space-y-3">
               {(call.omittedSubcalls ?? 0) > 0 && (
                 <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
-                  为限制常驻内存，中间省略了 {call.omittedSubcalls}{" "}
-                  条子调用；保留最早与最新记录。
+                  {t("detail.omitted", call.omittedSubcalls ?? 0)}
                 </div>
               )}
               {call.subcalls.length === 0 ? (
                 <div className="p-10 text-center text-zinc-400 text-xs">
-                  本次执行中没有调用任何底层 tools.* 原语或下游 MCP 工具。
+                  {t("detail.emptySubcalls")}
                 </div>
               ) : (
                 call.subcalls.map((sub, i) => (
@@ -239,8 +246,8 @@ export function CallDetailModal({
                           }`}
                         >
                           {sub.status === "success"
-                            ? "已返回"
-                            : "报错 / 非零退出"}
+                            ? t("detail.returned")
+                            : t("detail.failed")}
                         </span>
                       </div>
                       <span className="text-xs font-mono text-zinc-400">
@@ -251,7 +258,7 @@ export function CallDetailModal({
                     <div className="space-y-2 text-xs">
                       <div>
                         <span className="text-zinc-400 text-[10px] block mb-1">
-                          入参 (Arguments):
+                          {t("detail.arguments")}
                         </span>
                         {sub.name === "apply_patch" &&
                         typeof sub.input === "string" ? (
@@ -289,7 +296,7 @@ export function CallDetailModal({
                       {sub.output !== undefined && (
                         <div>
                           <span className="text-zinc-400 text-[10px] block mb-1">
-                            返回 (Result):
+                            {t("detail.result")}
                           </span>
                           <CodeBlock
                             code={
@@ -321,7 +328,8 @@ export function CallDetailModal({
               {call.error && (
                 <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
                   <h5 className="font-semibold text-xs flex items-center gap-1 mb-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> 错误信息
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {t("detail.error")}
                   </h5>
                   <p className="font-mono text-xs whitespace-pre-wrap">
                     {call.error}
@@ -332,7 +340,7 @@ export function CallDetailModal({
               {call.output !== undefined ? (
                 <div>
                   <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-                    MCP 返回（审计副本）
+                    {t("detail.auditResult")}
                   </h5>
                   <CodeBlock
                     code={JSON.stringify(call.output, null, 2)}
@@ -343,10 +351,10 @@ export function CallDetailModal({
               ) : (
                 <div className="p-8 text-center text-zinc-400 text-xs">
                   {call.status === "running"
-                    ? "任务正在执行，暂无返回结果..."
+                    ? t("detail.waiting")
                     : call.status === "terminated"
-                      ? "执行已终止，没有更多输出。"
-                      : "无输出结果"}
+                      ? t("detail.terminated")
+                      : t("detail.empty")}
                 </div>
               )}
             </div>
@@ -362,18 +370,20 @@ function InputParameters({
 }: {
   call: Pick<CallRecord, "tool" | "args">;
 }) {
+  const { t } = useLocale();
+
   const { code, parameters } = callInput(call);
   return (
     <div className="space-y-3">
       {(!code || Object.keys(parameters).length > 0) && (
         <div>
           <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-            {code ? "其余输入参数" : "输入参数"}（显式传入值）
+            {code ? t("detail.otherParameters") : t("detail.parameters")}
           </h4>
           {(Object.hasOwn(call.args, "file") ||
             (Array.isArray(call.args.files) && call.args.files.length > 0)) && (
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-              附件引用只显示名称、类型和大小，下载凭据已省略。
+              {t("detail.attachments")}
             </p>
           )}
           <CodeBlock
@@ -386,7 +396,7 @@ function InputParameters({
       {code && (
         <div>
           <h4 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
-            {code.field} 原文
+            {t("detail.source", code.field)}
           </h4>
           <CodeBlock
             code={code.value}
@@ -400,8 +410,9 @@ function InputParameters({
 }
 
 function StatusBadge({ call }: { call: CallRecord }) {
+  const { t } = useLocale();
   const { status } = call;
-  const label = callStatusLabel(call);
+  const label = callStatusLabel(call, t);
   if (status === "running") {
     return (
       <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">

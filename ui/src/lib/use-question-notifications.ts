@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "../context/LocaleContext";
 import type { SessionNotesEvent } from "../../../src/session-notes-types";
 import {
   QuestionNotifications,
@@ -9,6 +10,9 @@ export function useQuestionNotifications(
   authenticated: boolean,
   openSession: (id: string) => void,
 ) {
+  const { t } = useLocale();
+  const translation = useRef(t);
+  translation.current = t;
   const notifier = useRef<QuestionNotifications | null>(null);
   const open = useRef(openSession);
   open.current = openSession;
@@ -22,6 +26,7 @@ export function useQuestionNotifications(
       () => {
         if (notifier.current) setState(notifier.current.state);
       },
+      (key, ...values) => translation.current(key, ...values),
     );
     notifier.current = current;
     setState(current.state);

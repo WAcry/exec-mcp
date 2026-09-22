@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import { useEffect, useRef, useState } from "react";
 import { MessageCircleQuestion } from "lucide-react";
 import { apiFetch } from "../lib/api";
@@ -22,6 +23,8 @@ export function SessionQuestions({
   onChange: () => void;
   revision: number;
 }) {
+  const { t } = useLocale();
+
   const [data, setData] = useState<UserQuestionsPage | null>(null);
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
@@ -77,9 +80,9 @@ export function SessionQuestions({
     <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
       <div className="text-xs text-zinc-500 flex flex-wrap items-center justify-between gap-2">
         <span>
-          {data?.pendingCount ?? 0} 个待回答 · 共 {data?.total ?? 0} 个问题
+          {t("questions.count", data?.pendingCount ?? 0, data?.total ?? 0)}
         </span>
-        <span>未答优先；每题独立提交，选择和补充一起发送</span>
+        <span>{t("questions.help")}</span>
       </div>
       {error && (
         <p role="alert" className="text-xs text-rose-600 break-words">
@@ -87,14 +90,12 @@ export function SessionQuestions({
         </p>
       )}
       {!data ? (
-        <p className="text-xs text-zinc-500">正在读取…</p>
+        <p className="text-xs text-zinc-500">{t("common.loading")}</p>
       ) : displayed.length === 0 ? (
         <div className="py-12 text-center text-zinc-500 space-y-3">
           <MessageCircleQuestion className="w-8 h-8 mx-auto text-zinc-400" />
-          <p className="text-sm">本会话暂时没有问题</p>
-          <p className="text-xs">
-            Agent 提交的问题会显示在这里；也可主动发送补充消息。
-          </p>
+          <p className="text-sm">{t("questions.empty")}</p>
+          <p className="text-xs">{t("questions.emptyHelp")}</p>
         </div>
       ) : (
         displayed.map((question) => (
@@ -116,7 +117,7 @@ export function SessionQuestions({
             disabled={page <= 1}
             onClick={() => setPage((v) => v - 1)}
           >
-            上一页
+            {t("common.previous")}
           </button>
           <span>
             {page} / {data.totalPages}
@@ -126,13 +127,12 @@ export function SessionQuestions({
             disabled={page >= data.totalPages}
             onClick={() => setPage((v) => v + 1)}
           >
-            下一页
+            {t("common.next")}
           </button>
         </div>
       )}
       <p className="text-[11px] text-zinc-500 leading-relaxed">
-        答复作为用户补充随正常工具响应返回；已附带不代表已读。临时保留 72
-        小时，程序退出后丢失。
+        {t("questions.retention")}
       </p>
     </div>
   );

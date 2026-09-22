@@ -5,6 +5,7 @@ import {
 } from "../ui/src/lib/question-notifications.js";
 import { SessionNotes } from "../src/session-notes.js";
 import type { SessionNotesEvent } from "../src/session-notes-types.js";
+import { createTranslator } from "../ui/src/lib/locale.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -79,6 +80,26 @@ function browser(permission: NotificationPermission = "granted") {
 }
 
 describe("browser question notification delivery", () => {
+  it("uses the current UI language for new notifications without resetting delivery history", async () => {
+    const b = browser();
+    let translate = createTranslator("en");
+    const notifier = new QuestionNotifications(
+      b.open,
+      b.changed,
+      (key, ...values) => translate(key, ...values),
+    );
+    await notifier.receive(event());
+    expect(b.shown[0]!.title).toBe("EXEC MCP · Question alert");
+    expect(b.shown[0]!.options.body).toContain("New questions: 2");
+    translate = createTranslator("zh-CN");
+    await notifier.receive(event());
+    expect(b.shown).toHaveLength(1);
+    await notifier.receive(event("ask_after_language_change"));
+    expect(b.shown[1]!.title).toBe("EXEC MCP · 提问提醒");
+    expect(b.shown[1]!.options.body).toContain("有 2 个新问题");
+    notifier.dispose();
+    b.notifier.dispose();
+  });
   it("asks permission only on explicit enable and groups a request into one private notification", async () => {
     const b = browser("default");
     await b.notifier.receive(event());

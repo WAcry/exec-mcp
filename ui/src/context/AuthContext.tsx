@@ -79,7 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (testToken: string): Promise<boolean> => {
       loggingOut.current = false;
       statusRequest.current?.abort();
-      setIsVerifying(true);
+      // Keep an already-visible sign-in form mounted while it submits. Its
+      // local pending state preserves the token and translated failure message.
       try {
         const response = await fetch("/api/auth/verify", {
           method: "POST",

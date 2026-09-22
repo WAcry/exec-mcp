@@ -1,3 +1,4 @@
+import { useLocale } from "../context/LocaleContext";
 import { useState, useEffect } from "react";
 import type { McpServersResponse } from "../types";
 import { apiFetch } from "../lib/api";
@@ -7,6 +8,8 @@ import { useManagement } from "../context/ManagementContext";
 import { ConfigToggle } from "./ConfigToggle";
 
 export function McpView() {
+  const { t } = useLocale();
+
   const management = useManagement();
   const [data, setData] = useState<McpServersResponse | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -43,7 +46,8 @@ export function McpView() {
     <div className="space-y-4">
       {error && (
         <p role="alert" className="text-xs text-rose-600">
-          读取目录失败：{error}
+          {t("mcp.loadFailed")}
+          {error}
         </p>
       )}
       {Object.entries(data?.errors ?? {}).map(([server, message]) => (
@@ -61,24 +65,22 @@ export function McpView() {
           <div className="flex items-center gap-2">
             <Server className="w-4 h-4 text-zinc-400" />
             <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              已挂载的下游 MCP 服务
+              {t("mcp.title")}
             </h3>
           </div>
           <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-            {data?.servers.length ?? 0} 个服务
+            {t("mcp.servers", data?.servers.length ?? 0)}
           </span>
         </div>
 
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          所有启用的下游在服务就绪前完成连接与工具加载；Agent 在 exec 中通过
-          ALL_TOOLS 查看契约并调用 tools[name](args)。
+          {t("mcp.help")}
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
           {!data || data.servers.length === 0 ? (
             <div className="col-span-full p-8 text-center border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-400 text-xs">
-              尚未在 <code>config.toml</code> 的 <code>[mcp_servers]</code>{" "}
-              中配置外部服务。
+              {t("mcp.empty")}
             </div>
           ) : (
             data.servers.map((s) => (
@@ -95,7 +97,7 @@ export function McpView() {
                   </span>
                   {management.data?.available && (
                     <ConfigToggle
-                      label={`启用 MCP ${s.name}`}
+                      label={t("mcp.enable", s.name)}
                       checked={s.enabled !== false}
                       disabled={management.busy}
                       onChange={(enabled) =>
@@ -112,20 +114,22 @@ export function McpView() {
                 <div className="text-xs font-mono text-zinc-600 dark:text-zinc-400 break-all space-y-1">
                   {s.transport === "stdio" ? (
                     <div>
-                      <span className="text-zinc-400 font-sans">命令: </span>
-                      {s.command ?? "当前未加载"}
-                      {s.argsCount ? `（${s.argsCount} 个参数，值已隐藏）` : ""}
+                      <span className="text-zinc-400 font-sans">
+                        {t("mcp.command")}
+                      </span>
+                      {s.command ?? t("mcp.inactive")}
+                      {s.argsCount ? t("mcp.args", s.argsCount) : ""}
                     </div>
                   ) : (
                     <div>
                       <span className="text-zinc-400 font-sans">URL: </span>
-                      {s.url ?? "当前未加载"}
+                      {s.url ?? t("mcp.inactive")}
                     </div>
                   )}
                   {s.cwd && (
                     <div>
                       <span className="text-zinc-400 font-sans">
-                        工作目录:{" "}
+                        {t("mcp.workdir")}{" "}
                       </span>
                       {s.cwd}
                     </div>
@@ -133,7 +137,7 @@ export function McpView() {
                   {s.envKeys?.length ? (
                     <div>
                       <span className="text-zinc-400 font-sans">
-                        环境变量键:{" "}
+                        {t("mcp.env")}{" "}
                       </span>
                       {s.envKeys.join(", ")}
                     </div>
@@ -141,7 +145,7 @@ export function McpView() {
                   {s.headerNames?.length ? (
                     <div>
                       <span className="text-zinc-400 font-sans">
-                        HTTP Header 键:{" "}
+                        {t("mcp.headers")}{" "}
                       </span>
                       {s.headerNames.join(", ")}
                     </div>
@@ -150,7 +154,9 @@ export function McpView() {
 
                 {s.enabledTools && (
                   <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800/60 flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] text-zinc-400">指定工具:</span>
+                    <span className="text-[10px] text-zinc-400">
+                      {t("mcp.allowedTools")}
+                    </span>
                     {s.enabledTools.map((t) => (
                       <span
                         key={t}
@@ -173,19 +179,19 @@ export function McpView() {
           <div className="flex items-center gap-2">
             <Wrench className="w-4 h-4 text-zinc-400" />
             <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              已加载的下游工具（下一次 exec 的目录）
+              {t("mcp.toolsTitle")}
             </h3>
           </div>
           <span className="text-xs font-mono text-zinc-400">
-            {tools.length} / {data?.tools.length ?? 0} 个工具
+            {tools.length} / {data?.tools.length ?? 0} {t("mcp.toolsUnit")}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
           <Search className="w-4 h-4 shrink-0 text-zinc-400" />
           <input
-            aria-label="筛选已加载工具"
-            placeholder="按名称或描述筛选"
+            aria-label={t("mcp.filter")}
+            placeholder={t("mcp.filterPlaceholder")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="min-w-0 flex-1 px-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg"
@@ -197,20 +203,18 @@ export function McpView() {
             className="flex items-center gap-1 shrink-0 px-2 py-1.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            {loading ? "读取中…" : "刷新目录"}
+            {loading ? t("common.reading") : t("mcp.refresh")}
           </button>
         </div>
 
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
           {!data || data.tools.length === 0 ? (
             <div className="py-6 text-center text-zinc-400 text-xs">
-              {loading
-                ? "正在读取目录…"
-                : "当前没有下游工具；请检查启用服务和 enabled_tools 的目录选择。"}
+              {loading ? t("mcp.loading") : t("mcp.noTools")}
             </div>
           ) : tools.length === 0 ? (
             <div className="py-6 text-center text-zinc-400 text-xs">
-              没有匹配的工具。
+              {t("mcp.noMatches")}
             </div>
           ) : (
             tools.map((t) => (

@@ -398,6 +398,7 @@ export function execDescription(
 ): string {
   return `Run JavaScript code to orchestrate/compose tool calls on this connection's specific remote machine.
 - Work independently; do not invoke other agent CLIs on this machine (e.g. Codex or Claude Code) unless the user explicitly requests it.
+- For destructive deletion commands (e.g. rm or rm -rf), use only explicit, fully resolved absolute path literals. Do not use shell variables, command substitution, wildcards, dynamic path concatenation or other path interpolation. Before deleting, verify that the final target paths and scope exactly match the intended deletion.
 - Evaluates source in a fresh V8 isolate as an async module. The MCP argument is an object whose source field contains JavaScript.
 - All nested tools are available on the global tools object, for example await tools.exec_command(...). apply_patch takes a string; other local tools take an object. Tool return types are described below. Independent calls can run concurrently with Promise.all.
 - Only the orchestration JS isolate lacks Node.js, filesystem, network, console and module imports. Tools access the remote machine's filesystem and network; separate ChatGPT containers do not share that environment.

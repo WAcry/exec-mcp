@@ -34,6 +34,8 @@ const MULTILINE_RULE =
   "Nested JS, shell and other languages each interpret quoting, interpolation, escapes, argument boundaries and whitespace.";
 const AGENT_CLI_RULE =
   "Work independently; do not invoke other agent CLIs on this machine (e.g. Codex or Claude Code) unless the user explicitly requests it.";
+const DESTRUCTIVE_DELETE_RULE =
+  "For destructive deletion commands (e.g. rm or rm -rf), use only explicit, fully resolved absolute path literals. Do not use shell variables, command substitution, wildcards, dynamic path concatenation or other path interpolation. Before deleting, verify that the final target paths and scope exactly match the intended deletion.";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -95,6 +97,10 @@ describe("self-contained model-visible contracts", () => {
     expect(description.split("## Local tools")[0]).toContain(MULTILINE_RULE);
     expect(description.split("## Local tools")[0]).toContain(AGENT_CLI_RULE);
     expect(description.split(AGENT_CLI_RULE)).toHaveLength(2);
+    expect(description.split("## Local tools")[0]).toContain(
+      DESTRUCTIVE_DELETE_RULE,
+    );
+    expect(description.split(DESTRUCTIVE_DELETE_RULE)).toHaveLength(2);
     expect(description).toContain("this connection's specific remote machine");
     expect(description).toContain(
       "Only the orchestration JS isolate lacks Node.js, filesystem, network",
@@ -255,6 +261,12 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       AGENT_CLI_RULE,
     );
     expect(listed[0]!.description!.split(AGENT_CLI_RULE)).toHaveLength(2);
+    expect(listed[0]!.description!.split("## Local tools")[0]).toContain(
+      DESTRUCTIVE_DELETE_RULE,
+    );
+    expect(listed[0]!.description!.split(DESTRUCTIVE_DELETE_RULE)).toHaveLength(
+      2,
+    );
     expect(listed[0]!.description).not.toContain("revoke_file");
     expect(listed[0]!.description!).toContain(FILE_EDIT_RULE);
     expect(listed[0]!.description!.split("## Local tools")[0]).toContain(

@@ -421,7 +421,8 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       new URL("../docs/guides/code-mode-examples.md", import.meta.url),
       "utf8",
     );
-    const heading = "## 在 exec 内构造含 Markdown 的多行补丁";
+    const heading =
+      "## Build multiline patches containing Markdown inside exec";
     const start = doc.indexOf(heading);
     expect(start).toBeGreaterThanOrEqual(0);
     const end = doc.indexOf("\n## ", start + heading.length);

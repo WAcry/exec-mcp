@@ -1,81 +1,86 @@
-# ADR-001 执行内核与产品边界
+# ADR-001 Runtime and product scope
 
-当前生效，2026-09-22 更新。
+English | [简体中文](001-exec-runtime.zh.md)
 
-## 选择原因
+Active, updated 2026-09-22.
 
-exec-mcp 供使用 ChatGPT 的开发者在自己的机器上部署。每个连接指向用户指定的一台远端机器，
-工具中的“本机”指这台机器，与 ChatGPT 的其他容器相互独立。
-编排 JS 没有直接文件和网络 API，Shell 及其他工具仍按机器的系统权限访问文件与网络。
+## Rationale
 
-接口参考 Codex，将组合调用和结果筛选交给 JavaScript。目标 ChatGPT 宿主每轮的外层 tool call
-数量有限，具体上限可能变化。Agent 可以在一次 exec 中串行或并发调用多个工具，
-先整理结果，再把需要的部分交回模型，从而减少仅用于编排的往返。
-这项选择面向当前目标模型，效果仍需在实际任务中验证。
+exec-mcp is deployed by ChatGPT users on their own machines. Each connection targets one user-selected remote machine.
+Local in a tool description means that machine, independent of ChatGPT's other containers.
+The orchestration JS has no direct filesystem or network APIs; shells and other tools access files and networks with the machine account's permissions.
 
-## 工具入口与执行顺序
+The interface follows Codex and gives JavaScript responsibility for composing calls and filtering results. User testing on 2026-09-22 observed no fixed per-turn tool-call count cap;
+the amount of work completed in a turn was constrained by the overall workload. This observation guides the product's efficiency decisions.
+We assume neither a fixed call count nor unlimited host execution. The host's internal budget algorithm and thresholds are outside this service's contract.
 
-顶层 MCP 只提供 exec、wait。本机操作与下游 MCP 均绑定为 exec 内的 tools.* 方法。
-exec 描述包含本机完整契约，下游契约通过 ALL_TOOLS 按需展示，不保留隐藏的直接入口。
-采用 Code Mode Only 是为了贴近目标 Codex 模型的交互方式，并统一处理输出。
-PowerShell、嵌套模板和 Markdown 仍会增加字符串构造难度；描述简述多层语言的语法差异，
-较长示例留在文档。字符串使用 JavaScript 原有语法，服务端不猜测或修复内容。
+An agent can call several tools sequentially or concurrently in one exec, process their results, and return only what the model needs.
+Combining round trips and filtering results can reduce orchestration and repeated-context tokens. Parallel independent work can shorten waiting
+and leave room for more useful work in a turn. Benefits depend on the task and output choices and must be measured.
 
-独立调用可以用 Promise.all 并发。存在数据依赖或副作用冲突时，按操作要求串行执行，
-保留相应错误处理和重试条件。
+## Tool entry points and ordering
 
-本机执行方法包括 tools.exec_command、tools.write_stdin、tools.apply_patch 和 tools.view_image，
-发现方式见 [ADR-002](002-tool-discovery.md)。读取、搜索及 Git/worktree 操作使用系统工具，
-由调用者安排执行，不另设项目或任务管理功能。
+Only exec and wait are top-level MCP tools. Local operations and downstream MCP methods are bound to tools.* inside exec.
+The exec description contains complete local contracts; ALL_TOOLS exposes downstream contracts as needed. No hidden direct entry points remain.
+Code Mode Only follows the target Codex models' interaction pattern and gives output a common handling path.
+PowerShell, nested templates, and Markdown still make string construction harder. Descriptions briefly identify the language boundaries, with longer examples in documentation.
+Strings use ordinary JavaScript syntax; the server does not guess at or repair their content.
 
-## 目录与补丁
+Independent calls can run through Promise.all. Data dependencies or conflicting side effects require appropriate ordering,
+with error handling and retry conditions retained for each operation.
 
-exec.source 是 JavaScript，MCP 外层使用对象参数。exec.workdir 决定本次本机工具的默认目录，
-省略时使用服务账户主目录，相对值也从主目录解析。本机工具中的相对路径基于本次目录。
-命令可以单独指定目录，Shell 的 cd 只影响该进程；下游 MCP 的路径与参数保持原有语义。
+Local execution methods include tools.exec_command, tools.write_stdin, tools.apply_patch, and tools.view_image.
+See [ADR-002](002-tool-discovery.md) for discovery. Reading, searching, and Git/worktree operations use system tools at the caller's direction.
+There is no separate project or task manager.
 
-tools.apply_patch 接收一个完整补丁字符串，经 stdin 进入固定引擎，避免命令行参数长度限制。
-MCP 外层使用 source/workdir/files 对象，exec 内各方法保留自己的参数形状，不另建直接调用包装。
+## Directories and patches
 
-补丁沿用 Codex 的语法和引擎，工具描述提供完整语法。多文件补丁可能部分成功，
-调用者需检查结果；当前不为 diff UI 额外生成快照或行统计。
+exec.source contains JavaScript, while the outer MCP arguments are an object. exec.workdir supplies the default directory for local tools in that call.
+Omitting it uses the service account's home; a relative value also resolves from that home. Relative paths in local tools resolve from the call's directory.
+A command may override its directory. A shell's cd affects only its process; downstream MCP paths and parameters retain their own semantics.
 
-## 组件与平台
+tools.apply_patch accepts a complete patch string and sends it through stdin to the pinned engine, avoiding command-line argument limits.
+The outer MCP object contains source/workdir/files. Nested methods retain their own parameter shapes without separate direct-call wrappers.
 
-TypeScript/Node 负责 MCP、配置、下游连接和平台适配。JavaScript 与补丁执行复用同一固定版本的
-Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Server 或模型循环，
-服务也不读取机器上 Codex 的配置与数据库。组件升级通过显式依赖更新，并验证调用契约。
-Codex 组件及协议的许可见 [Apache-2.0 原文](../../proto/LICENSE)，依赖自带的许可证与 NOTICE 保留。
+Patches use Codex's syntax and engine, with the full grammar in the tool description. A multi-file patch can partially succeed,
+so callers must check its result. The service does not generate additional snapshots or line counts for a diff UI.
 
-Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。
-系统路径、Shell、PTY 和进程树由平台适配处理，安装位置也按系统选择。
-实例默认 Shell 与单次覆盖见 [ADR-007](007-command-shell.md)，执行器和默认说明共用解析结果。
-各平台分别验证 host、补丁入口和进程清理；bash、POSIX 信号或 systemd 等能力仅用于适用的平台。
-具体 OS/CPU 支持与版本 pin 以实现和对应发布的验证结果为准。
+## Components and platforms
 
-## 产品范围
+TypeScript/Node handles MCP, configuration, downstream connections, and platform adaptation. JavaScript and patch execution reuse components
+from the same pinned Codex version, and MCP uses the official SDK. The integration excludes the full Codex App Server and model loop;
+it does not read the installed Codex configuration or database. Component upgrades are explicit dependency changes with contract validation.
+See the [Apache-2.0 text](../../proto/LICENSE) for the components and protocol. Retain licenses and NOTICE files shipped with dependencies.
 
-已提供可选 Web 管理控制台，见 [ADR-009](009-web-console.md)。控制台独立于 ChatGPT，
-不提供内嵌 Widget 或下游登录交互。需要用户决定时，可以在原 ChatGPT 对话沟通，
-或把问题异步提交到本会话 Web；回答与主动补充共用 User Note 通道，见 [ADR-010](010-session-notes.md)。
-问题立即提交返回，服务不同步等待用户，也没有答案轮询工具或答复数据库。
+Windows, Linux, and macOS are product targets; Windows uses native execution.
+Platform adapters handle system paths, shells, PTYs, process trees, and installation locations.
+[ADR-007](007-command-shell.md) covers default shells and overrides. Execution and descriptions share the resolved shell.
+Validate the host, patch entry point, and process cleanup on each platform. Bash, POSIX signals, and systemd apply only where available.
+Exact OS/CPU support and version pins follow the implementation and validation for the corresponding release.
 
-本机 Skill 只提供元数据发现，全文用现有 Shell 读取，见 [ADR-006](006-skill-catalog.md)。
-Skill 安装与执行管理、Workspace、子 Agent、持久任务及调度框架均不在当前范围内。
-原生图片和音频可由输出助手显式发送；文件由 exec 编排，交付方式见 [ADR-005](005-file-transfer.md)。
+## Product scope
 
-## 接受的代价
+An optional Web management console is available under [ADR-009](009-web-console.md). It runs separately from ChatGPT,
+with no embedded Widget or downstream sign-in interface. User decisions can be discussed in ChatGPT or submitted as asynchronous questions
+to that conversation's Web view. Answers and unsolicited notes share the User Note path under [ADR-010](010-session-notes.md).
+Question submission returns immediately. There is no synchronous wait for the user, answer-polling tool, or answer database.
 
-exec 描述包含本机完整契约，篇幅较长，但新 Agent 可以直接使用常用工具。
-全部模型工具操作依赖原生 host，host 不可用时也无法执行命令或文件操作。
-复用二进制减少了开发量，同时需要维护协议和版本兼容。旧 codex-mcp 的实现按功能选用，
-取消、结果保真和连接机制仍需验证，旧项目的产品约束只在明确采纳后沿用。
+Local Skills provide metadata discovery only; the existing shell reads their full content under [ADR-006](006-skill-catalog.md).
+Skill installation and execution management, workspaces, subagents, persistent tasks, and scheduling frameworks are outside the current scope.
+Output helpers can explicitly send native images and audio. exec orchestrates files under [ADR-005](005-file-transfer.md).
 
-## 参考源码
+## Accepted costs
 
-参考 Codex 快照 `8b78600dc85cc265d7e7e827f6aa903875405287`。
-[补丁工具](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
-采用 freeform，[Code Mode 契约转换](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
-将其映射为字符串参数。
-[平台包装脚本](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-cli/scripts/build_npm_package.py)
-用于核对上游平台分发；exec-mcp 的跨平台支持仍需单独验证。运行版本由项目依赖显式固定。
+Including complete local contracts makes the exec description longer, while letting a fresh agent use common tools immediately.
+Every model-facing operation depends on the native host; commands and file operations are also unavailable when it is down.
+Binary reuse reduces implementation work and requires protocol and version compatibility maintenance. Reuse parts of the old codex-mcp as needed,
+while validating cancellation, result fidelity, and connectivity. Adopt old product constraints only through an explicit decision.
+
+## Source references
+
+Reference snapshot `8b78600dc85cc265d7e7e827f6aa903875405287` of Codex.
+Its [patch tool](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
+is freeform; [Code Mode contract conversion](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
+maps it to a string argument.
+The [platform packaging script](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-cli/scripts/build_npm_package.py)
+is a reference for upstream distribution. exec-mcp's platform support needs its own validation, and project dependencies explicitly pin the runtime version.

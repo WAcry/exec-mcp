@@ -1,66 +1,69 @@
-# ADR-005 文件传输与交付边界
+# ADR-005 File transfer and delivery boundaries
 
-当前生效，2026-09-22 更新。
+English | [简体中文](005-file-transfer.zh.md)
 
-## 文件绑定与编排
+Active, updated 2026-09-22.
 
-import_file/export_file 仅在 exec 内调用。ChatGPT 通过 openai/fileParams 标记的 exec.files
-绑定附件，机器端流式导入，导出内容通过独立资源通道交付。
-文件字节直接传输，不经过 V8、模型文本或 store，也无需 Agent 搬运 Base64。
+## File binding and orchestration
 
-文件引用在 MCP 顶层绑定，服务不解析 source 字符串猜测引用。临时下载凭据由机器端持有，
-exec 脚本使用本次文件数组的零基索引。只下载选中的附件，Web 审计不记录签名下载 URL。
-普通执行可不带附件；文件缺失或索引不符时报错，不查找其他消息里的附件。
-输入按宿主绑定契约校验，依据见 [OpenAI 文件参数](https://developers.openai.com/plugins/reference#define-file-inputs)，
-字段表以代码生成的 schema 为准。
+import_file and export_file are called only inside exec. ChatGPT binds attachments through exec.files, marked with openai/fileParams.
+The machine streams imports, and a separate resource channel delivers exports.
+Bytes bypass V8, model text, and store; the agent does not need to move Base64 data.
 
-## 导出与撤销
+File references are bound at the top MCP level. The service does not inspect source text to guess references.
+The machine holds temporary download credentials, while the script uses a zero-based index into the current file array.
+Only selected attachments are downloaded. The Web audit omits signed download URLs.
+Execution without attachments remains supported. Missing files or mismatched indices fail without looking for attachments in other messages.
+Inputs are validated against the host binding contract; see [OpenAI file parameters](https://developers.openai.com/plugins/reference#define-file-inputs).
+Code-generated schemas define the exact fields.
 
-模型只需导入和导出方法，revoke_file 及其隐藏别名已移除。
-导出快照会自动过期，偶发的提前撤销由用户在 Web 操作，减少常驻工具数量。
-失败、到期和正常关闭仍会清理资源；撤销后拒绝新下载，已经开始或完成的下载无法收回。
+## Export and revocation
 
-## 导入验证与替换
+The model needs import and export methods only. revoke_file and hidden aliases have been removed.
+Snapshots expire automatically, and users can revoke one early in the Web console. This keeps the permanent tool set smaller.
+Failure, expiry, and normal shutdown still clean up resources. Revocation blocks new downloads; downloads already started or completed cannot be recalled.
 
-下载使用 HTTPS，禁止重定向。直连时固定已验证的公网 DNS 地址，显式代理自行解析目标并决定路由，
-见 [ADR-008](008-environment-and-proxy.md)。签名 URL 仅用于下载，不进入 JS、工具目录或持久日志，也不回显。
+## Import validation and replacement
 
-文件先流式写入同目录临时文件，检查长度并计算摘要，再放到目标位置，默认不覆盖已有文件。
-覆盖、取消或文件替换失败可能发生在部分操作之后，需按实际状态检查。
-下载来源限于宿主绑定的附件，调用权限仍由 MCP 入口认证，URL 格式本身不提供授权。
+Downloads use HTTPS without redirects. Direct connections pin validated public DNS addresses. An explicit proxy resolves the target and controls routing
+under [ADR-008](008-environment-and-proxy.md). Signed URLs are used for downloading only and never enter JS, the tool catalog, persistent logs, or echoed results.
 
-## 私有资源与公开 URL
+Files stream first into a sibling temporary file, with length checking and a digest, then move into place. Existing files are preserved by default.
+Overwrite, cancellation, or replacement failures may occur after some effects and require inspection of the actual state.
+Sources are limited to host-bound attachments. MCP ingress authentication authorizes calls; URL shape itself grants no authority.
 
-默认通过原生 ResourceLink 交付，宿主用 resources/read 取文件，参考
-[WebCodex 文件桥](https://github.com/yyjeqhc/webcodex/blob/main/docs/MCP.md#chatgpt-file-bridge)。
-链接由每个 cell 的独立队列附入 exec/wait，固定 host 继续处理 JS、文本和媒体。
-文本预算不删文件引用，已撤销的待返回链接则不再交付。链接通过原生内容块传递，无需改协议或解析特殊文本标记。
+## Private resources and public URLs
 
-导出生成独立的短期快照。复制期间发现源文件变化则停止，复制完成后源文件变化不影响快照。
-快照仅用于用户显式导出的文件，通用大结果仍按原规则返回。资源独立于 cell，可多次读取；
-到期或撤销后拒绝新请求，正常关闭时清理，重启不恢复旧链接。
+Default delivery uses native ResourceLink blocks, and the host retrieves bytes through resources/read, following the
+[WebCodex file bridge](https://github.com/yyjeqhc/webcodex/blob/main/docs/MCP.md#chatgpt-file-bridge).
+Each cell's independent queue attaches links to exec/wait. The pinned host continues handling JS, text, and media.
+Text budgets preserve file references; queued links revoked before delivery are omitted. Native content blocks avoid protocol changes and special text markers.
 
-资源端点只读取已登记的导出，不提供文件目录或任意路径读取。快照保存在系统私有临时目录，
-异常退出可能留下文件，需由系统临时目录清理；残留文件无法通过旧链接访问。
+Exports create independent, short-lived snapshots. A source change during copying aborts the export; changes after copying do not alter the snapshot.
+Snapshots cover explicitly exported files only. Generic large results keep their existing handling.
+Resources outlive cells and allow repeated reads. Expiry or revocation blocks new requests; normal shutdown cleans up, and restarts do not restore old links.
 
-resources/read 使用本实例受信任的单操作者 MCP 入口。请求未必携带对话标识，
-双方都有标识时拒绝跨对话读取，缺失时仍按入口权限认证。
-私有资源 URI 不能用于公开下载端口。公网 MCP 也只授权指定操作者；若扩展为多人，
-须另行设计调用方身份和资源归属。
+Resource endpoints read registered exports only, with no directory browsing or arbitrary-path reads.
+Snapshots use a private system temporary directory. Abnormal exits may leave files for system temporary cleanup, but old links cannot access those leftovers.
 
-公开 URL 需要用户先配置真实 HTTPS 基址，再显式选择 delivery=url。
-独立回环端口只提供指定导出文件的 GET/HEAD/单范围读取，使用单独的高熵限时 bearer token。
-执行、目录浏览、上传及任意本机路径读取均不在该端口开放，无认证 MCP 端口不得一同转发到公网。
+resources/read uses this instance's trusted single-operator MCP ingress. A request may omit conversation identity.
+If both sides have identity, cross-conversation reads are rejected; otherwise ingress authentication still applies.
+Private resource URIs cannot be used on the public download port. Public MCP ingress also authorizes only the designated operator.
+Multi-user support would require a separate caller-identity and resource-ownership design.
 
-下载使用 attachment、nosniff 和禁止执行的 CSP。持有链接者可以下载或转发，工具说明须写清该权限。
-用户自行配置下载 Tunnel 或对象存储，resource 交付失败时不会自动改为公开 URL。
+Public URL delivery requires a configured HTTPS base URL and an explicit delivery=url selection.
+A separate loopback port offers GET, HEAD, and single-range reads for registered exports, using an independent high-entropy, expiring bearer token.
+It exposes no execution, directory browsing, upload, or arbitrary local-path reads. Never forward unauthenticated MCP execution alongside it.
 
-## 容量与验证
+Downloads use attachment, nosniff, and execution-blocking CSP headers. Link holders can download or forward the link; tool descriptions disclose that access.
+Users configure a download tunnel or object storage. A failed private-resource delivery never silently becomes a public URL.
 
-MCP binary resource 使用 Base64，SDK 可能缓冲完整响应，因此资源模式单独限制大小，
-并限制并发读取的总字节数。URL 模式直接传字节流，用于较大文件。
-快照配额包含管理开销，以限制大量空文件创建的记录；具体数值见代码和配置指南。
-传输采用独立取消和总期限，可长于一次 wait 的 110 秒窗口。
+## Capacity and validation
 
-资源协议、浏览器下载、ChatGPT 附件展示和 sandbox 挂载分别验证。
-服务端测试只报告实际覆盖的部分，ChatGPT 的绑定与展示需在宿主连接中验证；当前不保证 sandbox 挂载。
+MCP binary resources use Base64, and the SDK may buffer entire responses. Resource mode therefore has its own size limit
+and a total concurrent-read byte limit. URL mode streams bytes for larger files.
+Snapshot quotas include management overhead to bound records from many empty files. Code and the configuration guide define numeric values.
+Transfers have independent cancellation and total deadlines that may exceed one 110-second wait window.
+
+Validate the resource protocol, browser downloads, ChatGPT attachment presentation, and sandbox mounting separately.
+Server tests establish only what they exercise. Host attachment binding and display require testing through that host connection; sandbox mounting is not guaranteed.

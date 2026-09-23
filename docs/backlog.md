@@ -1,15 +1,17 @@
 # Backlog
 
-这里记录用户已提出、尚未交付且暂缓实现的计划。开始开发仍需另行授权，
-当前功能以代码、[README](../README.md) 和生效 ADR 为准。条目只写目标与必要的前置条件，计划变化时同步更新。
+English | [简体中文](backlog.zh.md)
 
-## 公共 npm 安装
+This document records user-requested plans that have not shipped and remain deferred. Starting implementation requires separate authorization.
+Use code, the [README](../README.md), and active ADRs for current behavior. Keep entries to their goals and necessary prerequisites, and update them when plans change.
 
-目前尚未公开发布 npm 包。计划通过公共 npm registry 分发，让用户用 npm install 安装后从命令行启动。
-Windows、macOS、Linux 共用这一方式，暂不提供额外的桌面安装器。
-1.0.0 当前通过源码构建使用，[README](../README.md) 保留相应步骤。
+## Public npm installation
 
-公开发布前需要确定许可、包名和发布权限，并验证从公共 registry 安装后的启动过程。
-现有 CI 已覆盖独立打包安装与跨平台执行，公共分发还需单独验证。
+No public npm package has been published. The plan is distribution through the public npm registry, followed by installation with npm install and startup from the command line.
+Windows, macOS, and Linux would share this approach without an additional desktop installer.
+Version 1.0.0 currently runs from a source build; the [README](../README.md) provides those steps.
 
-Web 控制台、Cloudflare/Tailscale 接入及异步提问与通知已经交付，相关用法见 [README](../README.md)。
+Before publication, decide licensing, package naming, and publishing permissions, and validate startup after installation from the public registry.
+CI already covers isolated package installation and cross-platform execution. Public distribution needs separate validation.
+
+The Web console, Cloudflare/Tailscale connections, asynchronous questions, and notifications have shipped. See the [README](../README.md) for usage.

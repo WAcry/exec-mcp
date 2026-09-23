@@ -1,97 +1,98 @@
-# ADR-009 可选的本机 Web 管理控制台
+# ADR-009 Optional local Web management console
 
-当前生效，2026-09-22 更新。
+English | [简体中文](009-web-console.zh.md)
 
-## 查看与管理运行状态
+Active, updated 2026-09-22.
 
-exec-mcp serve 可同时启动 Web 控制台，查看调用审计、会话、原生内存、终端、Skills、下游 MCP 和导出文件。
-界面以查看为主，提供清空审计和撤销产物等管理动作。外层调用只列 exec/wait，
-本机与下游操作按实际方法记录在子调用流中。
+## Observing and managing runtime state
 
-命令和补丁原文单独显示、复制，其余参数另列，0、false 和空字符串保留。
-下游页筛选当前工具目录，展开契约并展示连接错误，不调用检索探针。
-执行中的调用持续更新详情，已经完成且无子调用时隐藏空列表。返回句柄的任务仍可能在运行。
+exec-mcp serve can also start a Web console for call auditing, conversations, native memory, terminals, Skills, downstream MCP, and exports.
+The interface is mainly observational, with actions such as clearing audit history and revoking exports.
+Top-level calls show exec/wait; local and downstream operations use their actual method names in the nested-call view.
 
-控制台不调用模型，exec/wait 也不依赖 Web 执行。Web 启动失败时报告警告，MCP 继续运行。
-用户可用 [web].enabled=false 关闭界面；关闭或启动失败后同时清空并停止审计采集。
-前端静态资源随 npm 包构建，运行时不加载第三方字体、脚本或分析服务。
-CI 单独检查前端类型，并验证生产构建及独立 tarball 安装。
+Commands and patches have separate raw-text display and copying. Other arguments preserve explicit 0, false, and empty strings.
+The downstream page filters the current catalog, expands contracts, and shows connection errors without a search probe.
+Active call details refresh continuously. Empty nested-call lists disappear after completion; a returned handle may still identify running work.
 
-## 界面语言
+The console does not call a model, and exec/wait do not depend on Web execution. Web startup failure produces a warning while MCP continues.
+Set [web].enabled=false to disable it. Disabling Web or failing to start it clears and stops audit collection.
+Frontend assets are built into the npm package. Runtime pages fetch no third-party fonts, scripts, or analytics.
+CI checks frontend types, production builds, and isolated tarball installation.
 
-界面提供英语和简体中文。默认按 navigator.languages 的偏好顺序选择支持的语言，
-中文地区变体统一显示简体中文；没有匹配时使用英语。浏览器语言代表查看者的偏好，
-因此不从远端服务器读取系统语言，也不增加实例级语言配置。
-语言属于低频偏好，收在设置页的折叠区域，避免占用顶部操作区。登录页保留图标入口，
-两处共用语言选项，界面偏好独立于执行服务的配置保存和重启。
+## Interface language
 
-手动选择保存在当前网站的 localStorage，可切回自动模式。同源标签页同步选择；
-存储不可用时保留本页内存中的选择。切换只更新文案和日期数字格式，保留表单草稿、
-筛选和当前页面，登录 Cookie 与通知去重记录不变。通知使用发出时的界面语言。
+The interface offers English and Simplified Chinese. Automatic selection follows navigator.languages preference order,
+using Simplified Chinese for Chinese variants and English when no supported language matches.
+The browser describes the viewer's preference, so the server's OS language is not read and no instance language setting is added.
+Language is a low-frequency preference placed in a collapsed settings section, leaving the header free.
+The login page keeps an icon entry point. Both locations share options, and interface preferences are separate from execution configuration and restart.
 
-使用类型化双语词典和 React Context，随已有前端一起构建，不增加翻译服务或语言包网络请求。
-界面只翻译自身的标签和提示，问题选项、用户备注及日志原样展示。发给模型的契约和回答格式
-继续按原协议生成，容量校验也使用实际发送的原文。
+A manual choice is saved in the site's localStorage and can be reset to Auto. Same-origin tabs synchronize it.
+When storage is unavailable, the current page keeps the choice in memory. Switching changes wording and date/number formatting while retaining drafts,
+filters, and the current page. Sign-in cookies and notification deduplication remain unchanged. Notifications use the interface language at send time.
 
-## 本机与局域网访问
+A typed bilingual dictionary and React Context ship with the frontend, without a translation service or language-pack requests.
+Only UI-owned labels and prompts are translated. Question choices, user notes, and logs retain their text.
+Model contracts and answer payloads retain their protocol format; size validation uses the actual outgoing content.
 
-默认监听 `127.0.0.1:8893`。8891 留给 MCP，8892 可用于独立文件下载；
-端口冲突时直接报错，不自动换端口。用户将 [web].host 设置为 `0.0.0.0` 或 `::` 后才开放局域网。
-Web 只适用于可信网络，Cloudflare/Tailscale 的 MCP Tunnel 不会自动发布它。
+## Local and LAN access
 
-本机免密访问要求 TCP 对端和 HTTP Host 都是回环地址，以防 DNS rebinding。
-浏览器 API 只接受同源请求，响应设置 CSP、拒绝嵌入并禁止 Referrer，管理写请求还需 UI 专用头。
-CLI/curl 可省略 Origin，但仍须通过同一身份检查。
+The default listener is `127.0.0.1:8893`. Port 8891 serves MCP; 8892 may serve separate file downloads.
+Port conflicts fail rather than selecting another port. LAN access requires [web].host set explicitly to `0.0.0.0` or `::`.
+Web is intended for trusted networks. Cloudflare/Tailscale MCP tunnels do not publish it automatically.
 
-## 记住浏览器登录
+Passwordless local access requires both the TCP peer and HTTP Host to be loopback, protecting against DNS rebinding.
+Browser APIs accept only same-origin requests. Responses set CSP, deny framing, and suppress Referrer; management writes also require the UI header.
+CLI/curl requests may omit Origin but still pass the same identity checks.
 
-Web 访问密钥按配置文件分别持久保存，沿用 token 文件的轻量保护，普通重启后继续使用原密钥。
-初始化采用原子写入，显式轮换成功保存后才替换运行值。读取或保存失败时报错，
-不改用临时密钥，也不借用其他实例或 Tunnel 的凭据。
+## Remembering browser sign-in
 
-CLI 引导链接把密钥放在 URL fragment，登录后立即从地址栏移除。
-密钥不存 localStorage，查询参数也不用于认证。登录签发带 30 天有效期的 HMAC Cookie，
-包含 Max-Age，并保留 `HttpOnly; SameSite=Strict; Path=/api`。Cookie 中只有签名凭据，
-服务端验证签名与期限，访问密钥原文留在机器端。
+Each configuration file has its own persisted Web access key using lightweight token-file protection. Ordinary restarts reuse that key.
+Initialization is atomic. Explicit rotation persists the new key before replacing the active value.
+Read or write failure is an error; it does not create a temporary key or borrow another instance's or tunnel's credentials.
 
-控制台已有的状态请求自动续期这 30 天窗口，正常使用可长期保持登录。
-未过期 Cookie 在关闭浏览器和服务重启后继续有效，退出只清除当前浏览器 Cookie。
-当前不设置固定最长登录期，也不增加刷新轮询或用户会话数据库。
+CLI login links carry the key in the URL fragment, which is removed from the address bar after use.
+Keys are not stored in localStorage, and query parameters do not authenticate.
+Sign-in issues an HMAC cookie with a 30-day lifetime, Max-Age, and `HttpOnly; SameSite=Strict; Path=/api`.
+It contains a signed credential; the server checks signature and expiry while the access key stays on the machine.
 
-静态资源、认证失败和跨源请求不续期，长期 SSE 连接本身也不续期。
-SSE 在原有心跳或发送时检查凭据，过期便断开；正常页面可用已续期 Cookie 重连。
-服务器不记录每个浏览器的活动时间，旧 Cookie 副本会持续有效到其签名期限或全局轮换。
+Existing console status requests renew the 30-day window, allowing long-lived sign-in during normal use.
+An unexpired cookie survives closing the browser and restarting the service. Sign-out clears this browser's cookie only.
+There is no fixed maximum sign-in lifetime, extra refresh polling, or user-session database.
 
-换新密钥和定位配置文件仅限可信回环请求。轮换后立即撤销旧 Cookie 并断开所有既有 SSE，
-局域网客户端需重新认证。浏览器也可能自行提前清除 Cookie。
-持久登录减少了反复输入密钥的操作，但相应凭据有效期更长，用户需管理好浏览器访问权限。
-当前局域网 UI 使用 HTTP，远程或不可信网络应另配受保护的 HTTPS 访问。
+Static assets, failed authentication, and cross-origin requests do not renew sign-in. Long-lived SSE alone does not renew it either.
+SSE checks credentials at its existing heartbeat or send points and disconnects on expiry. A normal page can reconnect with a renewed cookie.
+The server does not track per-browser last activity. An old cookie copy remains valid until its signed expiry or global key rotation.
 
-## 有界审计
+Rotating the key and revealing the configuration file are restricted to trusted loopback requests.
+Rotation invalidates old cookies and disconnects existing SSE clients immediately; LAN clients must sign in again. Browsers may also clear cookies early.
+Persistent sign-in reduces repeated token entry and keeps credentials valid longer, so users must manage browser access.
+The current LAN UI uses HTTP. Remote or untrusted networks need separately protected HTTPS access.
 
-审计只保存在当前进程内，重启后丢失。对话显示宿主标识的摘要，原始 openai/session 不进入浏览器。
-列表返回摘要，详情按需读取，SSE 只广播变化类型和 ID，避免重复传输完整参数及结果。
-响应详情记录出口处理后的 MCP 结果，再按审计容量裁剪，因此详情可能省略内容。
-裁剪提示在各详情页显示，附件只记录名称、类型和大小，签名 URL 及不透明凭据不进入审计。
+## Bounded audit records
 
-记录数、文本和子调用都有上限，过大内容保留首尾；中间子调用也采用保留最早和滚动最新的方式。
-这些处理只影响 Web 副本，MCP 返回、终端输出及文件操作保持原行为。
-配置页隐藏凭据、header/env 值和命令参数，但用户明确执行的命令与结果仍可能含敏感信息，
-因此控制台应按高权限页面管理。仪表盘只统计当前保留记录，已滚动删除的历史不再计数。
+Audit records live in the current process and disappear on restart. Conversations show a digest of host identity; the raw openai/session value never reaches the browser.
+Lists return summaries and details are read on demand. SSE broadcasts change types and IDs instead of complete arguments and results.
+Response details record the prepared MCP result, then apply audit bounds, so some content can be omitted.
+Details show truncation notices. Attachment metadata includes name, type, and size only, without signed URLs or opaque credentials.
 
-## 管理操作
+Record count, text, and nested calls are bounded. Large text keeps its head and tail; nested calls retain the earliest and rolling latest records.
+These rules affect only the Web copy. MCP results, terminal output, and file operations keep their semantics.
+The configuration page hides credentials, header/env values, and command arguments. Explicit commands and results may still contain sensitive information,
+so treat the console as a high-privilege page. Dashboard counts cover retained records only.
 
-已认证的管理端点按导出 ID 撤销产物，仍保留 MCP 资源读取的对话检查。
-当前没有任意命令输入框、store 编辑器或 session 强杀按钮；新增破坏性操作前
-需检查认证、竞态和副作用说明。
+## Management actions
 
-配置页可以开关已有 MCP、已发现 Skill、默认 login 和 Web enabled。
-只修改相应 TOML 布尔值，保留注释和其他字段，结合完整校验、版本比较及原子替换防止覆盖并发编辑。
-保存与生效分开。重启先读取有效配置，再关闭旧运行时，重建工具连接、原生内存和终端，临时执行状态不备份。
-失败后保留 Web 管理入口供修正重试，重复点击合并为一次；服务关闭期间不会重新监听。
-会话问答沿用同一 Web 认证规则，回答只用于沟通，不作执行审批。
+Authenticated endpoints revoke exports by ID while retaining MCP resource conversation checks.
+There is no arbitrary command prompt, store editor, or session kill button. New destructive actions require review of authentication, races, and side-effect disclosure.
 
-会话组显示当前执行状态，历史错误不使整个会话永久告警。审计裁剪在详情标注，
-仪表盘不另设裁剪计数卡；脚本结束和子命令结果分别显示。
-用户可备注会话、发送补充或回答问题，见 [ADR-010](010-session-notes.md)。
-问题与补充独立于审计，滚动或清空审计时继续保留。
+The configuration page can toggle existing MCP servers, discovered Skills, default login, and Web enabled.
+It edits only the relevant TOML booleans, preserving comments and other fields. Full validation, revision checks, and atomic replacement protect concurrent edits.
+Saving and applying are separate. Restart reads valid configuration before closing the old runtime, then rebuilds connections, native memory, and terminals without backing up temporary execution state.
+On failure, the Web management entry point stays available for repair and retry. Repeated clicks share one restart; shutdown never reopens a listener.
+Questions and answers use the same Web authentication. Answers are communication, not execution approval.
+
+Conversation groups show current execution state without permanent alarms from historical failures.
+Audit truncation is marked in details, without a separate dashboard counter. Script completion and nested-command results are shown separately.
+Conversation labels, notes, and answers follow [ADR-010](010-session-notes.md).
+Questions and notes are independent of audit retention and survive rolling or clearing audit history.

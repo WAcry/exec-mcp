@@ -1,107 +1,113 @@
-# ADR-010 Web 会话补充与异步提问
+# ADR-010 Web conversation notes and asynchronous questions
 
-当前生效，2026-09-22 更新。
+English | [简体中文](010-session-notes.zh.md)
 
-## 对话归属与返回方式
+Active, updated 2026-09-22.
 
-操作者可以在 Web 会话组里主动发送文字，也可以回答 Agent 提交的问题。
-两种内容共用 User Note 队列，随同一对话下一次工具自然返回时附带。
-模型只有 exec 内的 tools.request_user_input_async 提问方法，没有答案查询、代发用户消息或命名会话的工具。
-服务不同步等待用户，也不增加确认参数或问答数据库。
+## Conversation ownership and delivery
 
-会话默认显示哈希，操作者可手动备注，备注仅用于 Web 辨认。
-归属使用 `_meta["openai/session"]` 的 SHA-256 摘要，独立于 MCP 连接、原生 session、cell、终端和目录。
-收件人来自带该标识的实际调用，无标识的组不能发送。
+Operators can send text from Web conversation groups or answer questions submitted by the agent.
+Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
+The model has only tools.request_user_input_async inside exec for asking questions. It has no answer-query, send-user-note, or conversation-naming tool.
+The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
-exec/wait 的成功、运行中和普通执行错误响应都可附带补充。
-嵌套工具的原值保持不变，MCP tools/list、resources/read 和 Web 查询不消费消息。
-返回时才从队列取消息，因此等待期间提交的内容可随当前响应返回。
-补充不唤醒等待或改写已运行的脚本，需要停下操作时仍应使用相应终止方法。
+Conversation names default to hashes. Operators may add labels for Web identification only.
+Ownership uses the SHA-256 digest of `_meta["openai/session"]`, independently of MCP connections, native sessions, cells, terminals, and working directories.
+Actual calls carrying that identifier establish recipients. Unidentified groups cannot receive messages.
 
-## 异步提问与作答
+Successful, running, and ordinary execution-error responses from exec/wait can all carry notes.
+Nested tool values remain unchanged. MCP tools/list, resources/read, and Web reads do not consume messages.
+Messages are selected at return time, so a note submitted during a wait can accompany that response.
+Notes do not wake waits or modify running scripts. Stopping an operation still requires its termination method.
 
-参考固定 Codex rust-v0.155.1 的
-[request_user_input_async](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
-沿用 questions/title/options 字符串数组与 accepted 的形状。await 只等提交完成，Agent 可继续其他工作。
-Codex 能注入新的用户消息，exec-mcp 则通过后续普通工具响应传回答案。
+## Asynchronous questions and answers
 
-每题提供多个选项，首项标记推荐，初始不选中，也不自动提交。
-界面自动增加自定义答案选项，选择任一项都可填写补充；自定义答案须填写文本。
-问题按对话哈希分组，显示操作者的备注。全局提示导航到会话组，侧栏分别显示问题和补充记录，
-未答问题排在前面，历史可分页查看。
+The design follows [request_user_input_async](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+in pinned Codex rust-v0.155.1, retaining questions/title/options string arrays and the accepted response shape.
+await waits for submission only, allowing the agent to continue other work. Codex can inject a new user message;
+exec-mcp returns the answer through a subsequent ordinary tool response.
 
-每题单独提交，两页同时回答时先保存者成功，另一份草稿保留。
-发送结果不确定时用同一提交 ID 去重。待投递答案可撤回重答，已附入响应的内容只能通过后续补充修正。
-可选 request_key 对同一对话的同内容请求去重，同键改题报冲突。问题与选项身份由服务分配，Agent 无需填写。
+Every question offers several options. The first is marked recommended but is neither preselected nor submitted automatically.
+The UI adds a custom-answer choice. Every choice allows a note, and custom answers require text.
+Questions are grouped by conversation hash and display the operator's label. The global prompt navigates to conversation groups;
+the side panel separates questions and note history, puts unanswered questions first, and paginates older records.
 
-浏览器只提交选项位置和补充，题目与选项从原记录还原。作答成功时同步更新问题并加入 FIFO，
-容量或校验失败时保持待答，正文不丢失。消息只包含题目、实际选择及补充，
-未选选项、请求 ID 和审计时间不再发送给模型。回答按提交时间与主动补充一起排队，未回答的问题不占队列。
+Questions can be answered individually. If two pages answer concurrently, the first saved response wins and the other page keeps its draft.
+The same submission ID deduplicates an uncertain retry. Pending answers can be withdrawn and replaced; an attached answer is corrected through a subsequent note.
+Optional request_key deduplicates identical requests within a conversation and rejects changed content under the same key.
+The service assigns question and option identity; the agent does not need to supply it.
 
-提问需要 Web 已监听且宿主提供对话标识，缺失时明确失败。问题和回答使用有界实例内存，
-无需修改原生 host 或自动续跑任务。提交前检查题目、选择与补充的编码总量，确保一条回答能够单独放进补充消息。
+The browser submits the option index and note only. The stored record supplies the original question and choices.
+A successful answer synchronously updates the question and enters the FIFO. Capacity or validation failure leaves the question pending and the draft intact.
+The message contains the question, actual selection, and note. Unselected choices, request IDs, and audit timestamps are omitted from model delivery.
+Answers and unsolicited notes queue by submission time. Unanswered questions occupy no position in that queue.
 
-## 浏览器通知
+Question submission requires a listening Web server and host conversation identity; missing prerequisites fail explicitly.
+Questions and answers use bounded instance memory without modifying the native host or resuming tasks automatically.
+Before accepting an answer, validate the encoded question, selection, and note together so the complete reply can fit into a note.
 
-新问题保存后，Web SSE 事件附带请求 ID 和题数，浏览器用原生 Notification 发系统提醒。
-事件不广播题目或答案；重复 request_key、回答、撤回、备注和普通补充也不触发新提醒。
-点击通知会聚焦页面并打开对应会话的问题标签。通知只显示短哈希和题数，
-完整问题与备注留在已认证页面中。
+## Browser notifications
 
-操作者点击启用通知时申请权限，已有权限可直接使用，也可暂停或测试。
-浏览器拒绝、环境不安全、移动端不支持或系统禁用通知时，提问和作答仍可进行。
-权限由 Web 管理，工具 schema 保持不变；通知发送状态无法证明真人或模型已经读到内容。
+After a new request is saved, the Web SSE event includes its request ID and question count. The browser uses native Notification for a system alert.
+The event omits question and answer text. Repeated request_key submissions, answers, withdrawals, labels, and ordinary notes do not trigger new alerts.
+Clicking a notification focuses the page and opens the conversation's questions tab. Notifications contain only a short hash and count;
+full questions and labels stay in the authenticated page.
 
-同次多题请求合成一次提醒，同源页面使用 Web Locks 和有界本地 ID 记录去重。
-无锁或存储不可用时，退回页面内去重与原生 tag，此时多标签可能重复提醒。
-本地偏好和 ID 历史不含问题正文、备注或凭据。退出认证或关闭页面时释放通知和监听。
-刷新、重连不补发旧提醒，遗漏的问题仍在待答列表。
+Permission is requested when the operator enables notifications. Existing permission can be used directly, and notifications can be paused or tested.
+Browser denial, an insecure context, unsupported mobile behavior, or OS notification settings do not prevent questions and answers.
+Web manages permission without changing tool schemas. Notification delivery does not prove that a person or model has read the content.
 
-当前不使用 service worker、Web Push 或定时查询，页面关闭或事件流断开时没有系统提醒。
-桌面通知和移动 Web 作答分别支持，部分移动浏览器无法发送此类通知。
-平台行为见 [浏览器通知权限、点击和生命周期](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API/Using_the_Notifications_API)
-及 [Notification 构造器的平台边界](https://developer.mozilla.org/en-US/docs/Web/API/Notification/Notification)。
+One multi-question request produces one alert. Same-origin pages use Web Locks and bounded local ID history to deduplicate it.
+Without locks or storage, fall back to page-local deduplication and native tags; multiple tabs may then notify twice.
+Local preferences and ID history contain no question text, labels, or credentials. Sign-out and page closure dispose notifications and listeners.
+Refresh and reconnection do not replay old alerts. Missed questions remain in the pending list.
 
-## 补充与结果共用通道
+There is no service worker, Web Push, or periodic question polling. Closed pages and disconnected event streams cannot produce alerts.
+Desktop notifications and mobile Web answering are separate capabilities; some mobile browsers cannot issue this type of notification.
+See [browser notification permission, clicks, and lifecycle](https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API/Using_the_Notifications_API)
+and [Notification constructor support](https://developer.mozilla.org/en-US/docs/Web/API/Notification/Notification).
 
-正常结果有 structuredContent 时，附带消息采用 `{result: 原结构化值, user_notes: [补充原文]}`。
-消费方即使只读结构化字段，也能收到补充，工具原字段则完整保存在 result 中。
-独立 TextContent 放入可选 result_content 并保留块元数据，仅删除可以证明重复的 JSON 镜像。
-图片、音频和原生资源仍留在 content，isError 及其他元数据不变。
+## Notes share the result channel
 
-没有 structuredContent 时，在 content 中追加输出标记 `用户额外补充：` 和正文。
-没有可附带消息时保持原结果，exec 内工具原值始终不受包装影响。
-当前 exec/wait 的原生结果使用 content，常规投递沿用文本，不额外制造结构化副本。
+When the normal result has structuredContent, attached messages use `{result: originalValue, user_notes: [noteText]}`.
+A consumer reading only structured data still receives the notes, while result retains the original tool fields.
+Distinct TextContent moves into optional result_content with block metadata preserved. Only proven duplicate JSON mirrors are removed.
+Images, audio, and native resources remain in content. isError and other metadata remain unchanged.
 
-官方文档将 content 和 structuredContent 都列为模型可见。共用通道是为了减少消费方只读其中一处而遗漏补充的风险，
-模型是否理解和采用仍需观察后续行为。消息按数组或内容块顺序排列，
-编号、ID、时间和备注只保留在内部队列与 Web 审计中。
+Without structuredContent, append the protocol marker `用户额外补充：` and body to content.
+With no attachable messages, keep the original response shape. Nested tool values are never affected by wrapping.
+Native exec/wait results currently use content, so ordinary delivery stays textual without creating a structured duplicate.
 
-## 输出额度与投递状态
+Official documentation treats content and structuredContent as model-visible. Using one channel reduces the risk of a consumer missing notes by reading only one field.
+Whether the model understands and acts on a note still requires observing later behavior. Messages follow array or content-block order;
+sequence numbers, IDs, times, and labels remain in the internal queue and Web audit only.
 
-普通结果限 36,000 UTF-8 字节，附带补充后合计最多 37,000 字节。
-按实际返回格式计入包装、转义、分隔符和文本标题，然后按 FIFO 加入完整消息。
-普通结果不为补充缩短，消息本身也不拆分。队首放不下时全队继续等后续响应，
-接受长消息可能长期排队的情况，以保持处理简单。
+## Output capacity and delivery state
 
-这些数值来自本服务的保守预算，宿主 token 限制可能变化。媒体与文件原生块保留，
-最终编码载荷仍独立检查。选取、校验和标记附带同步完成，防止并发响应重复消费。
-同批消息按序，跨响应的网络抵达顺序无法保证。
+Ordinary results are limited to 36,000 UTF-8 bytes, with a combined 37,000-byte ceiling when notes are attached.
+Count the actual wrapping, escapes, separators, and text headers, then append complete messages in FIFO order.
+Do not shorten normal output for a note or split the note. If the head does not fit, the entire queue waits for a later response.
+Long messages may stay queued indefinitely; this is an accepted cost of simple handling.
 
-附带前取消或编码失败时保持待发；附带后不重投，也不要求模型确认。
-UI 的“已附入工具响应”只记录服务器处理状态。响应若在连接器途中丢失，用户需通过复制入口重新发送，
-当前不为这类低频补充增加确认协议。
+These values are conservative service budgets, and host token limits may change. Native media and file blocks are retained,
+with the final encoded payload checked separately. Selection, validation, and marking attachment happen synchronously to prevent duplicate consumption by concurrent responses.
+A batch is ordered; network arrival order across separate responses cannot be guaranteed.
 
-## 保存期限与 Web 权限
+Cancellation or encoding failure before attachment keeps messages pending. After attachment, do not redeliver or require model acknowledgment.
+The UI's Attached to a tool response status records server handling only. If the connector loses that response, the user can copy and resend it.
+There is no acknowledgment protocol for these low-frequency notes.
 
-问题、消息和备注使用独立的有界实例内存，审计滚动、清空历史及原生 host 回收均保留它们。
-重启执行服务继续复用，整个进程退出后丢失。72 小时旧记录按需清理，计费容量约 16 MiB；
-容量不足拒绝新提交，待发消息保持原样。正文最多 30,000 UTF-8 字节，内容变化作为新消息，只有待发项可撤回。
+## Retention and Web permissions
 
-Web 监听期间发现收件人，关闭 Web 后已有消息仍能随原对话后续调用返回。
-API 沿用同源认证和写请求标记，SSE 只发变化通知与会话摘要。
-草稿按收件人隔离，提交成功后清空对应草稿，备注和正文按纯文本渲染。
-此通道信任单一操作者；同账户进程也可能访问 Web API，不能将作答记录用作真人授权证明。
+Questions, notes, and labels use separate bounded instance memory and survive audit eviction, clearing history, and native-host reclamation.
+Restarting the execution service reuses them; stopping the whole process loses them. Records older than 72 hours are cleaned up on access, within an approximately 16 MiB accounting budget.
+Insufficient capacity rejects new submissions without overwriting pending messages. Bodies allow at most 30,000 UTF-8 bytes.
+Changed content creates a new message, and only pending messages may be withdrawn.
 
-协议依据见 [OpenAI 对话元数据和可见工具结果](https://developers.openai.com/plugins/reference)
-及 [MCP 内容块](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)。
+Recipients are observed while Web is listening. After Web closes, existing messages may still accompany later calls from their original conversations.
+APIs retain same-origin authentication and the write-request marker. SSE sends only change notifications and conversation summaries.
+Drafts are isolated by recipient and cleared only after successful submission. Labels and bodies render as plain text.
+This channel trusts one operator. Same-account processes may also access the Web API, so answer records cannot prove human authorization.
+
+See [OpenAI conversation metadata and visible tool results](https://developers.openai.com/plugins/reference)
+and [MCP content blocks](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).

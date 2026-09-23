@@ -1,83 +1,88 @@
-# Agent 开发指南
+# Agent development guide
 
-本文件供 Agent 开发时查阅。当前功能看 README 和代码，长期取舍看下列生效 ADR。
-尚未实现的决定要注明状态。
+English | [简体中文](AGENTS.zh.md)
 
-## 工作方式
+Read this file when developing the project. Use the README and code for current behavior, and the ADRs below for lasting decisions.
+Mark decisions that have not been implemented.
 
-先核对目标仓库、分支和工作区变化，阅读适用的指令，保留无关及并发改动。
-读取与任务有关的代码和测试；任务涉及某项取舍时，再展开对应 ADR。
-有明确适用的 Skill 时先读全文，产品的 Skill 功能范围仍按 ADR-006 执行。
+## Working practices
 
-普通实现、检查和本地 Git 操作自主完成，提交只包含本次任务的改动。
-推送、发布、部署、重启现有服务或不可逆操作，需要本次任务的明确授权。
-开发新项目时，也应保留正在使用的 codex-mcp；修改或重启它需要单独授权。
+Check the repository, branch, and worktree state before editing. Read applicable instructions and preserve unrelated or concurrent changes.
+Inspect relevant code and tests; open the corresponding ADR when the task involves a recorded tradeoff.
+Read a clearly applicable Skill in full. The product's Skill feature remains governed by ADR-006.
 
-README、ADR 等文档使用中文。Web UI 支持英语和简体中文，界面文案在同一词典中维护。
-日志、用户内容及原始运行诊断保留原文，界面语言不改变模型契约或用户消息。
-模型可见的 MCP instructions、工具及资源说明、schema 参数说明和 ALL_TOOLS 包装使用英语，
-参考固定 Codex 版本及核对过的上游提示；差异须有实际环境或契约依据，见 ADR-002。
-代码标识符、协议字段、命令和枚举保留原文，上游数据也不翻译。
-用户补充、Skill 正文和第三方契约原样保留。
-公开文档不得带入个人路径、公司环境或凭据，安装步骤应适用于独立部署。
+Handle ordinary implementation, checks, and local Git work autonomously. Commit only changes belonging to the task.
+Pushing, publishing, deploying, restarting existing services, and irreversible operations require explicit authorization in the current task.
+Preserve any codex-mcp instance already in use while developing a new project; changing or restarting it requires separate authorization.
 
-## 文档分工
+Maintain English and Chinese versions of project documentation. The default `.md` file is English; its sibling `.zh.md` is Chinese.
+This applies to the README, AGENTS, CHANGELOG, architecture, guides, and ADRs. Update both versions together and keep their language links.
+Internal links should normally stay in the reader's language. Preserve commands, protocol fields, and sample user content; leave license texts and test fixtures untranslated.
+Write new commit messages in English and leave existing commit history intact. The Web UI supports English and Simplified Chinese through one shared message catalog.
+Logs, user content, and raw runtime diagnostics keep their original text. Interface language does not change model contracts or user messages.
+Model-visible MCP instructions, tool and resource descriptions, schema descriptions, and ALL_TOOLS wrappers use English.
+Refer to the pinned Codex version and reviewed upstream prompts; differences need an actual environment or contract reason, as recorded in ADR-002.
+Preserve identifiers, protocol fields, commands, enum values, and upstream data. User notes, Skill content, and third-party contracts remain unchanged.
+Keep personal paths, company environments, and credentials out of public documentation. Installation instructions must work for independent deployments.
 
-先读代码，再做必要改动。实现、测试、schema 或依赖锁文件已经说清的信息，无需再写一份 Spec。
-普通功能不另写规划文档或逐文件施工图，长期待办只记录用户明确提出的计划。
+## Documentation responsibilities
 
-文档应留下选择原因和放弃其他方案的代价，以及仅看代码难以理解的约束。
-每项信息只在一处维护，其他文档链接过去。
-README.md 和 AGENTS.md 留在根目录，供用户和 Agent 进入项目。其余文档放在 docs，
-操作指南归入 guides，决策记录归入 adr；架构说明与后续计划各保留一份。
+Read code first and make the necessary change. Implementation, tests, schemas, and lockfiles already describe many details; do not duplicate them in a specification.
+Ordinary features do not need separate planning documents or file-by-file implementation plans. Record only user-requested long-term backlog items.
 
-| 文档 | 读者与职责 |
+Keep the reasons for choices, the cost of alternatives, and constraints that code alone cannot explain.
+Maintain each topic in one location per language and link to it from elsewhere.
+Keep both language versions of README, AGENTS, and CHANGELOG at the repository root. Other documents belong under docs,
+with operational guides in guides and decisions in adr. Maintain one architecture document and one backlog per language.
+
+| Document | Audience and purpose |
 | --- | --- |
-| README.md | 向用户介绍产品用途、安装与连接，并说明权限和使用限制。 |
-| [配置指南](docs/guides/configuration.md)、[连接指南](docs/guides/connections.md)及[用法示例](docs/guides/code-mode-examples.md) | 供用户和调用者按需查阅操作方法。 |
-| AGENTS.md | 供 Agent 查阅开发规则和阅读入口。 |
-| [架构说明](docs/architecture.md) | 向开发者与 Agent 说明长期职责划分。函数和文件关系直接读代码。 |
-| docs/adr/ | 主要供 Agent 查阅当前生效的选择、理由和代价。 |
-| [后续计划](docs/backlog.md) | 记录用户明确保留、尚未交付的计划与前置条件。 |
+| README.md / README.zh.md | Introduces the product, installation, connections, permissions, and limits to users. |
+| [Configuration](docs/guides/configuration.md), [connections](docs/guides/connections.md), and [examples](docs/guides/code-mode-examples.md) | Operational guidance for users and callers. |
+| AGENTS.md / AGENTS.zh.md | Development rules and reading entry points for agents. |
+| [Changelog](CHANGELOG.md) | User-visible release changes, kept in sync across both languages; currently contains only 1.0.0. |
+| [Architecture](docs/architecture.md) | Lasting responsibility boundaries for developers and agents. Read code for functions and file relationships. |
+| docs/adr/ | Current choices, reasons, and tradeoffs, primarily for agents. |
+| [Backlog](docs/backlog.md) | Explicitly requested, unshipped plans and their prerequisites. |
 
-ADR 正文保持当前有效，同一主题通常原地更新，历史由 Git 保存。
-新 ADR 替代旧决定时，标明替代关系并更新本索引，避免同时保留相反决定。
-实现偏离决定时，先判断是缺陷还是产品取舍发生了变化，再修代码或文档。
-用户明确改变方向时同步更新相关决定。Backlog 条目变化时也要更新，但其中的计划须另获授权才能开发。
+Keep ADRs current, usually by editing the existing topic; Git retains the history.
+When a new ADR supersedes a decision, record that relationship and update this index so conflicting decisions do not remain active.
+If implementation diverges from a decision, determine whether it is a defect or a changed product choice, then update code or documentation.
+Reflect explicit user changes of direction in the relevant decisions. Keep backlog items current, but obtain separate authorization before implementing them.
 
-产品信任个人操作者和具备能力的 Agent。执行权限、无逐调用审批及环境恢复责任以 ADR-004 为准；
-下游启动时全量加载按 ADR-002 执行。改动须保持这两项决定。
+The product trusts its individual operator and a capable agent. ADR-004 defines execution permissions, the absence of per-call approval, and recovery responsibilities.
+ADR-002 requires complete downstream loading at startup. Preserve both decisions.
 
-## 按任务读取
+## Read by task
 
-| 任务 | 生效决定 |
+| Task | Active decision |
 | --- | --- |
-| 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001 执行内核与产品边界](docs/adr/001-exec-runtime.md) |
-| ALL_TOOLS、契约发现、英文模型描述、下游 MCP | [ADR-002 工具发现与契约](docs/adr/002-tool-discovery.md) |
-| JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003 结果与执行生命周期](docs/adr/003-results-lifecycle.md) |
-| Tunnel、认证、安装、发布及机器权限 | [ADR-004 接入与信任边界](docs/adr/004-connectivity-trust.md) |
-| 原生附件、文件导入导出、资源读取与下载 URL | [ADR-005 文件传输与交付边界](docs/adr/005-file-transfer.md) |
-| Skill 发现、软链接、显式调用策略与目录预算 | [ADR-006 一次发现的 Skill 目录](docs/adr/006-skill-catalog.md) |
-| Shell 默认值、单次覆盖及精简动态契约 | [ADR-007 默认命令 Shell 与单次覆盖](docs/adr/007-command-shell.md) |
-| 完整环境继承、出站代理与 Node 20 兼容 | [ADR-008 环境、代理与 Node 20](docs/adr/008-environment-and-proxy.md) |
-| Web 控制台、局域网认证、审计边界与前端交付 | [ADR-009 可选的本机 Web 管理控制台](docs/adr/009-web-console.md) |
-| 会话备注、异步提问、Web 作答与 User Note FIFO | [ADR-010 Web 会话补充与异步提问](docs/adr/010-session-notes.md) |
+| Tool entry points, directories, patches, Codex reuse, platforms | [ADR-001 Runtime and product scope](docs/adr/001-exec-runtime.md) |
+| ALL_TOOLS, contract discovery, English model descriptions, downstream MCP | [ADR-002 Tool discovery and contracts](docs/adr/002-tool-discovery.md) |
+| JSON deduplication, output budgets, store/load, media, cells and processes | [ADR-003 Results and execution lifecycle](docs/adr/003-results-lifecycle.md) |
+| Tunnels, authentication, installation, releases, machine permissions | [ADR-004 Connectivity and trust](docs/adr/004-connectivity-trust.md) |
+| Attachments, file transfer, resource reads, download URLs | [ADR-005 File transfer and delivery](docs/adr/005-file-transfer.md) |
+| Skill discovery, symlinks, explicit invocation, catalog budgets | [ADR-006 Skill catalog](docs/adr/006-skill-catalog.md) |
+| Default shell, per-command overrides, dynamic descriptions | [ADR-007 Command shells](docs/adr/007-command-shell.md) |
+| Environment inheritance, outbound proxies, Node 20 compatibility | [ADR-008 Environment and proxies](docs/adr/008-environment-and-proxy.md) |
+| Web console, LAN authentication, audit boundaries, frontend delivery | [ADR-009 Web console](docs/adr/009-web-console.md) |
+| Conversation labels, asynchronous questions, answers, User Note FIFO | [ADR-010 Conversation notes and questions](docs/adr/010-session-notes.md) |
 
-## 实现与验证
+## Implementation and validation
 
-工具说明从可执行契约生成。仅注册 exec/wait 两个顶层工具；本机契约同时用于生成 exec 的完整说明、
-ALL_TOOLS 条目和 tools.* 绑定。ALL_TOOLS 保留本次已绑定的全部本机及下游契约，
-下游按需用 JS 筛选查看，不另建搜索工具或直接调用入口。
-说明应足够让 Agent 首次正确调用。只写有用信息，历史决定和内部机制留在 ADR，详见 ADR-002。
+Generate tool descriptions from executable contracts. Register only exec and wait at the top level.
+Local contracts generate the full exec description, ALL_TOOLS entries, and tools.* bindings. ALL_TOOLS contains all bound local and downstream contracts for that exec.
+Use JS to inspect downstream entries as needed; do not add a separate search tool or direct-call entry point.
+Descriptions must support a correct first call. Keep history and internal mechanisms in ADRs; see ADR-002.
 
-已有成熟依赖能解决的问题优先复用，旧项目的 UI 和兼容代码按实际需要选取。
-复用上游代码时保留许可证和归属，参考仓库不得成为未声明的运行依赖。
+Reuse mature dependencies where they solve the problem. Select old UI or compatibility code only as needed.
+Preserve upstream licenses and attribution. Reference repositories must not become undeclared runtime dependencies.
 
-按风险选择验证范围。工具契约要检查真实 MCP 返回与参数校验，并确认新 Agent 能从描述中读懂用法。
-跨平台改动要验证对应平台的真实进程和安装路径，分别报告各平台结果。
-版本号只在用户明确要求时更新，日常修改和提交推送保持原版本。
-升版时同步包清单、锁文件和运行时常量，验证 CLI、MCP 与 Web 报告一致。
-源码版本变更与 Git tag/Release、npm 发布、部署分别取得授权，见 ADR-004。
+Choose validation based on risk. For tool contracts, check actual MCP responses and argument validation, and verify that a fresh agent has enough information to call correctly.
+For platform changes, exercise real processes and installation paths, and report platform results separately.
+Change the version only when the user explicitly requests it. Routine changes, commits, and pushes retain the current version.
+When bumping it, update the package manifest, lockfile, and runtime constant, then verify agreement across CLI, MCP, and Web.
+Source version changes, Git tags or Releases, npm publication, and deployment require separate authorization under ADR-004.
 
-纯文档任务检查事实、链接、决定是否一致，以及措辞和 Git diff；不安装依赖或运行无关构建。
-结束时说明改动与验证结果，交代 Git 状态及未验证之处；推送、部署等操作也应如实记录。
+For documentation-only work, check facts, links, decision consistency, wording, and the Git diff. Do not install dependencies or run unrelated builds.
+At completion, report changes, validation, Git status, and anything unverified. State whether pushing, deployment, or other requested actions actually occurred.

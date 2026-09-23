@@ -73,7 +73,11 @@
     "dist/src",
     "proto",
     "README.md",
+    "README.zh.md",
     "AGENTS.md",
+    "AGENTS.zh.md",
+    "CHANGELOG.md",
+    "CHANGELOG.zh.md",
     "docs"
   ]
 }

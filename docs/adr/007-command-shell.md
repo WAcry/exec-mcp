@@ -1,44 +1,45 @@
-# ADR-007 默认命令 Shell 与单次覆盖
+# ADR-007 Default shells and per-command overrides
 
-当前生效，2026-09-22 更新。
+English | [简体中文](007-command-shell.zh.md)
 
-## 默认配置与单次参数
+Active, updated 2026-09-22.
 
-config.toml 的 execution.shell 和 execution.login 决定实例默认值，exec_command 的同名参数
-只覆盖本次新建进程。普通调用只需提交命令，切换 Shell 时可直接传参数，减少命令中的解释器嵌套。
-参数形状参考固定 rust-v0.155.1 的
-[Direct exec_command](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/unified_exec.rs)，
-不引入 zsh-fork、App Server 或其他执行模式。
+## Instance defaults and call parameters
 
-shell 与 login 各自独立覆盖，显式参数优先，省略的字段继承实例配置。
-只换 shell 时 login 不变，显式 login=false 也可覆盖配置中的 true。默认继续使用 login=false。
-Codex 的 allow_login_shell 同时控制默认值和权限，本服务的 execution.login 只给出默认值，
-单次调用仍可设为 true，因此不增加 allow_login_shell。
+execution.shell and execution.login in config.toml define instance defaults. The same parameters on exec_command override only the newly created process.
+An ordinary call needs just a command. A shell override avoids another interpreter nested inside the command text.
+The parameter shape follows [Direct exec_command](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/unified_exec.rs)
+in pinned rust-v0.155.1, without introducing zsh-fork, App Server, or another execution mode.
 
-默认可执行路径在创建运行时时解析一次，执行器与说明共用结果。单次选择独立保存，
-不会改动配置、后续命令或并发命令。write_stdin 继续操作原 session_id 的进程，
-输入由原 Shell 处理，不因后来命令更换 Shell 而重建。
+shell and login override independently. Explicit values win; omitted fields inherit configuration.
+Changing only shell retains login, and explicit login=false overrides a configured true. The default remains login=false.
+Codex's allow_login_shell controls both defaults and permission. This service's execution.login is only a default,
+so calls may still set it to true, and there is no additional allow_login_shell option.
 
-## 路径与启动
+Resolve the default executable once at runtime creation and share it between execution and descriptions.
+Per-call choices do not change configuration, later commands, or concurrent commands.
+write_stdin continues the process identified by its original session_id. Its original shell handles input; later shell choices do not rebuild that terminal.
 
-Windows 优先查找 pwsh.exe，通常为 PowerShell 7，其次查找 Windows PowerShell，
-检查 PATH 及标准安装位置；CMD、Git Bash 和 WSL 不作自动回退。
-macOS/Linux 优先可用的 SHELL，失败后 macOS 尝试 /bin/zsh、/bin/sh，Linux 使用 /bin/sh。
+## Path resolution and launch
 
-配置中的相对路径基于配置文件目录，单次参数中的相对路径基于命令最终 workdir。
-裸名称从服务 PATH 查找，~/ 指服务账户主目录；工作目录中的同名文件不会额外加入 PATH 查询。
-可执行文件保留软链接名称，使 sh 等依赖 argv[0] 的程序维持原启动语义。
-显式配置无效时启动失败，单次覆盖无效时不创建进程；失败后不自动换 Shell 重试。
+Windows first looks for pwsh.exe, normally PowerShell 7, then Windows PowerShell, checking PATH and standard installation locations.
+CMD, Git Bash, and WSL are not automatic fallbacks.
+macOS/Linux prefer a usable SHELL. Otherwise macOS tries /bin/zsh and /bin/sh; Linux uses /bin/sh.
 
-执行器直接启动可执行文件并传参数数组，省去 cmd.exe /c 或 Base64 包装，脚本内容保持原样。
-PowerShell 在各平台使用自己的参数，Windows 保留现有 UTF-8 控制台设置。
-login 对 PowerShell 控制 profile 加载，对其他 Shell 控制 login 模式；
-login=false 时，zshenv、BASH_ENV 等 Shell 自身的启动规则仍可能生效。PTY 只分配终端，交互模式和 profile 不自动改变。
-自定义 Shell 使用 -c/-lc 接口，当前仍不支持 CMD 或批处理入口。
+Relative configured paths resolve from the configuration directory. Relative per-call paths resolve from the command's final workdir.
+Bare executable names use the service PATH. ~/ refers to the service account's home; same-named files in workdir are not implicitly added to PATH lookup.
+Keep symlink executable names so programs such as sh retain argv[0]-dependent behavior.
+An invalid configured shell fails startup; an invalid override creates no process. Neither case retries with a different shell.
 
-## 动态说明
+Launch the executable directly with an argument array, without cmd.exe /c or Base64 wrappers, and keep the script text intact.
+PowerShell uses its own launch arguments on each platform; Windows retains the existing UTF-8 console setup.
+login controls profile loading for PowerShell and login mode for other shells.
+With login=false, shell-specific rules such as zshenv or BASH_ENV may still apply. PTY allocation does not itself change interactive mode or profile behavior.
+Custom shells use a -c/-lc interface. CMD and batch-file entry points remain unsupported.
 
-常用 Shell 的英文描述显示默认名称和配置模式，未知类型使用通用执行说明。
-参数描述写清单次覆盖、路径基准和省略行为；环境探测或切换教程留给按需查阅的示例。
-同一契约生成 exec 描述和 ALL_TOOLS 条目。单次覆盖不刷新全局说明，
-配置更改后才需重启服务并刷新客户端目录。
+## Dynamic descriptions
+
+English descriptions for common shells show the resolved default name and mode. Unknown shell types use generic execution wording.
+Parameter descriptions explain per-call overrides, path bases, and omission behavior. Environment discovery and switching examples stay in optional documentation.
+The same contract generates the exec description and ALL_TOOLS entry. A per-call override does not refresh global descriptions;
+configuration changes require restarting the service and refreshing the client catalog.

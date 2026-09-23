@@ -1,102 +1,104 @@
-# ADR-003 结果与执行生命周期
+# ADR-003 Results and execution lifecycle
 
-当前生效，2026-09-22 更新。
+English | [简体中文](003-results-lifecycle.zh.md)
 
-## 结果去重与展示
+Active, updated 2026-09-22.
 
-structuredContent 与等价 JSON 文本只保留一份。处理下游结果时，仅删除可以无损证明重复的文本，
-保留独立说明、isError、媒体、资源及内容块元数据；宿主私有的顶层 _meta 不进入模型。
-比较时保留大整数、重复键与数字表示的差异，避免有损 parse/stringify 误删内容。
-结构化数据仍需结合 isError 判断，字段缺失也须与合法 null、数组或标量分别处理。
+## Deduplication and presentation
 
-本机函数将原值交给 JS，下游保留 CallToolResult。脚本通过 text/image/audio/generatedImage 显式输出，
-导出链接独立附带，见 [ADR-005](005-file-transfer.md)。显式输出只发送一次，省去无实际消费者的兼容镜像。
+Keep one copy of structuredContent and its equivalent JSON text. For downstream results, remove text only when it is provably a lossless duplicate.
+Preserve distinct explanations, isError, media, resources, and content-block metadata. Host-private top-level _meta does not enter model context.
+Comparison preserves differences in large integers, duplicate keys, and numeric representations to avoid deletion caused by lossy parse/stringify operations.
+Structured data still requires checking isError, and missing fields remain distinct from valid null, arrays, or scalar values.
 
-大结果由 Agent 在 Code Mode 中筛选，或用 store 保存后分段 load；需要持久内容时可显式写文件。
-服务不自动把通用结果写盘，以免增加重读、路径解析和结果清理步骤。
-最终响应采用目标链路实测得出的保守 UTF-8 字节上限，超限保留首尾并提示。
-被省略的内容不会由后续 wait 补发，截断文本也可能失去 JSON 语法完整性。宿主的实际 token 限制仍可能变化。
+Local methods return their values to JS; downstream methods retain CallToolResult. Scripts explicitly output through text/image/audio/generatedImage.
+Export links are attached separately under [ADR-005](005-file-transfer.md). Explicit output is sent once, without compatibility mirrors that have no actual consumer.
 
-exec.max_output_tokens 与 wait.max_tokens 分别缩小本次文本预算，外层参数优先于首行 pragma；
-wait 不继承 exec 的显式值。token 数量使用轻量估算，状态、句柄及媒体保留，并计入相应最终载荷限制。
-嵌套工具保留原始结果，但仍受独立传输限制；过大的原值可能在到达 JS 前就被拒绝。
-输入过大在操作前拒绝，结果过大则可能发生在操作之后，此时不能自动重试。
+Agents filter large results in Code Mode or store them for later partial reads through load. Persistent content can be explicitly written to files.
+The service does not spill generic results automatically, avoiding extra rereading, path resolution, and cleanup steps.
+Final responses use a conservative UTF-8 byte limit measured on the target connection, retaining the head and tail with a marker when exceeded.
+Later waits do not recover omitted text. Truncation may break JSON syntax, and the host's actual token limit can change.
 
-用户补充与普通结果使用同一文本通道，只占剩余额度。完整消息放不下就继续排队，
-不压缩普通结果，见 [ADR-010](010-session-notes.md)。
-默认值和可调项见[配置指南](../guides/configuration.md#容量与临时状态)，精确限制以 schema 和实现为准。
-编码载荷大小与进程内存分别检查，SDK 缓冲、并发请求和短期副本都会增加内存占用。
+exec.max_output_tokens and wait.max_tokens narrow their respective response text budgets. Outer arguments override first-line pragmas;
+wait does not inherit exec's explicit budget. Token counting is approximate. Status, handles, and media are preserved within the relevant final payload limits.
+Nested tools retain original results but remain subject to separate transport limits; oversized values can fail before reaching JS.
+Oversized inputs fail before an operation, while oversized results may fail afterward and must not trigger automatic replay.
 
-## 终端日志
+User notes share the normal result's text channel and use only spare capacity. Complete messages that do not fit remain queued;
+normal output is not reduced for them. See [ADR-010](010-session-notes.md).
+Defaults and settings are in the [configuration guide](../guides/configuration.md#capacity-and-temporary-state); schemas and implementation define exact limits.
+Encoded payload size and process memory are checked separately. SDK buffering, concurrent requests, and temporary copies consume additional memory.
 
-每个终端独立保留未读头部和滚动尾部，溢出时丢弃中间内容，并报告省略位置与字节数。
-按字节计量可限制巨大单行；已读头部不重复返回。接收阶段就限制缓冲大小，
-各会话独立处理，一个终端刷屏不会暂停其他终端。
-需要完整日志或数据时，调用者显式重定向到文件；用户生成文件的大小与磁盘配额由用户管理。
+## Terminal logs
 
-已退出且久未读取的终端记录可过期，运行中的进程继续保留。
-系统管道、PTY 和在途副本会占用额外内存，因此终端缓冲容量只约束本服务保留的日志。
+Each terminal retains its unread head and a rolling tail. Overflow discards the middle and reports its position and byte count.
+Byte accounting also bounds very long individual lines. Already-read prefixes are not returned again.
+Buffers are bounded at receipt, independently for each session, so a noisy terminal cannot pause another terminal.
+Callers explicitly redirect to files when they need complete logs or data. Users manage generated file sizes and disk quotas.
 
-## cell、终端与等待
+Exited terminals that remain unread can expire. Running processes remain retained.
+OS pipes, PTYs, and in-flight copies use additional memory, so the terminal capacity applies only to logs retained by this service.
 
-每次 exec 创建独立 V8 isolate，运行中的脚本通过 cell_id 续等或终止。
-命令返回 session_id 后由终端管理器持有，可跨 exec 使用，外层 cell 结束后仍能继续操作。
-这些句柄只在当前运行期间有效，调用权限由入口认证决定。
-正常关闭会清理自有进程；异常退出后，已写入的文件和外部操作仍可能保留。
+## Cells, terminals, and waiting
 
-write_stdin 沿用固定 Codex 的收集窗口。非空写入默认等待较短时间，空输入可收集较长时间。
-[上游收集器](https://github.com/openai/codex/blob/ebc05da3bdb76f25861e7cb418bd06d28cadc609/codex-rs/core/src/unified_exec/process_manager.rs)
-持续收集日志，到截止时间或进程结束时返回。窗口在取得终端并完成写入或调整后开始，
-排队及 stdin 背压不占用该窗口，新日志也不重置截止时间。显式 0 保留立即读取的能力。
-延长等待不会扩大缓冲或输出容量。
+Each exec creates an independent V8 isolate. A running script is resumed or terminated with cell_id.
+After a command returns session_id, the terminal manager owns that process. It remains usable across exec calls and after the outer cell ends.
+Handles are valid only during the current run; ingress authentication controls access.
+Normal shutdown cleans up owned processes. Files and external operations may survive abnormal exits.
 
-内层工具可以运行超过一次外层等待窗口。exec 先交回 cell_id，再由 wait 续取结果。
-外层 wait 默认及最大为 110 秒，依据目标 connector 超时不少于 120 秒的工程假设，
-为传输留出余量。任务可以继续运行，完成、主动 yield 或终止时则提前返回。
-当前没有独立 sleep 工具、后台模型轮询或持久任务调度。
+write_stdin follows the pinned Codex collection window. Nonempty input defaults to a short wait; empty input allows a longer collection.
+The [upstream collector](https://github.com/openai/codex/blob/ebc05da3bdb76f25861e7cb418bd06d28cadc609/codex-rs/core/src/unified_exec/process_manager.rs)
+collects logs until the deadline or process exit. Its window starts after acquiring the terminal and completing writes or resizing.
+Queueing and stdin backpressure do not consume that window, and new logs do not reset the deadline. Explicit 0 retains immediate reads.
+Longer waits do not increase buffer or output capacity.
 
-取消一次 wait 只停止观察；终止 cell 会请求取消尚未完成的嵌套调用。
-已交回 session_id 的终端仍需显式终止。观察者退出后解除监听，尚未交付的输出留待后续收取。
-取消、断连、host 故障或结果交付失败都可能留下已生效的操作，恢复连接后不自动重放脚本或下游调用。
-脚本须等待需要完成的 Promise；未 await 的操作可能被丢弃。notify 的宿主消息注入尚未接入。
+Nested tools may outlast an outer wait window. exec returns cell_id first, and wait retrieves subsequent output.
+Outer wait defaults to and is capped at 110 seconds, based on an engineering assumption that the target connector timeout is at least 120 seconds,
+leaving transport margin. The task can keep running; completion, an explicit yield, or termination returns sooner.
+There is no standalone sleep tool, background model polling, or persistent task scheduler.
 
-## 原生 store/load
+Cancelling one wait stops observation only. Terminating a cell requests cancellation of unfinished nested calls.
+Terminals whose session_id has already been returned require explicit termination. Removing an observer detaches its listeners and leaves undelivered output for later collection.
+Cancellation, disconnection, host failure, or failed result delivery can leave effective side effects. Reconnection never replays scripts or downstream calls automatically.
+Scripts must await promises that need to finish; unawaited work may be discarded. Host message injection through notify is not connected.
 
-同一 ChatGPT 对话复用原生 session，在 host 内保存可序列化数据。普通 JS 变量随 isolate 结束，
-store 数据也不会自动写盘。使用固定 host 的同步 store/load，保持二进制不变，
-不另设逐 key 协议、对话小配额或自定义 delete/clear/stats。传输限制单独生效；
-固定版本会忽略部分 heap 配置，不能将这些字段计作有效内存保护。
+## Native store/load
 
-每个 cell 读取启动快照，load 返回副本。写入在 cell 完成时合并，脚本错误前的写入也可能提交；
-终止尚未提交的 cell 会丢弃这些写入。并发同键写入没有事务保证，运行中的 cell 也不能通过 store/load 实时通信。
-单个 cell 收尾后，同一对话的其他 cell 继续存在；完成结果仍可通过原 cell_id 收取。
+The same ChatGPT conversation reuses a native session that stores serializable data in the host. Ordinary JS variables end with the isolate,
+and store data is not automatically persisted. Use the pinned host's synchronous store/load without changing the binary or adding per-key protocols,
+small per-conversation quotas, or custom delete/clear/stats methods. Transport limits apply independently.
+The pinned version ignores some heap settings, so those fields cannot count as effective memory protection.
 
-对话使用宿主 openai/session 的摘要分组，同一对话跨连接、跨轮次或换目录时继续关联。
-缺少标识时普通执行仍可用，store/load 报错，不创建全局共享存储。身份认证由接入层负责。
+Each cell reads a starting snapshot, and load returns a copy. Writes merge when the cell finishes, including writes before a script error.
+Terminating an uncommitted cell discards its writes. Concurrent writes to the same key have no transaction guarantee, and store/load is not real-time communication between active cells.
+Finishing one cell leaves other cells in the conversation intact. Completed results can still be retrieved by their original cell_id.
 
-## 内存回收与对话恢复
+Conversations are grouped by a digest of the host's openai/session value. Connections, turns, and working directories can change without changing that association.
+Without an identifier, ordinary execution still works and store/load fails instead of creating global shared storage. The connection layer handles authentication.
 
-宿主对话标识和原生 session 代次分别管理。回收时先解除旧绑定，再异步关闭旧实例，
-同一对话可以立即创建新实例。旧关闭回调、晚到结果及租约只影响旧代次，
-不能按对话名清理新实例。旧 cell 不转入新 session，也不自动重播。
+## Memory reclamation and recovery
 
-只采样自有 Code Mode host 的近似 RSS/working set，用户启动的浏览器、编译器等进程树由用户管理。
-测量失败时报告诊断，过期样本不用于判断新 host。正常情况下，所有 cell 收尾后保留空闲会话；
-内存超过高水位时，按进入空闲的时间 FIFO 回收，再测量。
-没有空闲候选且仍超高水位时，回收最久未使用的活动 session，其多个 cell 和 store 可能一起丢失。
-低于高水位就停止回收活动会话，一轮只处理开始时已存在的代次，新实例留给下一轮检查。
+Host conversation identity and native-session generations are separate. Reclamation removes the old binding before closing the old instance asynchronously,
+so the conversation can immediately obtain a new instance. Old close callbacks, late results, and leases affect their own generation only;
+cleanup cannot use the conversation name to remove its replacement. Old cells are neither moved nor replayed into the new session.
 
-关闭失败且内存仍高，或释放全部状态后内存仍高时，可以重启共享 host。
-重启会影响其中其他原生会话，须明确报告。无法确认旧 host 已终止时，拒绝并开新 host，后续可重试恢复。
-采样和回收存在延迟，瞬时分配仍可能耗尽内存。独立终端继续保留，持久数据由调用方显式写文件。
+Only the owned Code Mode host's approximate RSS/working set is sampled. Users manage browsers, compilers, and other child process trees they start.
+Sampling failures produce diagnostics, and stale samples cannot judge a new host. Normally, idle sessions remain after all cells finish.
+Above the high-water mark, reclaim by time of entering idle state, in FIFO order, then measure again.
+If no idle candidate remains and memory is still high, reclaim the least recently used active session; its cells and store may be lost together.
+Stop reclaiming active sessions below the high-water mark. A pass considers only generations present at its start, leaving new instances for the next pass.
 
-## 执行状态与诊断
+If closing fails while memory stays high, or freeing all state leaves it high, the shared host may be restarted.
+That affects other native sessions and must be reported. If the old host's termination cannot be confirmed, do not start another beside it; later recovery can retry.
+Sampling and reclamation lag behind allocation, so bursts may still exhaust memory. Independent terminals are retained, and callers explicitly write persistent data to files.
 
-Script completed 记录 JS 已完成，嵌套命令的成败仍按各自结果判断。Shell 退出码保持原生语义，
-stderr 字节数只供辅助判断，PTY 的合并输出不另设错误流计数。会话组按当前状态展示，
-历史子调用失败不使它永久告警。
+## Execution status and diagnostics
 
-原生 host 报 SyntaxError 后，服务才辅助解析实际收到的源码，提供指纹和可定位的片段。
-辅助解析用于诊断，不拦截 V8 语法，也不执行修改后的源码。
-generatedImage 输出已有 data URL 和说明，图片生成、URL 下载及文件保存需另行调用相应能力。
-媒体沿用固定 host 的规则，文本预算不增加另一套音频或图片过滤。
+Script completed records the end of JS; each nested command's result determines its success. Shell exit codes retain native semantics.
+Stderr byte counts are supporting evidence only, and PTY merged output has no separate stderr count. Conversation groups show current state;
+historical nested-call failures do not mark them permanently unhealthy.
+
+Only after the native host reports SyntaxError does the service parse the received source for a fingerprint and a locatable excerpt.
+This auxiliary parse provides diagnostics; it neither gates V8 syntax nor executes altered source.
+generatedImage outputs an existing data URL and hint. Image generation, URL download, and saving files require the relevant separate capability.
+Media follows the pinned host's rules without an additional audio or image filter for text budgets.

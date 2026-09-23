@@ -1,31 +1,33 @@
 # exec-mcp
 
-让 ChatGPT 在指定机器上开发和运行测试，也能使用已有 Skills 或调用你配置的其他 MCP 服务。
-工作仍在 ChatGPT 中进行。Web 控制台显示进度，你可以在其中回答问题或中途补充信息。
+English | [简体中文](README.zh.md)
 
-**1.0.0 是首个正式版本。** 当前通过源码安装；公共 npm 包、正式安装器和自动更新尚未发布。
-面向模型的工具说明使用英语，产品文档使用中文，Web 界面支持英语和简体中文。
+Let ChatGPT develop and run tests on a specific machine, use existing Skills, and call the other MCP services you configure.
+ChatGPT does the reasoning. The Web console shows progress and lets you answer questions or send notes while work continues.
 
-助手使用启动服务的系统账户权限，并完整继承环境变量及其中的凭据。以管理员账户启动时，
-助手也有管理员权限。请只连接可信的 ChatGPT 账户和下游服务，自行管理运行账户、备份和恢复环境。
+**1.0.0 is the first stable version.** Installation currently uses the source tree; a public npm package, dedicated installer, and automatic updates are not yet available.
+Model-facing tool descriptions use English. Product documentation and the Web console are available in English and Chinese. See the [Changelog](CHANGELOG.md) for the release record.
 
-## 可以做什么
+The assistant uses the service account's operating-system permissions and inherits its environment, including credentials.
+Starting the service as an administrator gives the assistant those privileges. Connect only trusted ChatGPT accounts and downstream services, and manage the account, backups, and recovery environment yourself.
 
-开发时可以组合工具调用，运行长任务，并在返回前筛选较大的结果。
-ChatGPT 附件可导入机器处理，机器上的文件也可交付回来。已有 Skills 和下游 MCP 资源可直接使用。
-Web 按会话显示调用详情，支持带选项的问答，并可用浏览器系统通知提醒你。
+## What it does
 
-每个连接对应一台指定机器，不与 ChatGPT 的其他容器共享文件、进程或网络环境。
-JavaScript 编排环境不直接提供文件和网络 API，但通过工具访问的机器仍有自己的文件系统与网络。
+Combine tool calls, run long tasks, and filter large results before returning them to the model.
+Import ChatGPT attachments onto the machine and deliver files back to the user. Existing Skills and downstream MCP resources are available through the same execution interface.
+The Web console groups calls by conversation, supports questions with answer choices, and can notify you through the browser.
 
-## 安装与启动
+Each connection targets one specific machine. It shares no files, processes, or network environment with ChatGPT's separate containers.
+The JavaScript orchestration environment has no direct filesystem or network APIs; tools still access the connected machine's filesystem and network.
 
-支持 Linux、Windows、macOS，CI 覆盖 Node.js 20、22、24 的真实执行和独立安装。
-需要 Git、npm 和 Node.js。20.x 最低为 20.19，22.x 最低为 22.19；新环境建议使用 22 或 24。
-[Node 20 已结束上游维护](https://nodejs.org/en/about/previous-releases)，本项目继续兼容，但该版本已无上游安全维护。
-Windows 需要 PowerShell 7 或 Windows PowerShell，不要求 WSL；安装依赖时需要联网。
+## Install and start
 
-在准备交给 ChatGPT 使用的机器上运行以下命令。
+Linux, Windows, and macOS are supported. CI covers actual execution and isolated installation on Node.js 20, 22, and 24.
+Install Git, npm, and Node.js. The minimums are 20.19 for 20.x and 22.19 for 22.x; use 22 or 24 for a new setup.
+[Node 20 has reached end of life](https://nodejs.org/en/about/previous-releases). This project retains compatibility, but Node 20 no longer receives upstream security maintenance.
+Windows needs PowerShell 7 or Windows PowerShell; WSL is not required. Dependency installation needs network access.
+
+Run these commands on the machine you will connect to ChatGPT.
 
 ```sh
 git clone https://github.com/WAcry/exec-mcp.git
@@ -37,83 +39,84 @@ node dist/src/cli.js doctor
 node dist/src/cli.js serve
 ```
 
-`init` 创建配置并打印位置，已有文件不会覆盖；`doctor` 检查配置及本机执行组件。
-`serve` 在前台运行，按 Ctrl+C 停止；它不会安装系统服务或接管其他程序。
+`init` creates the configuration and prints its location, leaving existing files untouched. `doctor` checks the configuration and local execution components.
+`serve` runs in the foreground; press Ctrl+C to stop it. It does not install a system service or take over other programs.
 
-MCP 默认地址为 `http://127.0.0.1:8891/mcp`，Web 为 `http://127.0.0.1:8893/`。
-这两个地址只供所在机器访问；ChatGPT 通过下面的 Tunnel 连接。端口冲突时修改自己的配置。
+The default MCP address is `http://127.0.0.1:8891/mcp` and the Web console is at `http://127.0.0.1:8893/`.
+These addresses are local to that machine. ChatGPT connects through one of the tunnels below. Change your configuration if a port is already in use.
 
-## 连接 ChatGPT
+## Connect ChatGPT
 
-| 连接方式 | 需要准备 |
+| Connection | Prerequisites |
 | --- | --- |
-| **OpenAI Secure MCP Tunnel** | OpenAI Tunnel 权限、Runtime API key 和官方 tunnel-client；使用默认私有模式。 |
-| **Cloudflare Named Tunnel** | 固定域名、cloudflared，以及 exec-mcp 的公网认证配置。 |
-| **Tailscale Funnel** | 已登录的 Tailscale 节点和 Funnel 权限，以及 exec-mcp 的公网认证配置。 |
+| **OpenAI Secure MCP Tunnel** | OpenAI Tunnel access, a Runtime API key, and the official tunnel-client; uses the default private mode. |
+| **Cloudflare Named Tunnel** | A stable hostname, cloudflared, and exec-mcp's public authentication configuration. |
+| **Tailscale Funnel** | A signed-in Tailscale node with Funnel permissions, and exec-mcp's public authentication configuration. |
 
-按[连接指南](docs/guides/connections.md)选择一种方式完成配置；公网接入提供 Auth0 示例。
-**不要将默认的无认证私有 MCP 端口直接转发到公网。** Web 管理界面也不会随 MCP Tunnel 自动公开。
+Choose a connection in the [connection guide](docs/guides/connections.md). It includes an Auth0 example for public access.
+**Keep the default unauthenticated private MCP port off the public internet.** The MCP tunnel does not publish the Web administration console automatically.
 
-连接后，告诉 ChatGPT 要操作的项目路径，例如请它检查 `C:/git/my-project`，运行测试并修复失败。
-需要第三方 MCP 时，先在[配置中添加已有服务](docs/guides/configuration.md#下游-mcp)。
-所有启用服务都连接并验证成功后，exec-mcp 才报告就绪；需要登录的服务应先在本机完成登录。
+Once connected, tell ChatGPT which project to work on, such as inspecting `C:/git/my-project`, running its tests, and fixing failures.
+To use another MCP service, [add it to the configuration](docs/guides/configuration.md#downstream-mcp).
+exec-mcp reports ready only after every enabled service connects and passes validation. Complete any required downstream sign-in on the machine first.
 
-## Web 控制台
+## Web console
 
-界面默认按浏览器语言选择中英文，在“设置”的“界面偏好”中切换；登录页也保留语言图标入口。
-选择保存在当前浏览器，选“自动”可恢复跟随浏览器。命令、问题与用户消息保持原文。
+The interface initially follows your browser's language. Change it under Settings, then Interface preferences; the login page also has a language icon.
+The choice is saved in this browser. Select Auto to follow the browser again. Commands, questions, and user messages keep their original text.
 
-打开启动日志中的 Web 地址，可以查看调用详情、命令与补丁原文、活动终端、内存状态、
-Skills、下游工具目录，以及导出的文件。会话默认显示哈希，可手动加备注帮助辨认。
-局域网首次登录后，浏览器会自动保持登录并续期；连续 30 天未访问才过期，普通服务重启不要求重新输入密钥。
-退出登录、清除浏览器 Cookie 或手动换新密钥后需要重新登录。
+Open the Web address printed at startup to inspect calls, command and patch text, active terminals, memory status, Skills, downstream tool catalogs, and exported files.
+Conversations initially show a hash; add your own label to distinguish them.
+After your first LAN sign-in, the browser keeps the session and renews it while you use the console. It expires after 30 days without a visit, and normal service restarts do not require the token again.
+Signing out, clearing browser cookies, or rotating the access token requires a new sign-in.
 
-### 发送补充
+### Send a note
 
-在会话组中点击“发送补充”。文字随该对话的下一次正常工具响应到达，
-不会打断正在执行的命令。待发消息可撤回；ChatGPT 已结束本轮时，也可复制到原对话继续沟通。
+Select Send a note in a conversation card. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
+Pending notes can be withdrawn. If ChatGPT has finished its turn, copy the text into the original conversation instead.
 
-### 回答问题
+### Answer questions
 
-会话卡片显示待答数量与问题预览。选择任一选项都能填写额外说明，
-也可以选“以上都不是”给出自己的回答；推荐项不会自动选中或提交。回答和主动补充使用同一通道。
+Conversation cards show the number of pending questions and a preview. You can add a note to any answer choice,
+or select None of the above and write your own answer. Recommended options are never selected or submitted automatically.
+Answers and unsolicited notes use the same delivery path.
 
-### 系统提醒与设置
+### Notifications and settings
 
-点击右上角铃铛，启用通知并允许浏览器权限。新问题会触发提醒，点击定位对应会话；
-需要保持页面打开并连接。浏览器不支持、权限被拒绝或系统勿扰时，仍可在页面查看和作答。
+Use the bell in the upper-right corner to enable notifications and grant browser permission. New questions trigger a notification that opens the corresponding conversation.
+Keep the page open and connected. If the browser cannot notify, permission is denied, or Do Not Disturb is active, questions remain available on the page.
 
-控制台可开关已有 MCP 和 Skill、调整已有设置并“重启执行服务”。保存配置与重启生效分开，
-不提供任意命令输入框或通用配置编辑器。局域网访问和关闭 Web 的设置见[配置指南](docs/guides/configuration.md#web-控制台)。
+The console can toggle existing MCP services and Skills, change supported settings, and restart the execution service. Saving and applying configuration are separate steps.
+It has no arbitrary command prompt or general configuration editor. See the [configuration guide](docs/guides/configuration.md#web-console) for LAN access and disabling the Web console.
 
-## 文件、Skills 与长期运行
+## Files, Skills, and long-running use
 
-在 ChatGPT 中附上文件并说明保存位置，或让助手把机器上的报告交付回来。
-导入默认不覆盖已有文件；导出默认使用私有资源，至多 32 MiB。
-更大文件可配置独立 HTTPS 下载入口，导入和 URL 导出默认单文件上限为 512 MiB。
-文件链接会过期，持有公开链接的人都可下载；实际附件展示由 ChatGPT 决定，不承诺挂载到 sandbox。
-详见[文件交付配置](docs/guides/configuration.md#文件交付)。
+Attach a file in ChatGPT and specify where to save it, or ask the assistant to deliver a report from the machine.
+Imports preserve existing files by default. Exports use private resources by default, with a 32 MiB limit.
+For larger files, configure a separate HTTPS download endpoint. Imports and URL exports default to a 512 MiB per-file limit.
+Links expire, and anyone holding a public link can download it. ChatGPT controls attachment display; sandbox mounting is not guaranteed.
+See [file delivery configuration](docs/guides/configuration.md#file-delivery).
 
-Skills 是工作流程文档，可放在用户目录或项目目录，也支持软链接。
-你可以启用或禁用 Skill，或将其设为仅在明确要求时调用，详见[Skills 配置](docs/guides/configuration.md#skills)。
+Skills are workflow documents stored in user or project directories; symbolic links are supported.
+Enable or disable Skills, or require explicit user invocation, through [Skill configuration](docs/guides/configuration.md#skills).
 
-任务执行、会话消息和审计只在当前进程内保存，各项清理操作的影响如下。
+Execution state, conversation messages, and audit records live in the current process. Cleanup has the following effects.
 
-| 操作 | 影响 |
+| Action | Effect |
 | --- | --- |
-| 清空调用审计 | 删除观察记录，不撤销执行；保留会话补充和问题。 |
-| Web“重启执行服务” | 重建工具连接，清空临时执行、终端、store 与导出链接；保留补充、问题和备注。 |
-| 停止整个 exec-mcp 程序 | 内存中的执行、消息、问题、备注和审计不恢复；不会回滚已经写入的文件或外部操作。 |
+| Clear call history | Removes audit records without undoing execution; keeps conversation notes and questions. |
+| Restart the execution service in the Web console | Rebuilds tool connections and clears temporary execution, terminals, store, and export links; keeps notes, questions, and labels. |
+| Stop the entire exec-mcp program | In-memory execution, messages, questions, labels, and audit records are not restored. Files already written and external operations are not rolled back. |
 
-默认对执行组件采用约 4 GiB 的宽松内存压力回收，正常空闲保留 72 小时。
-终端缓冲与模型输出都有上限；很大的结果会标注裁剪，重要数据应保存成文件。
-补充和回答按序使用响应剩余空间，长消息可能继续排队。“已附入响应”只记录发送状态，
-模型是否读到并执行，仍需从后续回复和操作确认。
-具体可调选项与边界见[配置指南](docs/guides/configuration.md#容量与临时状态)。
+The execution component has a loose memory-reclamation target of about 4 GiB and normally retains idle sessions for 72 hours.
+Terminal buffers and model output are bounded; oversized results show truncation markers. Save important data to files.
+Notes and answers use the response's remaining space in order, so a long message may remain queued. Attached to a tool response records delivery preparation only;
+check subsequent replies and operations to establish whether the model read and acted on it.
+See the [configuration guide](docs/guides/configuration.md#capacity-and-temporary-state) for settings and boundaries.
 
-## 升级与排障
+## Upgrade and troubleshoot
 
-升级前结束或保存正在进行的工作，停止自己启动的服务，再在干净的源码目录中运行以下命令。
+Finish or save active work, stop the service you started, then run these commands in a clean source checkout.
 
 ```sh
 git pull --ff-only
@@ -124,23 +127,23 @@ node dist/src/cli.js doctor
 node dist/src/cli.js serve
 ```
 
-已有配置不被覆盖。工具契约更新后，在 ChatGPT 的连接设置中刷新工具元数据；
-只开一个新聊天窗口不一定更新旧描述，步骤见[连接指南](docs/guides/connections.md#刷新与排障)。
+Existing configuration is preserved. After a tool contract changes, refresh tool metadata in ChatGPT's connection settings.
+A new conversation may still use cached descriptions; see [refresh and troubleshooting](docs/guides/connections.md#refresh-and-troubleshooting).
 
-服务启动失败时检查终端日志、配置和下游登录状态；MCP 正常而 Web 失败时，检查 Web 端口。
-默认 Shell、环境代理和 token 文件轮换分别见[配置指南](docs/guides/configuration.md)与[连接指南](docs/guides/connections.md)。
-命令、代码与结果可能交给 ChatGPT 或你调用的外部服务，自托管时也应按这一范围管理数据。
+For startup failures, check terminal logs, configuration, and downstream sign-in. If MCP works but the Web console does not, check the Web port.
+The [configuration guide](docs/guides/configuration.md) and [connection guide](docs/guides/connections.md) cover shells, proxies, and token rotation.
+Commands, code, and results may be sent to ChatGPT or external services you call. Account for that when managing self-hosted data.
 
-## 开发与后续计划
+## Development and planned work
 
 ```sh
 npm run check
 npm run test:package
 ```
 
-检查包括测试、类型检查与构建；独立安装验证只在临时目录打包安装，不发布 npm 包。
-开发者阅读[架构边界](docs/architecture.md)，编码 Agent 从 [AGENTS.md](AGENTS.md) 开始，
-具体调用示例见 [Code Mode 示例](docs/guides/code-mode-examples.md)。
+Checks cover tests, types, and builds. The isolated installation check packs and installs in a temporary directory without publishing to npm.
+Developers can read the [architecture](docs/architecture.md); coding agents should start with [AGENTS.md](AGENTS.md).
+See [Code Mode examples](docs/guides/code-mode-examples.md) for usage.
 
-未交付计划见 [Backlog](docs/backlog.md)。
-本项目尚未授予公开开源许可，公共 npm 分发需另行确定许可与发布流程。
+Unshipped plans are in the [Backlog](docs/backlog.md).
+This project has not granted a public open-source license. Public npm distribution requires a separate licensing and release decision.

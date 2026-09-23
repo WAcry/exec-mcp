@@ -69,7 +69,7 @@ const exec = (
 ) => client.callTool({ name: "exec", arguments: { source, ...extra } });
 
 describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
-  it("exposes exactly two Chinese tools without UI or duplicated payloads", async () => {
+  it("exposes exactly two tools without UI or duplicated payloads", async () => {
     const { client } = await connection({}, legacy);
     const tools = (await client.listTools()).tools;
     expect(tools.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
@@ -77,6 +77,16 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
     expect(tools[1]!.description).toContain("110");
     const result = await exec(client, "text({n:3});");
     expect(jsonOutput(result)).toEqual({ n: 3 });
+    expect(result.structuredContent).toBeUndefined();
+  });
+  it("returns mid-sized text inline without a connector-specific wrapper or disk spill", async () => {
+    const { client } = await connection({}, legacy);
+    const output = "BEGIN\n" + "x".repeat(14_000) + "\nEND";
+    const result = await exec(client, `text(${JSON.stringify(output)});`);
+    expect(result.isError).not.toBe(true);
+    expect(texts(result).join("\n")).toContain(output);
+    expect(result).not.toHaveProperty("text");
+    expect(result).not.toHaveProperty("outputFile");
     expect(result.structuredContent).toBeUndefined();
   });
   it("keeps processes usable through later exec calls and applies string patches under workdir", async () => {
@@ -136,6 +146,75 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
 describe.each([false, true])(
   "startup discovery over actual MCP (legacy=%s)",
   (legacy) => {
+    it("discovers and invokes inner downstream tools through renamed outer connectors", async () => {
+      const marker = path.join(await directory(), "nested-calls.txt");
+      const inner = await connection({ mcpServers: [fixture(marker)] }, legacy);
+      const aliases = ["workbench", "renamed-connection"];
+      const outer = await connection(
+        {
+          mcpServers: aliases.map((name) => ({
+            name,
+            transport: "streamable-http",
+            url: inner.url,
+            headers: {},
+            startupTimeoutMs: 5000,
+          })),
+        },
+        legacy,
+      );
+      // Both layers are real MCP runtimes. Host aliases expose exec/wait,
+      // while the fixture method exists only in the inner source's scope.
+      const listed = (await inner.client.listTools()).tools;
+      const description = listed.find(
+        (tool) => tool.name === "exec",
+      )!.description!;
+      const example = description.match(
+        /text\(ALL_TOOLS\.filter[^\n]+?\)\)\)/,
+      )?.[0];
+      expect(example).toBeDefined();
+      const discovery = example!.replace("/keyword/i", "/arithmetic/i");
+      for (const alias of aliases) {
+        const name = createDownstreamCodeName(alias, "exec");
+        const result = await exec(
+          outer.client,
+          [
+            'const outerMatches = ALL_TOOLS.filter(t => /arithmetic/i.test(t.name + " " + t.description));',
+            `const innerResult = await tools[${JSON.stringify(name)}](${JSON.stringify({ source: discovery })});`,
+            "text({outerMatches, direct: typeof tools.mcp__fixture__add, innerResult});",
+          ].join("\n"),
+        );
+        expect(result.isError, JSON.stringify(result)).not.toBe(true);
+        const value = jsonOutput<{
+          outerMatches: unknown[];
+          direct: string;
+          innerResult: CallToolResult;
+        }>(result);
+        expect(value.outerMatches).toEqual([]);
+        expect(value.direct).toBe("undefined");
+        expect(value.innerResult.isError).not.toBe(true);
+        const entries = jsonOutput<{ name: string; description: string }[]>(
+          value.innerResult,
+        );
+        expect(entries).toHaveLength(1);
+        expect(entries[0]!.name).toBe("mcp__fixture__add");
+        expect(entries[0]!.description).toContain("Input JSON Schema");
+        const source = `text(await tools[${JSON.stringify(entries[0]!.name)}]({value:41}));`;
+        const invoked = await exec(
+          outer.client,
+          `text(await tools[${JSON.stringify(name)}](${JSON.stringify({ source })}));`,
+        );
+        expect(invoked.isError, JSON.stringify(invoked)).not.toBe(true);
+        const forwarded = jsonOutput<CallToolResult>(invoked);
+        expect(forwarded.isError).not.toBe(true);
+        expect(jsonOutput(forwarded)).toEqual({
+          structuredContent: { value: 42 },
+          content: [{ type: "text", text: "distinct note" }],
+        });
+      }
+      expect((await readFile(marker, "utf8")).match(/^call$/gm)).toHaveLength(
+        aliases.length,
+      );
+    });
     it("binds a known name on the first exec and filters/calls within one snapshot", async () => {
       const marker = path.join(await directory(), "calls.txt");
       const { client } = await connection(

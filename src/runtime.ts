@@ -267,7 +267,7 @@ export class ExecRuntime {
       { name: "exec-mcp", title: "Exec MCP", version: VERSION },
       {
         instructions:
-          "Exec MCP connects ChatGPT to one specific remote machine operated by the user. exec orchestrates local and downstream tools; wait resumes running cells. Tool responses may include additional user messages or answers from this conversation's Web UI (user_notes or a labeled text block), in submission order, received through normal calls.",
+          "Exec MCP connects ChatGPT to one specific remote machine operated by the user. exec runs source with this machine's ALL_TOOLS catalog and tools bindings; wait resumes running cells. Tool responses may include additional user messages or answers from this conversation's Web UI (user_notes or a labeled text block), in submission order, received through normal calls.",
       },
     );
     const annotations = {

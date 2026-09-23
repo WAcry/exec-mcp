@@ -81,6 +81,9 @@ text(await tools.exec_command({
 
 ## 在 exec 中查阅下游工具
 
+连接在 ChatGPT 中可以使用不同名称。下面的发现与调用代码放在该连接的 exec 的 source 参数中执行。
+宿主侧若另有 exec，它使用自己的工具目录；在那里找到连接器，并不会列出机器上的下游工具。
+
 `ALL_TOOLS` 是 `{name, description}[]`；description 包含完整的输入、返回契约，工具名称与 `tools` 上的绑定一致。
 可按名称或描述筛选后输出，也可只列名称缩小范围。
 
@@ -90,6 +93,9 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 
 阅读命中项后使用它的准确名称调用 `await tools[name](args)`；已知名称和参数可以直接调用。
 这是当前 exec 的已绑定快照，筛选本身不连接或执行下游，也不自动把完整目录加入模型上下文。
+
+source 内的下游方法返回 MCP CallToolResult。外层宿主可能重新包装 exec/wait 的输出，
+转发输出的代码按宿主实际返回结构读取，该结构可以与嵌套方法的结果不同。
 
 ## MCP 资源
 

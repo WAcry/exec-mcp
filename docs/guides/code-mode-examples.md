@@ -82,6 +82,9 @@ The service does not alter error policy automatically. Return a native program's
 
 ## Inspect downstream tools inside exec
 
+The connection can have any name in ChatGPT. Run the discovery and invocation code below in the source argument of that connection's exec.
+A host-side exec, when present, has its own tool catalog; discovering the connector there does not list the machine's downstream tools.
+
 ALL_TOOLS is a `{name, description}[]` array. Each description includes full input and return contracts, and names match bindings on tools.
 Filter by name or description and print matches, or print names only to narrow the selection.
 
@@ -91,6 +94,9 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 
 After reading an entry, call its exact name with `await tools[name](args)`. Known names and arguments need no prior discovery.
 This is the bound snapshot for the current exec. Filtering does not connect to or execute a downstream and does not automatically add the catalog to model context.
+
+Inside source, downstream methods return MCP CallToolResult values. When an outer host wraps exec/wait output,
+code forwarding that output uses the host's actual return shape, which can differ from the nested method's result.
 
 ## MCP resources
 

@@ -409,8 +409,8 @@ export function execDescription(
 - Optional first-line pragma: // @exec: {"yield_time_ms": 10000, "max_output_tokens": 1000}. Explicit MCP arguments take precedence.
 
 ## Tool discovery
-Local tool contracts are included below. Downstream MCP tools are already bound to tools; their contracts are available in ALL_TOOLS, an array of {name, description} entries for all enabled nested tools.
-To find one, filter ALL_TOOLS by name and description: text(ALL_TOOLS.filter(t => /keyword/i.test(t.name + " " + t.description))). A known name and argument shape can be called directly with await tools[name](args).
+Within this connector's exec source, ALL_TOOLS lists all enabled local and downstream tools as {name, description} entries with full contracts; tools already contains their callable methods. These globals are separate from any outer host's tool catalog and tools object, regardless of the connector's name in ChatGPT. Local contracts are included below.
+Inside source, filter ALL_TOOLS by name and description: text(ALL_TOOLS.filter(t => /keyword/i.test(t.name + " " + t.description))). A known name and argument shape can be called directly with await tools[name](args).
 The catalog is not automatically printed; changes appear in the next exec. list_skills provides local skill metadata; a selected SKILL.md provides the full workflow.
 
 ## Global helpers
@@ -425,6 +425,7 @@ The catalog is not automatically printed; changes appear in the next exec. list_
 
 ## Results and execution
 Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources.
+An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.
 Final response text is limited to 36,000 UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is 37,000 UTF-8 bytes.
 exec waits 10000 ms by default, at most 30000. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
 cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.

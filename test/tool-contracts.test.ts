@@ -36,6 +36,10 @@ const AGENT_CLI_RULE =
   "Work independently; do not invoke other agent CLIs on this machine (e.g. Codex or Claude Code) unless the user explicitly requests it.";
 const DESTRUCTIVE_DELETE_RULE =
   "For destructive deletion commands (e.g. rm or rm -rf), use only explicit, fully resolved absolute path literals. Do not use shell variables, command substitution, wildcards, dynamic path concatenation or other path interpolation. Before deleting, verify that the final target paths and scope exactly match the intended deletion.";
+const DISCOVERY_SCOPE =
+  "Within this connector's exec source, ALL_TOOLS lists all enabled local and downstream tools";
+const HOST_RESULT_SCOPE =
+  "An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.";
 afterEach(async () => {
   await Promise.all(
     connections.splice(0).map((connection) => connection.close()),
@@ -119,6 +123,17 @@ describe("self-contained model-visible contracts", () => {
       "A known name and argument shape can be called directly with await tools[name](args)",
     );
     expect(description).toContain("ALL_TOOLS.filter");
+    expect(description.split(DISCOVERY_SCOPE)).toHaveLength(2);
+    expect(description).toContain(
+      "separate from any outer host's tool catalog",
+    );
+    expect(description).toContain(
+      "regardless of the connector's name in ChatGPT",
+    );
+    expect(description.split(HOST_RESULT_SCOPE)).toHaveLength(2);
+    expect(description).not.toMatch(
+      /dev_exec|LaptopExec|CodexMCP|functions\.exec/,
+    );
     expect(description).not.toMatch(
       /revoke_file|\{patch,\s*workdir\}|import_file\(index\)|String\.raw|must use|always use/i,
     );
@@ -278,6 +293,14 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     );
     const instructions = connection.client.getInstructions()!;
     expect(instructions).toContain("one specific remote machine");
+    expect(instructions).toContain(
+      "exec runs source with this machine's ALL_TOOLS catalog and tools bindings",
+    );
+    expect(instructions).not.toMatch(
+      /dev_exec|LaptopExec|CodexMCP|functions\.exec/,
+    );
+    expect(listed[0]!.description!.split(DISCOVERY_SCOPE)).toHaveLength(2);
+    expect(listed[0]!.description!.split(HOST_RESULT_SCOPE)).toHaveLength(2);
     expect(listed[0]!.description).toContain(
       "Only the orchestration JS isolate lacks",
     );

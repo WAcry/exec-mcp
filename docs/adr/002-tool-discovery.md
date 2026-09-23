@@ -15,6 +15,10 @@ Descriptions retain complete input and output constraints, including required fi
 The array remains in the runtime until explicitly printed, so keeping full local entries does not automatically add them to model context.
 Standard JS filters names and descriptions. A known name and argument shape can be called on the first exec.
 
+Connector names are assigned by the host. Descriptions refer to this connector's exec source, where its ALL_TOOLS catalog and tools bindings are available.
+Any outer orchestration runtime has a separate catalog and may wrap connector responses differently. Nested method return types apply inside source.
+We describe these boundaries without hardcoding a connector alias or changing the MCP response to match one host's wrapper.
+
 tool_search and the BM25 index have been removed, with no replacement schema/read/call API or discovery handshake.
 This drops built-in relevance ranking and synonym recall in exchange for fewer interfaces and consistent catalog and invocation behavior.
 The Web downstream view filters its current catalog and shows full contracts and connection errors without executing search probes.

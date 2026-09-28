@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -144,13 +145,13 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex rounded-lg bg-hover p-0.5"
+      className="inline-flex max-w-full overflow-x-auto rounded-lg bg-hover p-0.5 [scrollbar-width:none]"
     >
       {options.map((option) => (
         <label
           key={option.value}
           title={option.title}
-          className="relative cursor-pointer"
+          className="relative shrink-0 cursor-pointer"
         >
           <input
             type="radio"
@@ -160,7 +161,7 @@ export function Segmented<T extends string>({
             onChange={() => onChange(option.value)}
             className="peer sr-only"
           />
-          <span className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs text-ink-2 transition-colors peer-checked:bg-surface peer-checked:text-ink peer-checked:shadow-[0_1px_2px_rgb(0_0_0/0.08),0_0_0_1px_var(--line)] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-run hover:text-ink">
+          <span className="flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs whitespace-nowrap text-ink-2 transition-colors peer-checked:bg-surface peer-checked:text-ink peer-checked:shadow-[0_1px_2px_rgb(0_0_0/0.08),0_0_0_1px_var(--line)] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-1 peer-focus-visible:outline-run hover:text-ink">
             {option.label}
           </span>
         </label>
@@ -206,6 +207,8 @@ export function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+const VIEWPORT_GUTTER = 8;
+
 /** Menus and small panels: outside click and Escape close them, focus returns. */
 export function Popover({
   trigger,
@@ -232,7 +235,28 @@ export function Popover({
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const id = useId();
+  // Anchoring to the trigger can push the panel off-screen; slide it back inside.
+  useLayoutEffect(() => {
+    const node = panel.current;
+    if (!open || !node) return;
+    const place = () => {
+      node.style.translate = "";
+      const rect = node.getBoundingClientRect();
+      const room = document.documentElement.clientWidth;
+      const shift =
+        rect.left < VIEWPORT_GUTTER
+          ? VIEWPORT_GUTTER - rect.left
+          : rect.right > room - VIEWPORT_GUTTER
+            ? room - VIEWPORT_GUTTER - rect.right
+            : 0;
+      node.style.translate = shift ? `${shift}px 0` : "";
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
@@ -262,10 +286,11 @@ export function Popover({
       })}
       {open && (
         <div
+          ref={panel}
           id={id}
           role="dialog"
           aria-label={label}
-          className={`fade-in absolute z-40 rounded-xl border border-line bg-surface p-1 shadow-(--pop-shadow) ${side === "top" ? "bottom-full mb-2" : "top-full mt-2"} ${align === "end" ? "right-0" : "left-0"} ${panelClassName}`}
+          className={`fade-in absolute z-40 max-w-[calc(100vw-16px)] rounded-xl border border-line bg-surface p-1 shadow-(--pop-shadow) ${side === "top" ? "bottom-full mb-2" : "top-full mt-2"} ${align === "end" ? "right-0" : "left-0"} ${panelClassName}`}
         >
           {typeof children === "function" ? children(close) : children}
         </div>

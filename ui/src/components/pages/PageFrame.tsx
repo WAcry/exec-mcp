@@ -27,29 +27,27 @@ export function PageFrame({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="shrink-0 border-b border-line">
-        <div
-          className={`mx-auto flex items-start gap-3 px-4 pt-4 pb-3 sm:px-6 ${width}`}
-        >
-          {!wide && (
-            <button
-              type="button"
-              onClick={() => navigate({ name: "home" })}
-              aria-label={t("common.back")}
-              className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-hover"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-          )}
-          <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold text-ink">{title}</h1>
-            {description && (
-              <p className="mt-0.5 max-w-2xl text-sm text-ink-2">
-                {description}
-              </p>
+        <div className={`mx-auto px-4 pt-4 pb-3 sm:px-6 ${width}`}>
+          <div className="flex min-h-8 items-center gap-3">
+            {!wide && (
+              <button
+                type="button"
+                onClick={() => navigate({ name: "home" })}
+                aria-label={t("common.back")}
+                className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-2 hover:bg-hover"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
+            <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">
+              {title}
+            </h1>
+            {actions && (
+              <div className="flex shrink-0 items-center gap-2">{actions}</div>
             )}
           </div>
-          {actions && (
-            <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          {description && (
+            <p className="mt-1 max-w-2xl text-sm text-ink-2">{description}</p>
           )}
         </div>
         {toolbar && (

@@ -369,7 +369,9 @@ function StatusIcon({ status }: { status: CallRecord["status"] }) {
     );
   }
   if (status === "completed") {
-    return <CheckCircle2 className="w-3.5 h-3.5 text-zinc-400" />;
+    return (
+      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+    );
   }
   if (status === "yielding") {
     return <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />;

@@ -23,8 +23,9 @@ CI checks frontend types, production builds, and isolated tarball installation.
 
 The console is an operational surface that people scan. Hierarchy comes from size, weight, and spacing. Surfaces are flat panels with hairline borders
 and one small, consistent radius, without blur, glow, decorative gradients, or cards nested inside cards.
-Neutral grays and ink carry the interface; color marks state only. Red means errors and failures, and amber means warnings that need action.
-Success, idle, and completed states stay unmarked, so historical results do not keep drawing attention.
+Neutral grays and ink carry the interface; color marks state only. Red means errors and failures, amber means warnings that need action,
+and green means success or a live connection. State colors apply to icons, dots, and status text, never to tinted backgrounds, pills, or pulses.
+Pending, terminated, and idle states stay neutral; toggles and primary actions use ink.
 Monospace is limited to code, identifiers, paths, URLs, and tokens; counts and times use the sans face with tabular figures.
 Identifiers such as tool names and transports keep their original case. The system font stack satisfies the no-external-fonts rule
 and covers Chinese without shipping font files. Icons mark actions or state, not headings or cards.

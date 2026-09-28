@@ -227,7 +227,7 @@ export function CallDetailModal({
                           <span
                             className={`text-xs ${
                               sub.status === "success"
-                                ? "text-zinc-500 dark:text-zinc-400"
+                                ? "text-emerald-600 dark:text-emerald-400"
                                 : "font-medium text-rose-600 dark:text-rose-400"
                             }`}
                           >
@@ -415,7 +415,9 @@ function StatusBadge({ call }: { call: CallRecord }) {
       className={`flex items-center gap-1 text-xs font-medium ${
         status === "error"
           ? "text-rose-600 dark:text-rose-400"
-          : "text-zinc-600 dark:text-zinc-400"
+          : status === "completed"
+            ? "text-emerald-600 dark:text-emerald-400"
+            : "text-zinc-600 dark:text-zinc-400"
       }`}
     >
       <Icon

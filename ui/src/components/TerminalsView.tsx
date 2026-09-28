@@ -184,7 +184,7 @@ export function TerminalsView() {
                     {s.exitCode === undefined ? (
                       <div className="flex items-center justify-between">
                         <span>{t("terminals.state")}</span>
-                        <span className="font-medium text-zinc-900 dark:text-zinc-100">
+                        <span className="font-medium text-emerald-600 dark:text-emerald-400">
                           {t("terminals.running")}
                         </span>
                       </div>

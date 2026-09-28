@@ -39,7 +39,7 @@ export function Header({
       ? { label: t("header.restarting"), dot: "bg-amber-500" }
       : systemStatus?.status === "error"
         ? { label: t("header.error"), dot: "bg-rose-500" }
-        : { label: t("header.ready"), dot: "bg-zinc-400 dark:bg-zinc-500" };
+        : { label: t("header.ready"), dot: "bg-emerald-500" };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#09090b]">

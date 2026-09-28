@@ -8,7 +8,7 @@ export function RuntimeControl() {
   const { data, busy, error, restart } = useManagement();
   if (!data?.available) return null;
   return (
-    <section className="mb-4 flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-xs dark:border-zinc-800 dark:bg-zinc-900/50">
+    <section className="panel mb-3 flex flex-col gap-2 px-4 py-3 text-xs">
       <div className="flex items-center justify-between gap-3">
         <div className="text-zinc-500">
           <span
@@ -31,7 +31,7 @@ export function RuntimeControl() {
           disabled={busy}
           onClick={() => void restart()}
           title={t("runtime.restartTitle")}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-3 py-1.5 font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
         >
           <RotateCw
             className={`h-3.5 w-3.5 ${data.state === "restarting" ? "animate-spin" : ""}`}

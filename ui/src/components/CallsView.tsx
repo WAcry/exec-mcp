@@ -139,7 +139,7 @@ export function CallsView({
         </div>
       )}
       {/* Search & Filter Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+      <div className="panel flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3">
         <form onSubmit={handleSearchSubmit} className="relative min-w-0 flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
           <input
@@ -147,13 +147,13 @@ export function CallsView({
             placeholder={t("calls.search")}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
+            className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-colors"
           />
         </form>
 
         <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0">
           {selectedSessionId && (
-            <div className="flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-300/80 dark:border-zinc-700 whitespace-nowrap">
+            <div className="flex min-w-0 max-w-full items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 whitespace-nowrap">
               <Layers className="w-3.5 h-3.5" />
               <span className="truncate" title={selectedSessionId}>
                 {selectedSessionId}
@@ -171,7 +171,7 @@ export function CallsView({
           <select
             value={statusFilter}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">{t("calls.allStatus")}</option>
             <option value="completed">{t("calls.completed")}</option>
@@ -184,7 +184,7 @@ export function CallsView({
           <select
             value={toolFilter}
             onChange={(e) => handleToolChange(e.target.value)}
-            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
+            className="min-w-0 max-w-full text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md px-2.5 py-1.5 text-zinc-700 dark:text-zinc-300 focus:outline-none cursor-pointer"
           >
             <option value="all">{t("calls.allTools")}</option>
             {TOP_LEVEL_TOOL_NAMES.map((name) => (
@@ -196,7 +196,7 @@ export function CallsView({
 
           <button
             onClick={onClearHistory}
-            className="p-1.5 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-md transition-colors cursor-pointer"
             title={t("calls.clear")}
           >
             <Trash2 className="w-4 h-4" />
@@ -205,11 +205,11 @@ export function CallsView({
       </div>
 
       {/* Calls Table */}
-      <div className="overflow-hidden rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+      <div className="panel overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="border-b border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/70 dark:bg-zinc-950/60 text-zinc-500 dark:text-zinc-400 font-medium whitespace-nowrap">
+              <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 text-zinc-500 dark:text-zinc-400 font-medium whitespace-nowrap">
                 <th className="py-2.5 px-3.5 font-medium">
                   {t("calls.status")}
                 </th>
@@ -231,12 +231,12 @@ export function CallsView({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-mono">
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {!callsData || callsData.items.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
-                    className="py-12 text-center text-zinc-400 dark:text-zinc-500 font-sans"
+                    className="py-12 text-center text-zinc-400 dark:text-zinc-500"
                   >
                     {t("calls.empty")}
                   </td>
@@ -247,12 +247,12 @@ export function CallsView({
                     key={call.id}
                     data-call-id={call.id}
                     onClick={() => void openDetail(call)}
-                    className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
+                    className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer group"
                   >
                     <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <StatusIcon status={call.status} />
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold uppercase font-mono bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                        <span className="font-mono text-zinc-700 dark:text-zinc-300">
                           {call.tool}
                         </span>
                       </div>
@@ -262,7 +262,7 @@ export function CallsView({
                         {callPreview(call.tool, call.args)}
                       </span>
                     </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-500 dark:text-zinc-400 text-[11px]">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap font-mono text-zinc-500 dark:text-zinc-400 text-[11px]">
                       <span
                         onClick={(e) => {
                           e.stopPropagation();
@@ -273,25 +273,23 @@ export function CallsView({
                         {call.sessionId}
                       </span>
                     </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-600 dark:text-zinc-300">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap tabular-nums text-zinc-600 dark:text-zinc-400">
                       {call.subcallCount > 0 ? (
-                        <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 border border-zinc-200/60 dark:border-zinc-700/60">
-                          {t(
-                            "calls.count",
-                            call.subcallCount,
-                            call.truncated ? "+" : "",
-                          )}
-                        </span>
+                        t(
+                          "calls.count",
+                          call.subcallCount,
+                          call.truncated ? "+" : "",
+                        )
                       ) : (
                         <span className="text-zinc-400">-</span>
                       )}
                     </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-500 text-[11px]">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap tabular-nums text-zinc-500">
                       {call.durationMs !== undefined
-                        ? `${call.durationMs}ms`
-                        : "..."}
+                        ? `${call.durationMs} ms`
+                        : "…"}
                     </td>
-                    <td className="py-2.5 px-3.5 whitespace-nowrap text-zinc-400 text-[11px]">
+                    <td className="py-2.5 px-3.5 whitespace-nowrap tabular-nums text-zinc-500">
                       {new Date(call.startedAt).toLocaleTimeString(locale)}
                     </td>
                     <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
@@ -301,7 +299,7 @@ export function CallsView({
                           event.stopPropagation();
                           openDetail(call);
                         }}
-                        className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 group-hover:underline text-[11px] font-sans cursor-pointer"
+                        className="text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 group-hover:underline cursor-pointer"
                       >
                         {detailLoading === call.id
                           ? t("common.reading")
@@ -317,7 +315,7 @@ export function CallsView({
 
         {/* Pagination Bar */}
         {callsData && callsData.totalPages > 1 && (
-          <div className="flex items-center justify-between px-3.5 py-2.5 border-t border-zinc-200 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-950/40 text-xs text-zinc-500">
+          <div className="flex items-center justify-between px-3.5 py-2.5 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500 tabular-nums">
             <div>
               {t(
                 "calls.page",
@@ -366,16 +364,20 @@ export function CallsView({
 
 function StatusIcon({ status }: { status: CallRecord["status"] }) {
   if (status === "running") {
-    return <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin" />;
+    return (
+      <Loader2 className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-300 animate-spin" />
+    );
   }
   if (status === "completed") {
-    return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
+    return <CheckCircle2 className="w-3.5 h-3.5 text-zinc-400" />;
   }
   if (status === "yielding") {
     return <ArrowRight className="w-3.5 h-3.5 text-zinc-400" />;
   }
   if (status === "terminated") {
-    return <Square className="w-3.5 h-3.5 text-zinc-500" />;
+    return <Square className="w-3.5 h-3.5 text-zinc-400" />;
   }
-  return <AlertCircle className="w-3.5 h-3.5 text-rose-500" />;
+  return (
+    <AlertCircle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+  );
 }

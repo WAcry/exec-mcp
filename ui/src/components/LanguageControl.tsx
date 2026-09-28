@@ -13,7 +13,7 @@ function LanguageOptions() {
       <legend className="mb-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
         {t("language.label")}
       </legend>
-      <div className="grid grid-cols-3 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-950">
+      <div className="grid grid-cols-3 gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-950">
         {(["auto", "en", "zh"] as const).map((value) => (
           <label key={value} className="min-w-0 cursor-pointer">
             <input
@@ -46,13 +46,9 @@ export function InterfacePreferences() {
   const { preference, locale, t } = useLocale();
   const current = languageNames[locale === "zh-CN" ? "zh" : "en"];
   return (
-    <details className="group rounded-xl border border-zinc-200/80 bg-white shadow-xs dark:border-zinc-800/80 dark:bg-zinc-900/50">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-xl p-4 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500 [&::-webkit-details-marker]:hidden">
-        <span className="flex items-center gap-2 font-semibold text-zinc-900 dark:text-zinc-100">
-          <Languages
-            className="h-4 w-4 shrink-0 text-zinc-400"
-            aria-hidden="true"
-          />
+    <details className="panel group">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg p-4 text-xs focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-500 [&::-webkit-details-marker]:hidden">
+        <span className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
           {t("preferences.title")}
         </span>
         <span className="flex min-w-0 items-center gap-2 text-zinc-500">
@@ -126,7 +122,7 @@ export function LoginLanguageControl() {
       <div
         id={panelId}
         hidden={!open}
-        className="absolute right-0 top-full z-10 mt-1 w-64 max-w-[calc(100vw-4rem)] rounded-xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+        className="absolute right-0 top-full z-10 mt-1 w-64 max-w-[calc(100vw-4rem)] rounded-lg border border-zinc-200 bg-white p-3 shadow-md dark:border-zinc-700 dark:bg-zinc-900"
       >
         <LanguageOptions />
       </div>

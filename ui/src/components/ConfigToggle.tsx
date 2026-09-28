@@ -23,10 +23,10 @@ export function ConfigToggle({
       className="inline-flex shrink-0 items-center gap-2 text-xs disabled:opacity-50 disabled:cursor-wait cursor-pointer"
     >
       <span
-        className={`relative h-5 w-9 rounded-full transition-colors ${checked ? "bg-emerald-600" : "bg-zinc-300 dark:bg-zinc-700"}`}
+        className={`relative h-5 w-9 rounded-full transition-colors ${checked ? "bg-zinc-900 dark:bg-zinc-100" : "bg-zinc-300 dark:bg-zinc-700"}`}
       >
         <span
-          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0"}`}
+          className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full shadow-xs transition-transform ${checked ? "translate-x-4 bg-white dark:bg-zinc-900" : "translate-x-0 bg-white dark:bg-zinc-300"}`}
         />
       </span>
       <span className="text-zinc-500">

@@ -230,6 +230,10 @@ function ConsoleApp() {
     setCallsPage(1);
   };
 
+  const selectedLabel = sessionsData?.items.find(
+    (s) => s.id === callsFilters.sessionId,
+  )?.label;
+
   if (isVerifying) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-[#09090b] flex items-center justify-center text-xs text-zinc-500">
@@ -260,10 +264,10 @@ function ConsoleApp() {
               setSessionsSearch("");
               setSessionsPage(1);
             }}
-            className="w-full mb-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 px-4 py-3 text-left text-sm text-indigo-700 dark:text-indigo-300 cursor-pointer"
+            className="w-full mb-3 rounded-lg bg-zinc-900 px-4 py-3 text-left text-sm font-medium text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 transition-colors cursor-pointer"
           >
             {t("app.pendingQuestions", sessionsData.pendingQuestionsTotal)}
-            <span className="ml-2 text-xs opacity-80">
+            <span className="ml-3 text-xs font-normal opacity-70">
               {t("app.viewConversations")}
             </span>
           </button>
@@ -274,15 +278,20 @@ function ConsoleApp() {
 
         {activeTab === "calls" && callsFilters.sessionId && (
           <div className="mb-3 flex items-center justify-between gap-2 text-xs">
-            <span className="font-mono text-zinc-500 truncate">
+            <span className="text-zinc-500 truncate">
               {t("app.session")}
-              {sessionsData?.items.find((s) => s.id === callsFilters.sessionId)
-                ?.label || callsFilters.sessionId}
+              {selectedLabel ? (
+                <span className="text-zinc-900 dark:text-zinc-100">
+                  {selectedLabel}
+                </span>
+              ) : (
+                <span className="font-mono">{callsFilters.sessionId}</span>
+              )}
             </span>
             <button
               disabled={callsFilters.sessionId === "unscoped"}
               onClick={() => openConversation(callsFilters.sessionId!)}
-              className="shrink-0 px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 disabled:opacity-40 cursor-pointer"
+              className="shrink-0 px-3 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 cursor-pointer transition-colors"
             >
               {t("notes.send")}
             </button>
@@ -377,7 +386,7 @@ function ConsoleApp() {
         />
       )}
 
-      <footer className="border-t border-zinc-200/80 dark:border-zinc-800/80 py-5 text-center text-xs text-zinc-400 dark:text-zinc-500">
+      <footer className="border-t border-zinc-200 dark:border-zinc-800 py-5 text-center text-xs text-zinc-400 dark:text-zinc-500">
         <p>{t("app.footer")}</p>
       </footer>
     </div>

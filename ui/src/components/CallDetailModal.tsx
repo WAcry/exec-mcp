@@ -9,14 +9,11 @@ import {
 } from "../lib/call-presentation";
 import {
   X,
-  Clock,
-  Layers,
   CheckCircle2,
   AlertCircle,
   Loader2,
   ArrowRight,
   Square,
-  Zap,
 } from "lucide-react";
 
 interface CallDetailModalProps {
@@ -25,6 +22,16 @@ interface CallDetailModalProps {
   refreshError?: string | null;
   onRefresh?: () => void;
 }
+
+const tabClass = (active: boolean) =>
+  `flex items-center gap-1.5 pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-colors cursor-pointer ${
+    active
+      ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100"
+      : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
+  }`;
+
+const notice =
+  "px-3 py-2 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-400";
 
 export function CallDetailModal({
   call,
@@ -53,65 +60,55 @@ export function CallDetailModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="call-detail-title"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50"
     >
-      <div className="w-full min-w-0 max-w-4xl max-h-[90vh] bg-white dark:bg-[#121215] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/40">
-          <div className="flex flex-wrap min-w-0 items-center gap-2.5">
-            <span className="px-2 py-0.5 rounded text-xs font-mono font-bold uppercase bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
-              {call.tool}
-            </span>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3
-                  id="call-detail-title"
-                  className="text-sm break-all font-bold text-zinc-900 dark:text-zinc-100 font-mono"
-                >
-                  {call.id}
-                </h3>
-                <StatusBadge call={call} />
-              </div>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                {t("detail.session")}{" "}
-                <span className="font-mono break-all text-zinc-700 dark:text-zinc-300">
-                  {call.sessionId}
-                </span>{" "}
-                {t("detail.started")}{" "}
-                {new Date(call.startedAt).toLocaleString(locale)}
-              </p>
+      <div className="w-full min-w-0 max-w-4xl max-h-[90vh] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-lg flex flex-col overflow-hidden">
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">
+                {call.tool}
+              </span>
+              <h3
+                id="call-detail-title"
+                className="text-sm break-all font-semibold text-zinc-900 dark:text-zinc-100 font-mono"
+              >
+                {call.id}
+              </h3>
+              <StatusBadge call={call} />
             </div>
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
+              {t("detail.session")}{" "}
+              <span className="font-mono break-all text-zinc-700 dark:text-zinc-300">
+                {call.sessionId}
+              </span>{" "}
+              {t("detail.started")}{" "}
+              <span className="tabular-nums">
+                {new Date(call.startedAt).toLocaleString(locale)}
+              </span>
+            </p>
           </div>
           <button
             onClick={onClose}
             aria-label={t("detail.close")}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            className="p-1.5 -mr-1.5 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Tab switcher */}
-        <div className="flex items-center gap-1 overflow-x-auto shrink-0 px-5 pt-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#121215]">
+        <div className="flex items-center gap-1 overflow-x-auto shrink-0 px-5 pt-2.5 border-b border-zinc-200 dark:border-zinc-800">
           <button
             onClick={() => setActiveTab("overview")}
             aria-pressed={activeTab === "overview"}
-            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
-              activeTab === "overview"
-                ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
-                : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            }`}
+            className={tabClass(activeTab === "overview")}
           >
             {t("detail.overview")}
           </button>
           <button
             onClick={() => setActiveTab("input")}
             aria-pressed={activeTab === "input"}
-            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
-              activeTab === "input"
-                ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
-                : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            }`}
+            className={tabClass(activeTab === "input")}
           >
             {t("detail.input")}
           </button>
@@ -119,14 +116,10 @@ export function CallDetailModal({
             <button
               onClick={() => setActiveTab("subcalls")}
               aria-pressed={activeTab === "subcalls"}
-              className={`flex items-center shrink-0 whitespace-nowrap gap-1.5 pb-2 px-3 text-xs font-medium border-b-2 transition-all cursor-pointer ${
-                activeTab === "subcalls"
-                  ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
-                  : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-              }`}
+              className={tabClass(activeTab === "subcalls")}
             >
               <span>{t("detail.subcalls")}</span>
-              <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-100 dark:bg-zinc-800 font-mono text-zinc-600 dark:text-zinc-400">
+              <span className="tabular-nums text-zinc-400">
                 {call.subcalls.length}
                 {call.omittedSubcalls ? `+${call.omittedSubcalls}` : ""}
               </span>
@@ -135,22 +128,17 @@ export function CallDetailModal({
           <button
             onClick={() => setActiveTab("output")}
             aria-pressed={activeTab === "output"}
-            className={`pb-2 px-3 shrink-0 whitespace-nowrap text-xs font-medium border-b-2 transition-all cursor-pointer ${
-              activeTab === "output"
-                ? "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-semibold"
-                : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-            }`}
+            className={tabClass(activeTab === "output")}
           >
             {t("detail.output")}
           </button>
         </div>
 
-        {/* Tab Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {refreshError && (
             <div
               role="alert"
-              className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
+              className={`${notice} text-zinc-800 dark:text-zinc-200`}
             >
               {t("detail.refreshFailed")}
               {refreshError}
@@ -163,50 +151,47 @@ export function CallDetailModal({
             </div>
           )}
           {(call.truncatedFields ?? 0) > 0 && (
-            <div
-              role="note"
-              className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs"
-            >
+            <div role="note" className={notice}>
               {t("detail.truncated")}
             </div>
           )}
           {activeTab === "overview" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                  <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Clock className="w-3.5 h-3.5" />
+            <div className="space-y-5">
+              <dl className="grid grid-cols-1 sm:grid-cols-3 gap-4 pb-5 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="min-w-0">
+                  <dt className="text-xs text-zinc-500 dark:text-zinc-400">
                     {t("common.duration")}
-                  </span>
-                  <span className="text-base font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  </dt>
+                  <dd className="mt-1 text-base font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                     {call.durationMs !== undefined
                       ? `${call.durationMs} ms`
                       : t("common.runningEllipsis")}
-                  </span>
+                  </dd>
                 </div>
-                <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                  <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Layers className="w-3.5 h-3.5" />
+                <div className="min-w-0">
+                  <dt className="text-xs text-zinc-500 dark:text-zinc-400">
                     {t("detail.scope")}
-                  </span>
-                  <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100 truncate block">
+                  </dt>
+                  <dd
+                    className="mt-1.5 text-xs font-mono text-zinc-900 dark:text-zinc-100 truncate"
+                    title={call.sessionId}
+                  >
                     {call.sessionId}
-                  </span>
+                  </dd>
                 </div>
-                <div className="p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                  <span className="text-xs text-zinc-400 flex items-center gap-1 mb-1">
-                    <Zap className="w-3.5 h-3.5" />
+                <div className="min-w-0">
+                  <dt className="text-xs text-zinc-500 dark:text-zinc-400">
                     {t("detail.entry")}
-                  </span>
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  </dt>
+                  <dd className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">
                     {call.tool === "exec"
                       ? t("detail.exec")
                       : call.tool === "wait"
                         ? t("detail.wait")
                         : t("detail.direct")}
-                  </span>
+                  </dd>
                 </div>
-              </div>
+              </dl>
               <InputParameters call={call} />
             </div>
           )}
@@ -216,7 +201,7 @@ export function CallDetailModal({
           {activeTab === "subcalls" && (
             <div className="space-y-3">
               {(call.omittedSubcalls ?? 0) > 0 && (
-                <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 text-xs">
+                <div className={notice}>
                   {t("detail.omitted", call.omittedSubcalls ?? 0)}
                 </div>
               )}
@@ -225,113 +210,115 @@ export function CallDetailModal({
                   {t("detail.emptySubcalls")}
                 </div>
               ) : (
-                call.subcalls.map((sub, i) => (
-                  <div
-                    key={sub.id || i}
-                    className="p-3.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 space-y-2.5"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2 min-w-0">
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                          #{i + 1}
-                        </span>
-                        <span className="text-xs font-mono font-semibold text-zinc-900 dark:text-zinc-100 break-all">
-                          tools.{sub.name}
-                        </span>
-                        <span
-                          className={`text-[10px] px-1.5 py-0.2 rounded font-medium ${
-                            sub.status === "success"
-                              ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
-                              : "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800"
-                          }`}
-                        >
-                          {sub.status === "success"
-                            ? t("detail.returned")
-                            : t("detail.failed")}
+                <ol className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {call.subcalls.map((sub, i) => (
+                    <li
+                      key={sub.id || i}
+                      className="py-4 first:pt-0 last:pb-0 space-y-2.5"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 min-w-0">
+                          <span className="text-xs tabular-nums text-zinc-400">
+                            {i + 1}
+                          </span>
+                          <span className="text-xs font-mono font-medium text-zinc-900 dark:text-zinc-100 break-all">
+                            tools.{sub.name}
+                          </span>
+                          <span
+                            className={`text-xs ${
+                              sub.status === "success"
+                                ? "text-zinc-500 dark:text-zinc-400"
+                                : "font-medium text-rose-600 dark:text-rose-400"
+                            }`}
+                          >
+                            {sub.status === "success"
+                              ? t("detail.returned")
+                              : t("detail.failed")}
+                          </span>
+                        </div>
+                        <span className="text-xs tabular-nums text-zinc-400">
+                          {sub.durationMs} ms
                         </span>
                       </div>
-                      <span className="text-xs font-mono text-zinc-400">
-                        {sub.durationMs}ms
-                      </span>
-                    </div>
 
-                    <div className="space-y-2 text-xs">
-                      <div>
-                        <span className="text-zinc-400 text-[10px] block mb-1">
-                          {t("detail.arguments")}
-                        </span>
-                        {sub.name === "apply_patch" &&
-                        typeof sub.input === "string" ? (
-                          <InputParameters
-                            call={{
-                              tool: sub.name,
-                              args: { patch: sub.input },
-                            }}
-                          />
-                        ) : sub.input &&
-                          typeof sub.input === "object" &&
-                          !Array.isArray(sub.input) ? (
-                          <InputParameters
-                            call={{
-                              tool: sub.name,
-                              args: sub.input as CallRecord["args"],
-                            }}
-                          />
-                        ) : (
-                          <CodeBlock
-                            code={
-                              typeof sub.input === "string"
-                                ? sub.input
-                                : (JSON.stringify(sub.input, null, 2) ??
-                                  "undefined")
-                            }
-                            language={
-                              typeof sub.input === "string" ? "text" : "json"
-                            }
-                            maxHeight="max-h-36"
-                          />
+                      <div className="space-y-2 text-xs">
+                        <div>
+                          <span className="text-zinc-500 dark:text-zinc-400 text-[11px] block mb-1">
+                            {t("detail.arguments")}
+                          </span>
+                          {sub.name === "apply_patch" &&
+                          typeof sub.input === "string" ? (
+                            <InputParameters
+                              call={{
+                                tool: sub.name,
+                                args: { patch: sub.input },
+                              }}
+                            />
+                          ) : sub.input &&
+                            typeof sub.input === "object" &&
+                            !Array.isArray(sub.input) ? (
+                            <InputParameters
+                              call={{
+                                tool: sub.name,
+                                args: sub.input as CallRecord["args"],
+                              }}
+                            />
+                          ) : (
+                            <CodeBlock
+                              code={
+                                typeof sub.input === "string"
+                                  ? sub.input
+                                  : (JSON.stringify(sub.input, null, 2) ??
+                                    "undefined")
+                              }
+                              language={
+                                typeof sub.input === "string" ? "text" : "json"
+                              }
+                              maxHeight="max-h-36"
+                            />
+                          )}
+                        </div>
+
+                        {sub.output !== undefined && (
+                          <div>
+                            <span className="text-zinc-500 dark:text-zinc-400 text-[11px] block mb-1">
+                              {t("detail.result")}
+                            </span>
+                            <CodeBlock
+                              code={
+                                typeof sub.output === "string"
+                                  ? sub.output
+                                  : (JSON.stringify(sub.output, null, 2) ??
+                                    "undefined")
+                              }
+                              language="json"
+                              maxHeight="max-h-44"
+                            />
+                          </div>
+                        )}
+
+                        {sub.error && (
+                          <p className="font-mono text-xs whitespace-pre-wrap break-words text-rose-700 dark:text-rose-400">
+                            {sub.error}
+                          </p>
                         )}
                       </div>
-
-                      {sub.output !== undefined && (
-                        <div>
-                          <span className="text-zinc-400 text-[10px] block mb-1">
-                            {t("detail.result")}
-                          </span>
-                          <CodeBlock
-                            code={
-                              typeof sub.output === "string"
-                                ? sub.output
-                                : (JSON.stringify(sub.output, null, 2) ??
-                                  "undefined")
-                            }
-                            language="json"
-                            maxHeight="max-h-44"
-                          />
-                        </div>
-                      )}
-
-                      {sub.error && (
-                        <div className="p-2.5 rounded bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 font-mono text-xs">
-                          {sub.error}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))
+                    </li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
 
           {activeTab === "output" && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {call.error && (
-                <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300">
-                  <h5 className="font-semibold text-xs flex items-center gap-1 mb-1">
+                <div className="p-3 rounded-md border border-zinc-200 dark:border-zinc-800">
+                  <h5 className="font-semibold text-xs flex items-center gap-1 mb-1.5 text-rose-600 dark:text-rose-400">
                     <AlertCircle className="w-3.5 h-3.5" />
                     {t("detail.error")}
                   </h5>
-                  <p className="font-mono text-xs whitespace-pre-wrap">
+                  <p className="font-mono text-xs whitespace-pre-wrap break-words text-zinc-800 dark:text-zinc-200">
                     {call.error}
                   </p>
                 </div>
@@ -339,7 +326,7 @@ export function CallDetailModal({
 
               {call.output !== undefined ? (
                 <div>
-                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
+                  <h5 className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
                     {t("detail.auditResult")}
                   </h5>
                   <CodeBlock
@@ -413,41 +400,27 @@ function StatusBadge({ call }: { call: CallRecord }) {
   const { t } = useLocale();
   const { status } = call;
   const label = callStatusLabel(call, t);
-  if (status === "running") {
-    return (
-      <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-        <Loader2 className="w-3 h-3 animate-spin" />
-        {label}
-      </span>
-    );
-  }
-  if (status === "completed") {
-    return (
-      <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-        <CheckCircle2 className="w-3 h-3" />
-        {label}
-      </span>
-    );
-  }
-  if (status === "yielding") {
-    return (
-      <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
-        <ArrowRight className="w-3 h-3" />
-        {label}
-      </span>
-    );
-  }
-  if (status === "terminated") {
-    return (
-      <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
-        <Square className="w-3 h-3" />
-        {label}
-      </span>
-    );
-  }
+  const Icon =
+    status === "running"
+      ? Loader2
+      : status === "completed"
+        ? CheckCircle2
+        : status === "yielding"
+          ? ArrowRight
+          : status === "terminated"
+            ? Square
+            : AlertCircle;
   return (
-    <span className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
-      <AlertCircle className="w-3 h-3" />
+    <span
+      className={`flex items-center gap-1 text-xs font-medium ${
+        status === "error"
+          ? "text-rose-600 dark:text-rose-400"
+          : "text-zinc-600 dark:text-zinc-400"
+      }`}
+    >
+      <Icon
+        className={`w-3.5 h-3.5 ${status === "running" ? "animate-spin" : ""}`}
+      />
       {label}
     </span>
   );

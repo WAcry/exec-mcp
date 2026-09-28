@@ -30,20 +30,22 @@ export function QuestionNotificationControl({
         className="list-none [&::-webkit-details-marker]:hidden cursor-pointer p-1.5 rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       >
         {enabled ? (
-          <Bell className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <Bell className="w-4 h-4 text-zinc-900 dark:text-zinc-100" />
         ) : (
           <BellOff className="w-4 h-4" />
         )}
       </summary>
-      <div className="fixed right-4 top-28 sm:absolute sm:right-0 sm:top-full mt-2 w-64 max-w-[85vw] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-3 shadow-xl space-y-3 text-xs text-zinc-700 dark:text-zinc-300">
-        <h2 className="font-semibold">{t("notification.label")}</h2>
+      <div className="fixed right-4 top-28 sm:absolute sm:right-0 sm:top-full mt-2 w-64 max-w-[85vw] rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-3 shadow-md space-y-3 text-xs text-zinc-700 dark:text-zinc-300">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+          {t("notification.label")}
+        </h2>
         <p role="status">{t(messages[state])}</p>
         <div className="flex gap-2">
           {available && (
             <button
               disabled={requesting}
               onClick={() => (enabled ? pause() : void enable())}
-              className="px-2.5 py-1.5 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 disabled:opacity-50 cursor-pointer"
+              className="px-2.5 py-1.5 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50 cursor-pointer transition-colors"
             >
               {requesting
                 ? t("notification.requesting")
@@ -57,7 +59,7 @@ export function QuestionNotificationControl({
           {enabled && (
             <button
               onClick={test}
-              className="px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 cursor-pointer"
+              className="px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
             >
               {t("notification.test")}
             </button>

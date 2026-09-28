@@ -1,6 +1,5 @@
 import { useLocale } from "../context/LocaleContext";
 import { useEffect, useRef, useState } from "react";
-import { MessageCircleQuestion } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { QuestionCard, type AnswerDraft } from "./QuestionCard";
 import type {
@@ -92,9 +91,10 @@ export function SessionQuestions({
       {!data ? (
         <p className="text-xs text-zinc-500">{t("common.loading")}</p>
       ) : displayed.length === 0 ? (
-        <div className="py-12 text-center text-zinc-500 space-y-3">
-          <MessageCircleQuestion className="w-8 h-8 mx-auto text-zinc-400" />
-          <p className="text-sm">{t("questions.empty")}</p>
+        <div className="py-12 text-center text-zinc-500 space-y-1.5">
+          <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            {t("questions.empty")}
+          </p>
           <p className="text-xs">{t("questions.emptyHelp")}</p>
         </div>
       ) : (

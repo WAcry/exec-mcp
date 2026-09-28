@@ -1,7 +1,7 @@
 import { useLocale } from "../context/LocaleContext";
 import { message, feedback, type Feedback } from "../lib/locale";
 import { useEffect, useRef, useState } from "react";
-import { Copy, Send, X, Pencil, Check, MessageSquare } from "lucide-react";
+import { Copy, Send, X, Pencil, Check } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { draftId } from "../lib/draft-id";
 import { SessionQuestions } from "./SessionQuestions";
@@ -25,7 +25,7 @@ export function newNoteDraft(text: string): NoteDraft {
 }
 const bytes = (text: string) => new TextEncoder().encode(text).length;
 const actionClass =
-  "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer";
+  "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors";
 
 export function SessionNotesPanel({
   sessionId,
@@ -205,7 +205,7 @@ export function SessionNotesPanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex justify-end bg-black/40"
       onClick={onClose}
     >
       <section
@@ -213,14 +213,11 @@ export function SessionNotesPanel({
         aria-modal="true"
         aria-label={t("notes.dialog")}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl h-full bg-white dark:bg-zinc-950 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col text-zinc-900 dark:text-zinc-100"
+        className="w-full max-w-xl h-full bg-white dark:bg-zinc-950 border-l border-zinc-200 dark:border-zinc-800 flex flex-col text-zinc-900 dark:text-zinc-100"
       >
         <header className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 space-y-2">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <MessageSquare className="w-4 h-4" />
-              {t("notes.title")}
-            </h2>
+            <h2 className="text-base font-semibold">{t("notes.title")}</h2>
             <button
               className={actionClass}
               aria-label={t("notes.close")}
@@ -288,7 +285,7 @@ export function SessionNotesPanel({
             role="tab"
             aria-selected={tab === "questions"}
             onClick={() => setTab("questions")}
-            className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "questions" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
+            className={`px-3 py-3 text-xs font-medium cursor-pointer border-b-2 transition-colors ${tab === "questions" ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100" : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"}`}
           >
             {t("notes.questions")}
             {data?.pendingQuestions
@@ -299,7 +296,7 @@ export function SessionNotesPanel({
             role="tab"
             aria-selected={tab === "notes"}
             onClick={() => setTab("notes")}
-            className={`px-3 py-3 text-xs cursor-pointer border-b-2 ${tab === "notes" ? "border-indigo-500 text-indigo-600 dark:text-indigo-400" : "border-transparent text-zinc-500"}`}
+            className={`px-3 py-3 text-xs font-medium cursor-pointer border-b-2 transition-colors ${tab === "notes" ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100" : "border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"}`}
           >
             {t("notes.messages")}
             {data?.pendingCount
@@ -345,10 +342,10 @@ export function SessionNotesPanel({
                   <article
                     key={note.id}
                     data-note-id={note.id}
-                    className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-3 space-y-2"
+                    className="rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 px-3 py-3 space-y-2"
                   >
                     <div className="flex justify-between flex-wrap gap-1 text-[11px] text-zinc-500">
-                      <span>
+                      <span className="tabular-nums">
                         #{note.sequence} ·{" "}
                         {new Date(note.createdAt).toLocaleString(locale)}
                       </span>
@@ -364,7 +361,7 @@ export function SessionNotesPanel({
                       {note.text}
                     </p>
                     {note.callId && (
-                      <p className="text-[10px] font-mono text-zinc-500 break-all">
+                      <p className="text-[11px] font-mono text-zinc-500 break-all">
                         {t("notes.call")}
                         {note.callId}
                       </p>
@@ -441,11 +438,11 @@ export function SessionNotesPanel({
                 disabled={sending}
                 rows={4}
                 placeholder={t("notes.placeholder")}
-                className="w-full resize-y max-h-60 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                className="w-full resize-y max-h-60 rounded-md border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
               />
               <div className="flex items-center justify-between">
                 <span
-                  className={`text-[11px] font-mono ${bodyBytes > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
+                  className={`text-[11px] tabular-nums ${bodyBytes > NOTE_MAX_BYTES ? "text-rose-600 dark:text-rose-400" : "text-zinc-500"}`}
                 >
                   {bodyBytes.toLocaleString(locale)} /{" "}
                   {NOTE_MAX_BYTES.toLocaleString(locale)}{" "}

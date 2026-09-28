@@ -44,22 +44,24 @@ export function CodeBlock({
 
   return (
     <div
-      className={`relative group rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-[#0c0d0e] text-zinc-100 ${className}`}
+      className={`relative group rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 ${className}`}
     >
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 bg-[#141517] text-[11px] text-zinc-400">
-        <span className="font-mono uppercase font-semibold">{language}</span>
+      <div className="flex items-center justify-between px-3 py-1 border-b border-zinc-200 dark:border-zinc-800 text-[11px] text-zinc-500">
+        <span className="font-mono">{language}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-zinc-300 hover:text-white bg-zinc-800/80 hover:bg-zinc-700 transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/70 dark:hover:text-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
           title={t("common.copyContent")}
         >
           {copyState === "copied" ? (
             <>
-              <Check className="w-3 h-3 text-emerald-400" />
-              <span className="text-emerald-400">{t("common.copied")}</span>
+              <Check className="w-3 h-3" />
+              <span>{t("common.copied")}</span>
             </>
           ) : copyState === "failed" ? (
-            <span className="text-rose-400">{t("common.copyFailed")}</span>
+            <span className="text-rose-600 dark:text-rose-400">
+              {t("common.copyFailed")}
+            </span>
           ) : (
             <>
               <Copy className="w-3 h-3" />

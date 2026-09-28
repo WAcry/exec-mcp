@@ -19,7 +19,7 @@ export interface AnswerDraft {
   note: string;
 }
 const button =
-  "inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed";
+  "inline-flex items-center justify-center gap-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-xs cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors";
 
 export function QuestionCard({
   question,
@@ -126,17 +126,17 @@ export function QuestionCard({
   return (
     <article
       data-question-id={question.id}
-      className={`rounded-xl border p-4 space-y-3 ${question.pending ? "border-indigo-200 dark:border-indigo-900 bg-white dark:bg-zinc-900 shadow-xs" : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50"}`}
+      className={`rounded-lg border p-4 space-y-3 ${question.pending ? "border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900" : "border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50"}`}
     >
       <div className="flex justify-between items-center gap-2 text-[11px] text-zinc-500">
-        <span>
+        <span className="tabular-nums">
           {t("question.fromAgent")}{" "}
           {new Date(question.createdAt).toLocaleString(locale)}
         </span>
         <span
           className={
             question.pending
-              ? "text-indigo-600 dark:text-indigo-400 font-medium"
+              ? "text-zinc-900 dark:text-zinc-100 font-medium"
               : ""
           }
         >
@@ -161,20 +161,20 @@ export function QuestionCard({
               return (
                 <label
                   key={index}
-                  className={`flex items-start gap-2.5 p-3 rounded-lg border cursor-pointer transition-colors ${selected ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40" : "border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800"}`}
+                  className={`flex items-start gap-2.5 p-3 rounded-md border cursor-pointer transition-colors ${selected ? "border-zinc-900 bg-zinc-50 dark:border-zinc-300 dark:bg-zinc-800" : "border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800"}`}
                 >
                   <input
                     type="radio"
                     name={`answer-${question.id}`}
                     checked={selected}
                     onChange={() => change({ option_index: value })}
-                    className="mt-0.5 shrink-0 accent-indigo-600"
+                    className="mt-0.5 shrink-0 accent-zinc-900 dark:accent-zinc-100"
                   />
                   <span className="text-sm whitespace-pre-wrap break-words min-w-0 flex-1">
                     {option}
                   </span>
                   {index === 0 && (
-                    <span className="text-[10px] shrink-0 text-indigo-600 dark:text-indigo-400">
+                    <span className="text-[11px] shrink-0 text-zinc-500">
                       {t("question.recommended")}
                     </span>
                   )}
@@ -196,11 +196,11 @@ export function QuestionCard({
             disabled={busy}
             onChange={(e) => change({ note: e.target.value })}
             placeholder={t("question.placeholder")}
-            className="w-full resize-y max-h-72 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full resize-y max-h-72 rounded-md border border-zinc-300 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-500"
           />
           <div className="flex flex-wrap justify-between items-center gap-2">
             <span
-              className={`text-[11px] ${byteLength > NOTE_MAX_BYTES ? "text-rose-500" : "text-zinc-500"}`}
+              className={`text-[11px] tabular-nums ${byteLength > NOTE_MAX_BYTES ? "text-rose-600 dark:text-rose-400" : "text-zinc-500"}`}
             >
               {t(
                 "question.bytes",
@@ -221,9 +221,9 @@ export function QuestionCard({
       ) : (
         question.answer && (
           <>
-            <div className="rounded-lg bg-white dark:bg-zinc-950 p-3 space-y-2 text-sm border border-zinc-200 dark:border-zinc-800">
+            <div className="rounded-md bg-white dark:bg-zinc-950 p-3 space-y-2 text-sm border border-zinc-200 dark:border-zinc-800">
               <p className="flex gap-2">
-                <Check className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                <Check className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
                 <span className="whitespace-pre-wrap break-words">
                   {question.answer.option_index === null
                     ? t("question.none")
@@ -272,8 +272,8 @@ export function QuestionCard({
               </div>
             </div>
             {draft && (
-              <div className="rounded-lg border border-amber-200 dark:border-amber-900 p-3 space-y-2">
-                <p className="text-xs text-amber-700 dark:text-amber-400">
+              <div className="rounded-md border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
                   {t("question.conflict")}
                 </p>
                 <pre className="text-xs whitespace-pre-wrap break-words max-h-40 overflow-auto">

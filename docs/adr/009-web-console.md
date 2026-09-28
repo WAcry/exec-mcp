@@ -2,7 +2,7 @@
 
 English | [简体中文](009-web-console.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-09-28.
 
 ## Observing and managing runtime state
 
@@ -18,6 +18,16 @@ The console does not call a model, and exec/wait do not depend on Web execution.
 Set [web].enabled=false to disable it. Disabling Web or failing to start it clears and stops audit collection.
 Frontend assets are built into the npm package. Runtime pages fetch no third-party fonts, scripts, or analytics.
 CI checks frontend types, production builds, and isolated tarball installation.
+
+## Visual language
+
+The console is an operational surface that people scan. Hierarchy comes from size, weight, and spacing. Surfaces are flat panels with hairline borders
+and one small, consistent radius, without blur, glow, decorative gradients, or cards nested inside cards.
+Neutral grays and ink carry the interface; color marks state only. Red means errors and failures, and amber means warnings that need action.
+Success, idle, and completed states stay unmarked, so historical results do not keep drawing attention.
+Monospace is limited to code, identifiers, paths, URLs, and tokens; counts and times use the sans face with tabular figures.
+Identifiers such as tool names and transports keep their original case. The system font stack satisfies the no-external-fonts rule
+and covers Chinese without shipping font files. Icons mark actions or state, not headings or cards.
 
 ## Interface language
 

@@ -2,72 +2,355 @@
 
 @variant dark (&:where(.dark, .dark *));
 
+/* Runtime colors switch with the theme; utilities read them through @theme inline. */
+:root {
+  color-scheme: light;
+  --bg: #fafaf9;
+  --sidebar: #f3f3f1;
+  --surface: #ffffff;
+  --sunken: #f4f4f2;
+  --hover: rgb(24 24 27 / 0.045);
+  --selected: rgb(24 24 27 / 0.075);
+  --line: rgb(24 24 27 / 0.09);
+  --line-strong: rgb(24 24 27 / 0.17);
+  --ink: #18181b;
+  --ink-2: #53535c;
+  --ink-3: #8a8a93;
+  --ink-4: #b8b8bf;
+  --ok: #15803d;
+  --run: #2563eb;
+  --warn: #b45309;
+  --err: #c2362b;
+  --you: #1c1c20;
+  --you-ink: #f6f6f7;
+  --pop-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05), 0 10px 30px -12px rgb(0 0 0 / 0.22);
+  --dock-shadow:
+    0 -1px 0 rgb(0 0 0 / 0.02), 0 12px 32px -16px rgb(0 0 0 / 0.28);
+  --ansi-0: #3f3f46;
+  --ansi-1: #c2362b;
+  --ansi-2: #15803d;
+  --ansi-3: #a16207;
+  --ansi-4: #1d4ed8;
+  --ansi-5: #a21caf;
+  --ansi-6: #0e7490;
+  --ansi-7: #71717a;
+  --ansi-8: #71717a;
+  --ansi-9: #dc2626;
+  --ansi-10: #16a34a;
+  --ansi-11: #ca8a04;
+  --ansi-12: #2563eb;
+  --ansi-13: #c026d3;
+  --ansi-14: #0891b2;
+  --ansi-15: #18181b;
+}
+
+.dark {
+  color-scheme: dark;
+  --bg: #111113;
+  --sidebar: #0c0c0e;
+  --surface: #19191c;
+  --sunken: #151517;
+  --hover: rgb(255 255 255 / 0.045);
+  --selected: rgb(255 255 255 / 0.075);
+  --line: rgb(255 255 255 / 0.08);
+  --line-strong: rgb(255 255 255 / 0.15);
+  --ink: #ececef;
+  --ink-2: #a3a3ab;
+  --ink-3: #72727b;
+  --ink-4: #4f4f57;
+  --ok: #3ccb7f;
+  --run: #6b95ff;
+  --warn: #f2a93b;
+  --err: #ff6b5f;
+  --you: #ececef;
+  --you-ink: #121214;
+  --pop-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.04), 0 16px 40px -12px rgb(0 0 0 / 0.7);
+  --dock-shadow:
+    0 0 0 1px rgb(255 255 255 / 0.03), 0 16px 40px -16px rgb(0 0 0 / 0.8);
+  --ansi-0: #52525b;
+  --ansi-1: #ff7b72;
+  --ansi-2: #56d364;
+  --ansi-3: #e3b341;
+  --ansi-4: #79a6ff;
+  --ansi-5: #e07cff;
+  --ansi-6: #56d4dd;
+  --ansi-7: #c9c9d1;
+  --ansi-8: #8b8b94;
+  --ansi-9: #ffa198;
+  --ansi-10: #7ee787;
+  --ansi-11: #f2cc60;
+  --ansi-12: #a5c3ff;
+  --ansi-13: #f0a8ff;
+  --ansi-14: #86e8ee;
+  --ansi-15: #ffffff;
+}
+
 /* System faces only: the console ships no font files and fetches none. */
 @theme {
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB",
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+    system-ui, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-mono:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
+    ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", "Cascadia Code",
+    Menlo, Consolas, "Liberation Mono", monospace;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 22px;
+  --text-md: 15px;
+  --text-md--line-height: 22px;
+  --text-lg: 17px;
+  --text-lg--line-height: 24px;
+  --text-xl: 21px;
+  --text-xl--line-height: 28px;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-ok: var(--ok);
+  --color-run: var(--run);
+  --color-warn: var(--warn);
+  --color-err: var(--err);
+  --color-you: var(--you);
+  --color-you-ink: var(--you-ink);
 }
 
 @layer base {
-  :root {
-    color-scheme: light;
-  }
-
-  .dark {
-    color-scheme: dark;
+  html,
+  body,
+  #root {
+    height: 100%;
   }
 
   body {
+    background: var(--bg);
+    color: var(--ink);
     font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 20px;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
   }
 
   code,
-  pre {
+  pre,
+  kbd,
+  samp {
     font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--run) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--run) 70%, transparent);
+    outline-offset: 2px;
+  }
+
+  button,
+  [role="button"],
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--ink-3);
   }
 }
 
-@utility panel {
-  @apply rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900;
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgba(161, 161, 170, 0.3);
-  border-radius: 9999px;
+  background: var(--line-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(161, 161, 170, 0.5);
+  background-color: var(--ink-4);
 }
 
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(113, 113, 122, 0.35);
+/* Expanding regions animate their real height instead of guessing a max-height. */
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms var(--ease-out);
+}
+.reveal[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.reveal > * {
+  min-height: 0;
+  overflow: hidden;
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(113, 113, 122, 0.6);
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.rise-in {
+  animation: rise-in 260ms var(--ease-out) both;
 }
 
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.fade-in {
+  animation: fade-in 180ms var(--ease-standard) both;
+}
+
+/* A located call fades from a highlight rather than blinking. */
+@keyframes locate {
+  0%,
+  35% {
+    background-color: color-mix(in srgb, var(--run) 12%, transparent);
+  }
+}
+.locate {
+  animation: locate 1600ms var(--ease-standard);
+}
+
+@keyframes orbit {
+  to {
+    rotate: 360deg;
+  }
+}
+.sigil-ring {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+}
+.sigil[data-live="true"] .sigil-ring {
+  animation: orbit var(--orbit, 3s) linear infinite;
+}
+.sigil[data-live="true"] .sigil-ring[data-reverse="true"] {
+  animation-direction: reverse;
+}
+
+@keyframes spin {
+  to {
+    rotate: 360deg;
+  }
+}
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+/* Indeterminate progress: a short segment travels along a hairline. */
+@keyframes travel {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 250% 0;
+  }
+}
+.travel {
+  animation: travel 1400ms var(--ease-standard) infinite;
+}
+
+/* Two-step confirmation drains its remaining time. */
+@keyframes drain {
+  from {
+    scale: 1 1;
+  }
+  to {
+    scale: 0 1;
+  }
+}
+.drain {
+  transform-origin: left center;
+  animation: drain var(--drain, 3s) linear forwards;
+}
+
+/* Syntax colors follow ink tones; only strings and keywords take a hue. */
+.code-view .token.comment,
+.code-view .token.prolog {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.code-view .token.keyword,
+.code-view .token.boolean,
+.code-view .token.null {
+  color: color-mix(in srgb, var(--run) 85%, var(--ink));
+}
+.code-view .token.string,
+.code-view .token.template-string,
+.code-view .token.char {
+  color: color-mix(in srgb, var(--ok) 85%, var(--ink));
+}
+.code-view .token.number {
+  color: color-mix(in srgb, var(--warn) 85%, var(--ink));
+}
+.code-view .token.function {
+  color: var(--ink);
+  font-weight: 600;
+}
+.code-view .token.property,
+.code-view .token.parameter {
+  color: var(--ink-2);
+}
+.code-view .token.punctuation,
+.code-view .token.operator {
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+  .sigil[data-live="true"] .sigil-ring {
+    animation: none;
+  }
 }

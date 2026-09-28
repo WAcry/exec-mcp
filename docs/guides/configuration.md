@@ -150,7 +150,7 @@ An extreme minimum catalog may still exceed the budget. One response cannot prom
 
 The interface supports English and Simplified Chinese. It selects the first supported browser language preference, with English as fallback.
 Browsers commonly inherit OS language preferences. The service machine's language does not determine the UI language.
-Expand Interface preferences under Settings to choose Auto, English, or Simplified Chinese. The login page has a language icon.
+Choose Auto, English, or Simplified Chinese under Settings, then Interface. The login page has a language icon.
 Changes apply immediately without editing config.toml or restarting.
 Manual choices are saved in this site's localStorage and synchronized across same-origin tabs. If storage is blocked, the current page can still switch.
 Dates and numbers follow the interface language, while time zones stay local to the browser. User content and raw diagnostics remain unchanged.

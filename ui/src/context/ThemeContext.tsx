@@ -11,17 +11,29 @@ interface ThemeContextType {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
+function storedTheme(): Theme {
+  try {
+    const saved = localStorage.getItem("exec_ui_theme");
+    if (saved === "light" || saved === "dark" || saved === "system")
+      return saved;
+  } catch {
+    /* A blocked storage API should not prevent the console from loading. */
+  }
+  return "system";
+}
+
+/** Applied before the first render so a dark system never flashes light. */
+export function applyStoredTheme(): void {
+  const theme = storedTheme();
+  const dark =
+    theme === "dark" ||
+    (theme === "system" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    try {
-      const saved = localStorage.getItem("exec_ui_theme");
-      if (saved === "light" || saved === "dark" || saved === "system")
-        return saved;
-    } catch {
-      /* A blocked storage API should not prevent the console from loading. */
-    }
-    return "system";
-  });
+  const [theme, setThemeState] = useState<Theme>(storedTheme);
 
   const [systemDark, setSystemDark] = useState<boolean>(() => {
     return window.matchMedia("(prefers-color-scheme: dark)").matches;

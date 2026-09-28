@@ -71,8 +71,14 @@ export class ArtifactStore {
     this.#timer.unref();
   }
 
-  getActiveArtifacts(): ExportInfo[] {
-    return [...this.#records.values()].map((r) => ({ ...r.info }));
+  /** conversation uses the same base64url digest as audit conversation IDs. */
+  getActiveArtifacts(): (ExportInfo & { conversation?: string })[] {
+    return [...this.#records.values()].map((r) => ({
+      ...r.info,
+      ...(r.scope
+        ? { conversation: Buffer.from(r.scope, "hex").toString("base64url") }
+        : {}),
+    }));
   }
 
   importFile(

@@ -222,6 +222,7 @@ export class ExecRuntime {
           input as ExecCommandInput,
           ctx.cwd,
           ctx.signal,
+          sessionScopeKey(ctx.scope),
         );
       case "write_stdin":
         return this.terminal.writeStdin(input as WriteStdinInput, ctx.signal);
@@ -333,6 +334,7 @@ export class ExecRuntime {
           const tools = this.native.map((contract) =>
             bindNative(contract, async (input, nested) => {
               const subcallStart = Date.now();
+              const audit = callTracker.startSubcall(contract.name, input);
               try {
                 const subcallResult = await this.callNative(
                   contract.name,
@@ -346,19 +348,15 @@ export class ExecRuntime {
                     attachments,
                   },
                 );
-                callTracker.recordSubcall({
-                  name: contract.name,
+                audit.finish({
                   durationMs: Date.now() - subcallStart,
-                  input,
                   output: subcallResult,
                   status: subcallFailed(subcallResult) ? "error" : "success",
                 });
                 return subcallResult;
               } catch (subErr) {
-                callTracker.recordSubcall({
-                  name: contract.name,
+                audit.finish({
                   durationMs: Date.now() - subcallStart,
-                  input,
                   error:
                     subErr instanceof Error ? subErr.message : String(subErr),
                   status: "error",
@@ -384,20 +382,20 @@ export class ExecRuntime {
                 ...tool,
                 call: async (...parameters: Parameters<typeof tool.call>) => {
                   const started = Date.now();
+                  const audit = callTracker.startSubcall(
+                    tool.name,
+                    parameters[0],
+                  );
                   try {
                     const result = await tool.call(...parameters);
-                    callTracker.recordSubcall({
-                      name: tool.name,
-                      input: parameters[0],
+                    audit.finish({
                       output: result,
                       durationMs: Date.now() - started,
                       status: subcallFailed(result) ? "error" : "success",
                     });
                     return result;
                   } catch (error) {
-                    callTracker.recordSubcall({
-                      name: tool.name,
-                      input: parameters[0],
+                    audit.finish({
                       error:
                         error instanceof Error ? error.message : String(error),
                       durationMs: Date.now() - started,

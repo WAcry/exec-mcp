@@ -13,7 +13,8 @@ export interface SubCallRecord {
   input: unknown;
   output?: unknown | undefined;
   error?: string | undefined;
-  status: "success" | "error";
+  /** running: recorded at start so the console can show the call in progress. */
+  status: "running" | "success" | "error";
 }
 
 export interface CallRecord {
@@ -66,8 +67,41 @@ export interface SessionSummary {
         durationMs?: number | undefined;
         timestamp: string;
         preview: string;
+        /** Most recent nested call, so a list can show what is happening now. */
+        step?:
+          | { name: string; preview: string; status: SubCallRecord["status"] }
+          | undefined;
       }
     | undefined;
+}
+
+/** One nested call in a listing: its first input line, never its output. */
+export interface CallStepSummary {
+  name: string;
+  status: SubCallRecord["status"];
+  durationMs: number;
+  preview: string;
+  /** Terminal session or question request returned by the nested call. */
+  handle?: string;
+  exitCode?: number;
+}
+
+export interface CallListItem {
+  id: string;
+  sessionId: string;
+  tool: string;
+  status: CallStatus;
+  startedAt: string;
+  endedAt?: string | undefined;
+  durationMs?: number | undefined;
+  args: Record<string, string>;
+  subcallCount: number;
+  truncated: boolean;
+  /** Up to the first five and last three recorded nested calls. */
+  steps?: CallStepSummary[];
+  /** Cell that continues after an exec yields, for linking later waits. */
+  cellId?: string;
+  errorPreview?: string;
 }
 
 export interface CallFilterOptions {

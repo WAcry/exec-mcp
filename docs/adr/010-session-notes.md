@@ -2,16 +2,19 @@
 
 English | [简体中文](010-session-notes.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-09-28.
 
 ## Conversation ownership and delivery
 
-Operators can send text from Web conversation groups or answer questions submitted by the agent.
+Operators can send text from a conversation's composer or answer questions submitted by the agent.
 Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
 The model has only tools.request_user_input_async inside exec for asking questions. It has no answer-query, send-user-note, or conversation-naming tool.
 The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
-Conversation names default to hashes. Operators may add labels for Web identification only.
+The composer sits at the bottom of every conversation, shaped like a chat input, so first-time operators find it without a separate entry point.
+Its hint follows the conversation's state: while ChatGPT is inside a call or was active moments ago, the message should arrive with the next response;
+when it is idle, the hint says the message waits for the next tool call and offers to copy the text into ChatGPT instead.
+Unlabeled conversations show Untitled conversation, a short hash prefix, and their sigil. Operators rename them inline for Web identification only.
 Ownership uses the SHA-256 digest of `_meta["openai/session"]`, independently of MCP connections, native sessions, cells, terminals, and working directories.
 Actual calls carrying that identifier establish recipients. Unidentified groups cannot receive messages.
 
@@ -29,8 +32,9 @@ exec-mcp returns the answer through a subsequent ordinary tool response.
 
 Every question offers several options. The first is marked recommended but is neither preselected nor submitted automatically.
 The UI adds a custom-answer choice. Every choice allows a note, and custom answers require text.
-Questions are grouped by conversation hash and display the operator's label. The global prompt navigates to conversation groups;
-the side panel separates questions and note history, puts unanswered questions first, and paginates older records.
+Questions appear in their conversation's timeline under the call that asked them, with the answer and its delivery state once answered.
+Pending questions are also pinned in a dock above the composer, oldest first. Number keys select options, and the dock can be minimized while reading.
+Conversations with pending questions sort first in the list, and the tab title and favicon show that something is waiting.
 
 Questions can be answered individually. If two pages answer concurrently, the first saved response wins and the other page keeps its draft.
 The same submission ID deduplicates an uncertain retry. Pending answers can be withdrawn and replaced; an attached answer is corrected through a subsequent note.
@@ -50,10 +54,11 @@ Before accepting an answer, validate the encoded question, selection, and note t
 
 After a new request is saved, the Web SSE event includes its request ID and question count. The browser uses native Notification for a system alert.
 The event omits question and answer text. Repeated request_key submissions, answers, withdrawals, labels, and ordinary notes do not trigger new alerts.
-Clicking a notification focuses the page and opens the conversation's questions tab. Notifications contain only a short hash and count;
+Clicking a notification focuses the page and opens the conversation, where the question waits in the dock. Notifications contain only a short hash and count;
 full questions and labels stay in the authenticated page.
 
-Permission is requested when the operator enables notifications. Existing permission can be used directly, and notifications can be paused or tested.
+Permission is requested when the operator enables notifications, from Settings, the sidebar bell, or the prompt shown with a pending question.
+Existing permission can be used directly, and notifications can be paused or tested.
 Browser denial, an insecure context, unsupported mobile behavior, or OS notification settings do not prevent questions and answers.
 Web manages permission without changing tool schemas. Notification delivery does not prove that a person or model has read the content.
 
@@ -94,7 +99,8 @@ with the final encoded payload checked separately. Selection, validation, and ma
 A batch is ordered; network arrival order across separate responses cannot be guaranteed.
 
 Cancellation or encoding failure before attachment keeps messages pending. After attachment, do not redeliver or require model acknowledgment.
-The UI's Attached to a tool response status records server handling only. If the connector loses that response, the user can copy and resend it.
+The UI's delivered status names the call whose response carried the message, and that call links back to it.
+This records server handling only. If the connector loses that response, the user can copy and resend it.
 There is no acknowledgment protocol for these low-frequency notes.
 
 ## Retention and Web permissions

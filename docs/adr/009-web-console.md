@@ -10,9 +10,18 @@ exec-mcp serve can also start a Web console for call auditing, conversations, na
 The interface is mainly observational, with actions such as clearing audit history and revoking exports.
 Top-level calls show exec/wait; local and downstream operations use their actual method names in the nested-call view.
 
-Commands and patches have separate raw-text display and copying. Other arguments preserve explicit 0, false, and empty strings.
-The downstream page filters the current catalog, expands contracts, and shows connection errors without a search probe.
-Active call details refresh continuously. Empty nested-call lists disappear after completion; a returned handle may still identify running work.
+Operators come to see what ChatGPT is doing on the machine, so conversations are the primary object. Each opens as one chronological timeline
+of its calls, the operator's messages, and the agent's questions, with a message composer always at the bottom. Answers render under the call that asked,
+waits link to the script they resume, and delivered messages link to the call whose response carried them.
+The list puts conversations waiting for an answer first, then those inside a call, then recency. All activity, processes, tools, files, and settings are secondary pages.
+Routes live in the URL fragment so conversations and calls can be linked and back navigation works; the sign-in token fragment stays separate.
+
+Timeline rows read as actions, such as ran a command, edited files, or asked a question, rather than raw script text.
+Commands and patches have separate raw-text display and copying. Patches render as diffs, and terminal output keeps its ANSI colors.
+Other arguments preserve explicit 0, false, and empty strings. The downstream page groups the current catalog by server,
+expands contracts, and shows connection errors without a search probe.
+Active call details refresh continuously. Nested calls are recorded when they start and completed in place, so the step in progress is visible;
+a returned handle may still identify running work.
 
 The console does not call a model, and exec/wait do not depend on Web execution. Web startup failure produces a warning while MCP continues.
 Set [web].enabled=false to disable it. Disabling Web or failing to start it clears and stops audit collection.
@@ -21,21 +30,30 @@ CI checks frontend types, production builds, and isolated tarball installation.
 
 ## Visual language
 
-The console is an operational surface that people scan. Hierarchy comes from size, weight, and spacing. Surfaces are flat panels with hairline borders
-and one small, consistent radius, without blur, glow, decorative gradients, or cards nested inside cards.
-Neutral grays and ink carry the interface; color marks state only. Red means errors and failures, amber means warnings that need action,
-and green means success or a live connection. State colors apply to icons, dots, and status text, never to tinted backgrounds, pills, or pulses.
-Pending, terminated, and idle states stay neutral; toggles and primary actions use ink.
-Monospace is limited to code, identifiers, paths, URLs, and tokens; counts and times use the sans face with tabular figures.
+The console is an operational surface that people scan for long periods. Hierarchy comes from size, weight, and spacing.
+Surfaces are flat with hairline borders and a small radius scale. Only floating layers, such as the question dock, the composer, and menus, cast a restrained shadow.
+Neutral grays and ink carry the interface, and color marks state: green for success or a live connection, blue for work in progress,
+amber for something that needs the operator, such as a pending question or memory pressure, and red for failures. Idle and terminated states stay neutral.
+The operator's own messages are inverted ink bubbles, so they read as the operator's voice beside the agent's steps.
+Diffs keep the conventional green and red line tints because that is how people read them.
+
+Each conversation has a deterministic sigil of three orbits derived from its hash, with hues kept away from the state colors.
+The same mark appears in the list, header, activity rows, and process owners, and it rotates only while that conversation is inside a tool call.
+The brand mark and favicon use the same motif, and the favicon gains an amber dot while a question waits, so a background tab still signals it.
+Motion only describes a change: new rows rise in, details open to their real height, reordered conversations glide to their new position,
+and a sent message rises from the composer into the timeline. prefers-reduced-motion turns these effects off.
+
+Monospace is limited to code, identifiers, paths, URLs, and tokens; counts, times, and durations use the sans face with tabular figures.
 Identifiers such as tool names and transports keep their original case. The system font stack satisfies the no-external-fonts rule
-and covers Chinese without shipping font files. Icons mark actions or state, not headings or cards.
+and covers Chinese without shipping font files. Destructive or disruptive actions arm on the first click and act on a second click within a few seconds,
+instead of opening a modal dialog.
 
 ## Interface language
 
 The interface offers English and Simplified Chinese. Automatic selection follows navigator.languages preference order,
 using Simplified Chinese for Chinese variants and English when no supported language matches.
 The browser describes the viewer's preference, so the server's OS language is not read and no instance language setting is added.
-Language is a low-frequency preference placed in a collapsed settings section, leaving the header free.
+Language is a low-frequency preference placed under Settings, Interface, next to the theme.
 The login page keeps an icon entry point. Both locations share options, and interface preferences are separate from execution configuration and restart.
 
 A manual choice is saved in the site's localStorage and can be reset to Auto. Same-origin tabs synchronize it.
@@ -83,7 +101,11 @@ The current LAN UI uses HTTP. Remote or untrusted networks need separately prote
 ## Bounded audit records
 
 Audit records live in the current process and disappear on restart. Conversations show a digest of host identity; the raw openai/session value never reaches the browser.
-Lists return summaries and details are read on demand. SSE broadcasts change types and IDs instead of complete arguments and results.
+Lists return summaries and details are read on demand. A call summary adds the first input line of up to eight nested calls, the first five and last three,
+with their status, returned terminal or question handle, and exit code, plus a yielded cell ID and the first failure line. It never includes nested outputs.
+Conversation summaries carry the latest nested call's first line. Terminal listings report the first command line, directory, and owning conversation digest,
+exports report their owning conversation digest, and status includes the machine's hostname.
+SSE broadcasts change types and IDs instead of complete arguments and results.
 Response details record the prepared MCP result, then apply audit bounds, so some content can be omitted.
 Details show truncation notices. Attachment metadata includes name, type, and size only, without signed URLs or opaque credentials.
 
@@ -97,13 +119,14 @@ so treat the console as a high-privilege page. Dashboard counts cover retained r
 Authenticated endpoints revoke exports by ID while retaining MCP resource conversation checks.
 There is no arbitrary command prompt, store editor, or session kill button. New destructive actions require review of authentication, races, and side-effect disclosure.
 
-The configuration page can toggle existing MCP servers, discovered Skills, default login, and Web enabled.
+The Tools and Settings pages can toggle existing MCP servers, discovered Skills, default login, and Web enabled.
 It edits only the relevant TOML booleans, preserving comments and other fields. Full validation, revision checks, and atomic replacement protect concurrent edits.
 Saving and applying are separate. Restart reads valid configuration before closing the old runtime, then rebuilds connections, native memory, and terminals without backing up temporary execution state.
 On failure, the Web management entry point stays available for repair and retry. Repeated clicks share one restart; shutdown never reopens a listener.
 Questions and answers use the same Web authentication. Answers are communication, not execution approval.
 
-Conversation groups show current execution state without permanent alarms from historical failures.
+Conversations show their current execution state without permanent alarms from historical failures.
 Audit truncation is marked in details, without a separate dashboard counter. Script completion and nested-command results are shown separately.
+A restart banner appears only while a saved configuration waits to be applied, a restart runs, or one failed.
 Conversation labels, notes, and answers follow [ADR-010](010-session-notes.md).
 Questions and notes are independent of audit retention and survive rolling or clearing audit history.

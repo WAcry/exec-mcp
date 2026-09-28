@@ -842,7 +842,7 @@ describe("Web management data and actions", () => {
     tracker.recordSubcall({
       name: "exec_command",
       durationMs: 3,
-      input: { cmd: "PRIVATE_DETAIL_COMMAND" },
+      input: { cmd: "npm test\nPRIVATE_DETAIL_COMMAND" },
       output: { text: "PRIVATE_DETAIL_OUTPUT" },
       status: "success",
     });
@@ -855,12 +855,18 @@ describe("Web management data and actions", () => {
     expect(listing.status).toBe(200);
     expect(listing.text).not.toMatch(/PRIVATE_DETAIL|PRIVATE_FINAL/);
     const summary = listing.json<{
-      items: { id: string; args: { source: string }; subcallCount: number }[];
+      items: {
+        id: string;
+        args: { source: string };
+        subcallCount: number;
+        steps: unknown[];
+      }[];
     }>().items[0]!;
     expect(summary).toMatchObject({
       id: tracker.id,
       args: { source: "first line" },
       subcallCount: 1,
+      steps: [{ name: "exec_command", status: "success", preview: "npm test" }],
     });
 
     const detail = await request(

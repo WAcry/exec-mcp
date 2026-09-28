@@ -62,28 +62,32 @@ exec-mcp reports ready only after every enabled service connects and passes vali
 
 ## Web console
 
-The interface initially follows your browser's language. Change it under Settings, then Interface preferences; the login page also has a language icon.
+The interface initially follows your browser's language. Change it under Settings, then Interface; the login page also has a language icon.
 The choice is saved in this browser. Select Auto to follow the browser again. Commands, questions, and user messages keep their original text.
 
-Open the Web address printed at startup to inspect calls, command and patch text, active terminals, memory status, Skills, downstream tool catalogs, and exported files.
-Conversations initially show a hash; add your own label to distinguish them.
+Open the Web address printed at startup. Each ChatGPT conversation appears in the sidebar and opens as a live timeline of its commands, patches, questions,
+and your messages; select a step to see its full script, output, and what was returned to ChatGPT.
+Processes, Tools, Files, and Settings cover running commands and memory, downstream MCP servers and Skills, exported files, and configuration.
+Unnamed conversations show a short hash and a generated mark; click the title to rename one.
 After your first LAN sign-in, the browser keeps the session and renews it while you use the console. It expires after 30 days without a visit, and normal service restarts do not require the token again.
 Signing out, clearing browser cookies, or rotating the access token requires a new sign-in.
 
 ### Send a note
 
-Select Send a note in a conversation card. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
-Pending notes can be withdrawn. If ChatGPT has finished its turn, copy the text into the original conversation instead.
+Type in the message box at the bottom of a conversation and press Enter. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
+Queued messages can be withdrawn, and the timeline shows which call delivered each one. If ChatGPT has finished its turn, copy the text into the original conversation instead.
 
 ### Answer questions
 
-Conversation cards show the number of pending questions and a preview. You can add a note to any answer choice,
+Conversations with a pending question move to the top of the sidebar, and the browser tab shows the count.
+Open the conversation and answer in the panel above the message box: pick an option (number keys work), add a note if you like,
 or select None of the above and write your own answer. Recommended options are never selected or submitted automatically.
 Answers and unsolicited notes use the same delivery path.
 
 ### Notifications and settings
 
-Use the bell in the upper-right corner to enable notifications and grant browser permission. New questions trigger a notification that opens the corresponding conversation.
+Use the bell next to the machine name in the sidebar, or the prompt shown with a pending question, to enable notifications and grant browser permission.
+New questions trigger a notification that opens the corresponding conversation.
 Keep the page open and connected. If the browser cannot notify, permission is denied, or Do Not Disturb is active, questions remain available on the page.
 
 The console can toggle existing MCP services and Skills, change supported settings, and restart the execution service. Saving and applying configuration are separate steps.

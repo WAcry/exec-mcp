@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { AUDIT_OMITTED_TEXT, auditOmissionMarker } from "./audit-format.js";
 
 const DEFAULT_STRING_CHARS = 8 * 1024;
 const DEFAULT_VALUE_CHARS = 16 * 1024;
@@ -39,16 +40,16 @@ export function truncateAuditText(
   const length = codePointLength(value);
   if (length <= maximum) return { value, truncated: false };
 
-  let marker = `\n…[审计记录省略 ${Math.max(0, length - maximum)} 个字符]…\n`;
+  let marker = auditOmissionMarker(Math.max(0, length - maximum));
   for (let attempt = 0; attempt < 3; attempt++) {
     const available = Math.max(0, maximum - codePointLength(marker));
-    const next = `\n…[审计记录省略 ${length - available} 个字符]…\n`;
+    const next = auditOmissionMarker(length - available);
     if (next === marker) break;
     marker = next;
   }
   if (codePointLength(marker) > maximum) {
     return {
-      value: takeStart("…[审计记录已省略]…", maximum),
+      value: takeStart(AUDIT_OMITTED_TEXT, maximum),
       truncated: true,
     };
   }

@@ -47,6 +47,17 @@ export function createTranslator(locale: Locale): Translate {
     );
 }
 
+/** English needs a singular form; Chinese uses the same text for both keys. */
+export function plural(
+  t: Translate,
+  count: number,
+  one: MessageKey,
+  other: MessageKey,
+  ...values: Value[]
+): string {
+  return t(count === 1 ? one : other, count, ...values);
+}
+
 /** Keep UI feedback translatable after a language switch; raw diagnostics stay raw. */
 export function message(key: MessageKey, ...values: Value[]): Feedback {
   return { key, values };

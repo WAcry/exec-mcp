@@ -86,6 +86,26 @@ describe("real local processes", () => {
     expect(result.output).toContain("err");
     expect(result.exit_code).toBe(7);
   });
+  it("describes retained processes by command line, directory and owning conversation", async () => {
+    const cwd = await directory();
+    const value = terminal();
+    const command = nodeCommand("setInterval(() => {}, 1000)");
+    const first = await value.execCommand(
+      { cmd: `\n${command}`, yield_time_ms: 0 },
+      cwd,
+      undefined,
+      "conversation-digest",
+    );
+    expect(value.getActiveSessions()).toEqual([
+      expect.objectContaining({
+        id: first.session_id,
+        command,
+        cwd,
+        owner: "conversation-digest",
+      }),
+    ]);
+    await value.writeStdin({ session_id: first.session_id!, terminate: true });
+  });
   it("keeps an interactive pipe across calls, including stdin EOF", async () => {
     const value = terminal();
     const cwd = await directory();

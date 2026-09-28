@@ -3,6 +3,8 @@ export const NOTE_MAX_BYTES = 30_000;
 export const NOTE_LABEL_BYTES = 256;
 export const NOTES_RESPONSE_BYTES = 37_000;
 export const NOTE_RETENTION_MS = 72 * 60 * 60 * 1000;
+/** Model-visible label for notes appended to results without structuredContent. */
+export const USER_NOTE_TEXT_PREFIX = "用户额外补充：\n";
 
 /** Web-only change event. Question text and answers stay behind the existing API. */
 export interface SessionNotesEvent {

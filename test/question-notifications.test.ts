@@ -110,7 +110,7 @@ describe("browser question notification delivery", () => {
     await b.notifier.receive(event());
     expect(b.shown).toHaveLength(1);
     expect(b.shown[0]!.options.body).toBe(
-      "会话 hash_A_a…7890 有 2 个新问题，点击作答。",
+      "对话 hash_A_a…7890 有 2 个新问题，点击作答。",
     );
     const click = new Event("click", { cancelable: true });
     b.shown[0]!.onclick?.(click);

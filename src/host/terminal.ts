@@ -13,6 +13,7 @@ import { terminateProcessTree } from "./platform.js";
 import { inheritedEnvironment } from "../environment.js";
 import { DEFAULT_IDLE_MS, MEMORY_DEFAULTS, MiB } from "../memory.js";
 import { RollingOutputBuffer } from "./output-buffer.js";
+import { inputPreview } from "../tool-names.js";
 import {
   resolveCommandShell,
   resolveShell,
@@ -53,6 +54,11 @@ type Backend =
 interface Session {
   id: string;
   backend: Backend;
+  /** First command line and directory, shown by the Web console. */
+  command: string;
+  cwd: string;
+  /** Conversation digest that started the process, when known. */
+  owner?: string;
   buffer: RollingOutputBuffer;
   touched: number;
   observers: number;
@@ -104,6 +110,9 @@ export class TerminalManager {
 
   getActiveSessions(): {
     id: string;
+    command: string;
+    cwd: string;
+    owner?: string | undefined;
     exitCode?: number | undefined;
     touched: number;
     observers: number;
@@ -115,6 +124,9 @@ export class TerminalManager {
   }[] {
     return [...this.sessions.values()].map((s) => ({
       id: s.id,
+      command: s.command,
+      cwd: s.cwd,
+      ...(s.owner === undefined ? {} : { owner: s.owner }),
       exitCode: s.exitCode,
       touched: s.touched,
       observers: s.observers,
@@ -130,6 +142,7 @@ export class TerminalManager {
     input: ExecCommandInput,
     base: string,
     signal?: AbortSignal,
+    owner?: string,
   ): Promise<TerminalResult> {
     this.requireOpen();
     throwIfAborted(signal);
@@ -167,6 +180,9 @@ export class TerminalManager {
     const session: Session = {
       id: randomHandle("term"),
       backend,
+      command: inputPreview("cmd", input.cmd),
+      cwd,
+      ...(owner === undefined ? {} : { owner }),
       buffer: new RollingOutputBuffer(this.bufferBytes),
       touched: Date.now(),
       observers: 1,

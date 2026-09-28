@@ -20,6 +20,7 @@ import {
   NOTE_MAX_BYTES,
   NOTE_RETENTION_MS,
   NOTES_RESPONSE_BYTES,
+  USER_NOTE_TEXT_PREFIX,
   type SessionNote,
   type SessionNotesEvent,
   type SessionNotesPage,
@@ -495,7 +496,7 @@ export class SessionNotes {
       const selected: SessionNote[] = [];
       for (const note of conversation.notes) {
         if (note.status !== "pending") continue;
-        const text = `用户额外补充：\n${note.text}`;
+        const text = USER_NOTE_TEXT_PREFIX + note.text;
         // JSON escaping and array separators count too; do not estimate a
         // structured note using only the UTF-8 length of its unescaped text.
         const bytes = structured

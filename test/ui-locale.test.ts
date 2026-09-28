@@ -64,21 +64,40 @@ describe("console language", () => {
       expect(value.zh.length, key).toBeGreaterThan(0);
       expect(/\p{Script=Han}/u.test(value.en), key).toBe(false);
       expect(slots(value.en), key).toEqual(slots(value.zh));
-      if (!["common.callsUnit", "common.itemsUnit"].includes(key))
-        expect(value.en.length, key).toBeGreaterThan(0);
+      expect(value.en.length, key).toBeGreaterThan(0);
     }
+  });
+
+  it("uses every catalog entry, so removed screens do not leave stale text", async () => {
+    const root = fileURLToPath(new URL("../ui/src", import.meta.url));
+    let source = "";
+    async function read(dir: string) {
+      for (const entry of await readdir(dir, { withFileTypes: true })) {
+        const filename = path.join(dir, entry.name);
+        if (entry.isDirectory()) await read(filename);
+        else if (/\.tsx?$/.test(filename) && !filename.endsWith("messages.ts"))
+          source += await readFile(filename, "utf8");
+      }
+    }
+    await read(root);
+    expect(
+      Object.keys(messages).filter((key) => !source.includes(`"${key}"`)),
+    ).toEqual([]);
   });
 
   it("substitutes values once, preserving user text rather than interpreting it as a translation", () => {
     const t = createTranslator("en");
     const raw = "原文 ${value} {1} <script> & \n";
     expect(t("calls.open", raw)).toBe("View " + raw + " call details");
-    expect(t("calls.page", 0, 1, 2)).toBe("0 records · Page 1 / 2");
+    expect(t("dock.position", 1, 3)).toBe("1 of 3");
+    expect(t("step.finishedLater", "11:03", 2)).toBe(
+      "Finished at 11:03 after 2 checks",
+    );
     expect(feedback(raw, t)).toBe(raw);
-    const saved = message("notes.copied");
-    expect(feedback(saved, t)).toBe(messages["notes.copied"].en);
+    const saved = message("question.saved");
+    expect(feedback(saved, t)).toBe(messages["question.saved"].en);
     expect(feedback(saved, createTranslator("zh-CN"))).toBe(
-      messages["notes.copied"].zh,
+      messages["question.saved"].zh,
     );
   });
 

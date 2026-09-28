@@ -10,6 +10,7 @@ import type {
   ActivityStats,
 } from "./types.js";
 import { snapshotAuditValue, truncateAuditText } from "./snapshot.js";
+import { nestedPreview } from "./call-summary.js";
 
 export type ActivityEvent =
   | { type: "call:start"; callId: string; sessionId: string }
@@ -26,11 +27,22 @@ export interface ActiveCallController {
       timestamp?: string;
     },
   ): SubCallRecord;
+  /** Records a nested call as running now; finish fills in its result. */
+  startSubcall(name: string, input: unknown): SubcallTracker;
   finish(result: {
     status: CallStatus;
     output?: unknown;
     error?: string;
   }): CallRecord;
+}
+
+export interface SubcallTracker {
+  finish(result: {
+    durationMs: number;
+    output?: unknown;
+    error?: string;
+    status: "success" | "error";
+  }): void;
 }
 
 export class ActivityStore {
@@ -165,9 +177,64 @@ export class ActivityStore {
         };
         if (input.truncated || output?.truncated || error?.truncated)
           call.truncatedFields = (call.truncatedFields ?? 0) + 1;
-        if (this.callsById.has(id)) this.pushSubcall(call, subcall);
+        if (this.callsById.has(id)) {
+          this.pushSubcall(call, subcall);
+          const current = this.sessions.get(sessionId);
+          if (current?.lastCall?.id === id)
+            current.lastCall.step = stepPreview(subcall);
+        }
         this.emit({ type: "call:subcall", callId: id, subcallId: subcall.id });
         return subcall;
+      },
+      startSubcall: (name, rawInput) => {
+        const input = snapshotAuditValue(rawInput, 4096);
+        const subcall: SubCallRecord = {
+          id: `sub_${randomUUID()}`,
+          timestamp: new Date().toISOString(),
+          name,
+          durationMs: 0,
+          input: input.value,
+          status: "running",
+        };
+        if (input.truncated)
+          call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+        const step = stepPreview(subcall);
+        if (this.callsById.has(id)) {
+          this.pushSubcall(call, subcall);
+          const current = this.sessions.get(sessionId);
+          if (current?.lastCall?.id === id) current.lastCall.step = step;
+        }
+        this.emit({ type: "call:subcall", callId: id, subcallId: subcall.id });
+        let done = false;
+        return {
+          finish: (result) => {
+            if (done) return;
+            done = true;
+            const output =
+              result.output === undefined
+                ? undefined
+                : snapshotAuditValue(result.output, 8192);
+            const error =
+              result.error === undefined
+                ? undefined
+                : truncateAuditText(result.error, 4096);
+            subcall.durationMs = result.durationMs;
+            if (output) subcall.output = output.value;
+            if (error) subcall.error = error.value;
+            subcall.status = result.status;
+            step.status = result.status;
+            if (
+              (output?.truncated || error?.truncated) &&
+              this.callsById.has(id)
+            )
+              call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+            this.emit({
+              type: "call:subcall",
+              callId: id,
+              subcallId: subcall.id,
+            });
+          },
+        };
       },
       finish: ({ status, output, error }) => {
         if (finished) return call;
@@ -412,6 +479,7 @@ export class ActivityStore {
     }
     const newest = calls[0]!;
     const oldest = calls.at(-1)!;
+    const latestStep = newest.subcalls.at(-1);
     this.sessions.set(sessionId, {
       id: sessionId,
       callCount: calls.length,
@@ -427,9 +495,18 @@ export class ActivityStore {
           : { durationMs: newest.durationMs }),
         timestamp: newest.startedAt,
         preview: this.extractPreview(newest.tool, newest.args),
+        ...(latestStep ? { step: stepPreview(latestStep) } : {}),
       },
     });
   }
+}
+
+function stepPreview(subcall: SubCallRecord) {
+  return {
+    name: subcall.name,
+    preview: nestedPreview(subcall.name, subcall.input),
+    status: subcall.status,
+  };
 }
 
 function disabledCall(params: {
@@ -459,6 +536,9 @@ function disabledCall(params: {
         status: subcall.status,
         ...(subcall.error === undefined ? {} : { error: "[审计已关闭]" }),
       };
+    },
+    startSubcall() {
+      return { finish() {} };
     },
     finish(result) {
       call.status = result.status;

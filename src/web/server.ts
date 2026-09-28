@@ -5,7 +5,7 @@ import {
   type Server,
 } from "node:http";
 import type { AddressInfo } from "node:net";
-import { networkInterfaces } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -24,7 +24,7 @@ import { configView, mcpServerView } from "./config-view.js";
 import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
-import { inputPreview, callPreview } from "../tool-names.js";
+import { callListItem } from "./call-summary.js";
 import { SessionNoteError } from "../session-notes.js";
 import { QUESTION_ANSWER_SCHEMA } from "../user-questions.js";
 import { NOTE_MAX_BYTES } from "../session-notes-types.js";
@@ -436,6 +436,7 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       stats: runtime.activity.getStats(),
       memory: await runtime.codeMode.getMemoryStatus(),
       system: {
+        hostname: hostname(),
         platform: process.platform,
         arch: process.arch,
         nodeVersion: process.version,
@@ -597,40 +598,7 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
       ...(tool ? { tool } : {}),
       ...(search ? { search } : {}),
     });
-    jsonResponse(res, 200, {
-      ...data,
-      items: data.items.map((call) => ({
-        id: call.id,
-        sessionId: call.sessionId,
-        tool: call.tool,
-        status: call.status,
-        startedAt: call.startedAt,
-        endedAt: call.endedAt,
-        durationMs: call.durationMs,
-        args: Object.fromEntries(
-          [
-            "source",
-            "cmd",
-            "patch",
-            "query",
-            "path",
-            "destination",
-            "workdir",
-            "cell_id",
-            "session_id",
-          ].flatMap((key) =>
-            typeof call.args[key] === "string"
-              ? [[key, inputPreview(key, call.args[key])]]
-              : [],
-          ),
-        ),
-        ...(call.tool === "request_user_input_async"
-          ? { args: { preview: callPreview(call.tool, call.args) } }
-          : {}),
-        subcallCount: call.subcalls.length + (call.omittedSubcalls ?? 0),
-        truncated: !!call.truncatedFields || !!call.omittedSubcalls,
-      })),
-    });
+    jsonResponse(res, 200, { ...data, items: data.items.map(callListItem) });
     return;
   }
 

@@ -1,118 +1,29 @@
-export type CallStatus =
-  | "running"
-  | "completed"
-  | "error"
-  | "yielding"
-  | "terminated";
-
-export interface SubCallRecord {
-  id: string;
-  name: string;
-  timestamp: string;
-  durationMs: number;
-  input: unknown;
-  output?: unknown;
-  error?: string;
-  status: "success" | "error";
-}
-
-export interface CallRecord {
-  id: string;
-  sessionId: string;
-  tool: string;
-  status: CallStatus;
-  startedAt: string;
-  endedAt?: string;
-  durationMs?: number;
-  args: {
-    source?: string;
-    workdir?: string;
-    yield_time_ms?: number;
-    max_output_tokens?: number;
-    files?: { name?: string; size?: number; type?: string }[];
-    cell_id?: string;
-    terminate?: boolean;
-    [key: string]: unknown;
-  };
-  subcalls: SubCallRecord[];
-  omittedSubcalls?: number;
-  truncatedFields?: number;
-  output?: unknown;
-  error?: string;
-}
-
-export interface CallSummary {
-  id: string;
-  sessionId: string;
-  tool: string;
-  status: CallStatus;
-  startedAt: string;
-  endedAt?: string;
-  durationMs?: number;
-  args: Record<string, unknown>;
-  subcallCount: number;
-  truncated: boolean;
-}
-
-export interface SessionSummary {
-  id: string;
-  label?: string;
-  pendingNotes?: number;
-  pendingQuestions?: number;
-  questionPreview?: string;
-  canMessage?: boolean;
-  callCount: number;
-  errorCount: number;
-  firstSeen: string;
-  lastActive: string;
-  lastCall?: {
-    id: string;
-    tool: string;
-    status: CallStatus;
-    durationMs?: number;
-    timestamp: string;
-    preview: string;
-  };
-}
-
-export interface PaginatedResult<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
-}
+export type {
+  ActivityStats,
+  CallListItem,
+  CallRecord,
+  CallStatus,
+  CallStepSummary,
+  CodeModeMemoryStatus,
+  NativeSessionItem,
+  PaginatedResult,
+  SessionSummary,
+  SubCallRecord,
+} from "../../src/web/types.js";
+import type {
+  ActivityStats,
+  CodeModeMemoryStatus,
+  PaginatedResult,
+  SessionSummary,
+} from "../../src/web/types.js";
 
 export interface SessionPage extends PaginatedResult<SessionSummary> {
   pendingQuestionsTotal: number;
 }
 
-export interface CodeModeMemoryStatus {
-  highWaterBytes: number;
-  highWaterMib: number;
-  rssBytes?: number | undefined;
-  sampledAt?: string | undefined;
-  status: "normal" | "elevated" | "exceeded" | "unsampled";
-  hostPid?: number | undefined;
-  idleRetentionHours: number;
-}
-
-export interface NativeSessionItem {
-  id: string;
-  scope?: string | undefined;
-  users: number;
-  idleSince: number;
-  lastUsed: number;
-  generation: number;
-  activeCellCount: number;
-  activeCellIds: string[];
-  retired?: "memory" | "idle" | "failure" | "shutdown" | "unscoped" | undefined;
-  isOldestIdle: boolean;
-  isOldestActive: boolean;
-}
-
 export interface SystemStatus {
   status: string;
+  generation?: number;
   version: string;
   uptime: number;
   isLoopback: boolean;
@@ -130,12 +41,28 @@ export interface SystemStatus {
     lanUrls: string[];
   };
   stats: ActivityStats;
-  memory?: CodeModeMemoryStatus;
+  memory?: CodeModeMemoryStatus | undefined;
   system: {
+    hostname?: string;
     platform: string;
     arch: string;
     nodeVersion: string;
   };
+}
+
+export interface TerminalItem {
+  id: string;
+  command?: string;
+  cwd?: string;
+  owner?: string;
+  exitCode?: number;
+  touched: number;
+  observers: number;
+  kind: "pipe" | "pty";
+  pid?: number;
+  bufferBytes: number;
+  bufferCapacityBytes: number;
+  omittedBytes: number;
 }
 
 export interface SkillItem {
@@ -170,16 +97,6 @@ export interface McpServerItem {
   active?: boolean;
 }
 
-export interface ActivityStats {
-  totalCalls: number;
-  activeSessions: number;
-  errorCalls: number;
-  runningCalls: number;
-  avgDurationMs: number;
-  truncatedFields: number;
-  omittedSubcalls: number;
-}
-
 export interface McpToolItem {
   name: string;
   description: string;
@@ -192,18 +109,6 @@ export interface McpServersResponse {
   errors: Record<string, string>;
 }
 
-export interface TerminalSessionItem {
-  id: string;
-  exitCode?: number;
-  touched: number;
-  observers: number;
-  kind: "pipe" | "pty";
-  pid?: number;
-  bufferBytes: number;
-  bufferCapacityBytes: number;
-  omittedBytes: number;
-}
-
 export interface ArtifactItem {
   id: string;
   name: string;
@@ -212,6 +117,7 @@ export interface ArtifactItem {
   sha256: string;
   expires_at: string;
   uri: string;
+  conversation?: string;
 }
 
 export interface ConfigResponse {
@@ -220,3 +126,15 @@ export interface ConfigResponse {
   config_exists?: boolean;
   [key: string]: unknown;
 }
+
+export type LiveEvent =
+  | { type: "connected" }
+  | { type: "call:start"; callId: string; sessionId: string }
+  | { type: "call:subcall"; callId: string; subcallId: string }
+  | { type: "call:finish"; callId: string; status: string }
+  | { type: "call:clear" }
+  | {
+      type: "session:notes";
+      sessionId: string;
+      questionRequest?: { id: string; count: number };
+    };

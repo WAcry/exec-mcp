@@ -2,7 +2,12 @@ import type { NativeSessionItem, SessionSummary } from "../types";
 
 export const UNSCOPED = "unscoped";
 
-export type LiveState = "asking" | "working" | "background" | "idle";
+export type LiveState =
+  | "asking"
+  | "message"
+  | "working"
+  | "background"
+  | "idle";
 
 export interface ConversationState {
   state: LiveState;
@@ -11,13 +16,19 @@ export interface ConversationState {
   /** A script continues after its call returned. */
   background: boolean;
   questions: number;
+  /** Messages from ChatGPT the operator has not dismissed. */
+  unread: number;
 }
 
 export function conversationState(
-  summary: Pick<SessionSummary, "lastCall" | "pendingQuestions">,
+  summary: Pick<
+    SessionSummary,
+    "lastCall" | "pendingQuestions" | "unreadMessages"
+  >,
   native?: NativeSessionItem,
 ): ConversationState {
   const questions = summary.pendingQuestions ?? 0;
+  const unread = summary.unreadMessages ?? 0;
   const working =
     summary.lastCall?.status === "running" ||
     (!!native && !native.retired && native.users > 0);
@@ -28,36 +39,39 @@ export function conversationState(
   return {
     state: questions
       ? "asking"
-      : working
-        ? "working"
-        : background
-          ? "background"
-          : "idle",
+      : unread
+        ? "message"
+        : working
+          ? "working"
+          : background
+            ? "background"
+            : "idle",
     working,
     background,
     questions,
+    unread,
   };
 }
 
 const RANK: Record<LiveState, number> = {
   asking: 0,
-  working: 1,
-  background: 2,
-  idle: 3,
+  message: 1,
+  working: 2,
+  background: 3,
+  idle: 4,
 };
 
-/** Questions first, then live work, then recency; unidentified calls sink. */
+/** What needs the operator first, then live work, then recency; unidentified calls sink. */
 export function sortConversations(
   items: readonly SessionSummary[],
   native: Readonly<Record<string, NativeSessionItem>>,
 ): SessionSummary[] {
+  const rank = (item: SessionSummary) =>
+    RANK[conversationState(item, native[item.id]).state];
   return [...items].sort((a, b) => {
     if ((a.id === UNSCOPED) !== (b.id === UNSCOPED))
       return a.id === UNSCOPED ? 1 : -1;
-    const rank =
-      RANK[conversationState(a, native[a.id]).state] -
-      RANK[conversationState(b, native[b.id]).state];
-    return rank || b.lastActive.localeCompare(a.lastActive);
+    return rank(a) - rank(b) || b.lastActive.localeCompare(a.lastActive);
   });
 }
 

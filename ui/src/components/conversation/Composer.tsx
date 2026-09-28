@@ -39,9 +39,6 @@ export function Composer({
   const disabled = outlook === "unavailable";
 
   useEffect(() => {
-    const focus = () => {
-      if (!disabled) input.current?.focus();
-    };
     const key = (event: KeyboardEvent) => {
       if (disabled || event.defaultPrevented || isTyping(event.target)) return;
       if (event.key !== "c" || event.metaKey || event.ctrlKey || event.altKey)
@@ -50,11 +47,7 @@ export function Composer({
       input.current?.focus();
     };
     window.addEventListener("keydown", key);
-    window.addEventListener("exec:focus-composer", focus);
-    return () => {
-      window.removeEventListener("keydown", key);
-      window.removeEventListener("exec:focus-composer", focus);
-    };
+    return () => window.removeEventListener("keydown", key);
   }, [disabled]);
 
   const send = async () => {

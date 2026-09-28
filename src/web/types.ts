@@ -54,6 +54,9 @@ export interface SessionSummary {
   pendingNotes?: number;
   pendingQuestions?: number;
   questionPreview?: string;
+  /** Messages from ChatGPT the operator has not dismissed yet. */
+  unreadMessages?: number;
+  messagePreview?: string;
   canMessage?: boolean;
   callCount: number;
   errorCount: number;

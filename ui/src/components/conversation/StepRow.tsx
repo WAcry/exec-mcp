@@ -83,6 +83,8 @@ export interface StepRowProps {
   conversation?: SessionSummary | undefined;
   /** Questions rendered under this row; the row then only marks the moment. */
   asked?: number;
+  /** Messages rendered under this row, likewise. */
+  messaged?: number;
   onToggle(id: string): void;
   onHover(key: string | null): void;
   onLocate(id: string): void;
@@ -103,6 +105,7 @@ export const StepRow = memo(function StepRow({
   carried,
   conversation,
   asked = 0,
+  messaged = 0,
   onToggle,
   onHover,
   onLocate,
@@ -111,9 +114,15 @@ export const StepRow = memo(function StepRow({
   const { t, locale } = useLocale();
   const described = describeCall(call, t);
   const summary: CallSummaryText =
-    asked && call.subcallCount <= asked
+    asked + messaged && call.subcallCount <= asked + messaged
       ? {
-          verb: asked === 1 ? t("step.askedOne") : t("step.askedMany", asked),
+          verb: asked
+            ? asked === 1
+              ? t("step.askedOne")
+              : t("step.askedMany", asked)
+            : messaged === 1
+              ? t("step.messaged")
+              : t("step.messagedMany", messaged),
           more: 0,
         }
       : described;

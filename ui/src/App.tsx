@@ -8,6 +8,7 @@ import { SettingsView } from "./components/pages/SettingsView";
 import { ToolsView } from "./components/pages/ToolsView";
 import { ConnectionBanner, RuntimeBanner } from "./components/shell/Banners";
 import { HomeView } from "./components/shell/HomeView";
+import { MessageToasts } from "./components/shell/MessageToasts";
 import { ShortcutSheet } from "./components/shell/ShortcutSheet";
 import { Sidebar } from "./components/shell/Sidebar";
 import { useAuth } from "./context/AuthContext";
@@ -61,12 +62,21 @@ function Shell({ route, navigate }: { route: Route; navigate: Navigate }) {
       navigate({ name: "conversation", id: target.id }, { replace: true });
   }, [route.name, wide, live.sessions, live.native, navigate]);
 
+  const unread = (live.sessions ?? []).reduce(
+    (sum, item) => sum + (item.unreadMessages ?? 0),
+    0,
+  );
   useEffect(() => {
     updateTabState({
-      attention: live.pendingQuestionsTotal,
+      attention: live.pendingQuestionsTotal
+        ? "question"
+        : unread
+          ? "message"
+          : null,
+      count: live.pendingQuestionsTotal + unread,
       title: t("app.title"),
     });
-  }, [live.pendingQuestionsTotal, t]);
+  }, [live.pendingQuestionsTotal, unread, t]);
 
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -112,6 +122,7 @@ function Shell({ route, navigate }: { route: Route; navigate: Navigate }) {
           </div>
         </main>
       )}
+      <MessageToasts route={route} navigate={navigate} />
       {shortcuts && <ShortcutSheet onClose={() => setShortcuts(false)} />}
     </div>
   );

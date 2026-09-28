@@ -235,18 +235,19 @@ and line/column plus an excerpt where available. This auxiliary check locates er
 Code Mode's prelude does not change the reported original-source locations. If only the host rejected a complex request and non-execution is confirmed,
 inspect it and simplify or split as appropriate. Combining independent operations reduces outer round trips; the task determines the tradeoff.
 
-## Asynchronous questions
+## Messages and questions
 
-Send an update or reply to an interim user question without waiting for a response. This code runs inside exec.
+Tell the user something they need to know now, such as a blocker or a finding that changes the plan, or briefly answer a question they sent while work continues.
+The message informs and expects no reply; routine progress belongs in commentary. This code runs inside exec.
 
 ```js
 text(await tools.send_message_to_user_async({
-  message: "The tests passed. I am checking the package next."
+  message: "Heads-up: staging rejects the migration because the database user lacks ALTER permission. I am finishing the local fix and leaving staging unchanged."
 }));
 ```
 
-The message appears in this conversation's Web timeline. Replies from the composer arrive through normal exec/wait responses as user notes.
-Both communication tools require a running Web server and a host-provided conversation ID. The question form below provides answer choices.
+The message stays pinned in this conversation's Web UI until the user dismisses it. Anything the user writes afterwards still arrives as a user note with a later exec/wait response.
+Both communication tools require a running Web server and a host-provided conversation ID. When you need an answer, ask with request_user_input_async and offer choices.
 
 ```js
 text(await tools.request_user_input_async({

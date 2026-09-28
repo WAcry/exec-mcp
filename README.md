@@ -76,7 +76,6 @@ Signing out, clearing browser cookies, or rotating the access token requires a n
 
 Type in the message box at the bottom of a conversation and press Enter. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
 Queued messages can be withdrawn, and the timeline shows which call delivered each one. If ChatGPT has finished its turn, copy the text into the original conversation instead.
-ChatGPT can send updates or answer your interim questions in the same timeline while continuing to work. These entries are labeled ChatGPT; Reply focuses the message box and keeps your draft.
 
 ### Answer questions
 
@@ -84,6 +83,12 @@ Conversations with a pending question move to the top of the sidebar, and the br
 Open the conversation and answer in the panel above the message box: pick an option (number keys work), add a note if you like,
 or select None of the above and write your own answer. Recommended options are never selected or submitted automatically.
 Answers and unsolicited notes use the same delivery path.
+
+### Messages from ChatGPT
+
+While it keeps working, ChatGPT can tell you about a blocker or a finding that changes the plan, or briefly answer a question you sent. It does not wait for a reply.
+Unread messages stay pinned above the message box until you select Got it, and each also appears under the call that sent it.
+Conversations with unread messages show a preview and a blue count in the sidebar. A message that arrives while you are elsewhere in the console also shows a toast.
 
 ### Notifications and settings
 

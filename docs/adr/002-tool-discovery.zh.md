@@ -2,7 +2,7 @@
 
 [English](002-tool-discovery.md) | 简体中文
 
-当前生效，2026-09-22 更新。
+当前生效，2026-09-28 更新。
 
 ## 工具入口与契约来源
 
@@ -22,6 +22,14 @@ description 保留完整输入和返回约束，包括必填项、枚举与引�
 取消 tool_search 及 BM25 索引，也不另设 schema/read/call API 或搜索后的解锁步骤。
 因此没有内建相关性排名和同义词召回，但可用接口更少，目录与调用方式一致。
 Web 下游页只筛选当前目录，展示完整契约与连接错误，不执行检索探针。
+
+## 服务器标识
+
+serverInfo 带有生成的图标：MCP 客户端必须支持的 64 和 256 像素 PNG，以及供可缩放客户端使用的 SVG。
+三者都是 data URI，因此图标既不需要公开的资源地址，也不需要为它放开认证。
+图标由代码按 Web 品牌标志和 favicon 的同一几何绘制，不引入二进制素材。工具不单独带图标，客户端会回退到服务器图标。
+协议修订 2026-07-28 会在每个结果的 _meta 中重复 serverInfo，这会让每次 exec 和 wait 响应多出约 14 KB。
+这些结果自带不含图标的服务器标识，SDK 会优先采用它而不再附加自己的副本；initialize、server/discover 和列表响应仍携带图标。
 
 ## 启动与目录更新
 
@@ -93,6 +101,7 @@ Codex 的 Code Mode Only 使用 ALL_TOOLS；其他模型模式仍可能提供搜
 | 外层预算和 110 秒 wait | 适配目标连接器，内层保留原值供 JS 处理，见 ADR-003。 |
 | Shell 单次覆盖、EOF/resize/terminate 和零等待 | 保留现有进程操作；配置默认值允许单次参数覆盖。 |
 | 原生 MCP 图片/文件块、Skills 和 Web 问答 | 适配 ChatGPT 的文件及消息交付方式，提供独立的 Skill 发现；未接入 notify 注入。 |
+| Agent 消息不承诺回复，提问交给 request_user_input_async | exec-mcp 无法开启 ChatGPT 的新轮次，承诺的回复不会到来，见 [ADR-010](010-session-notes.zh.md#agent-发来的消息)。 |
 | 资源直接 URI 读取与聚合 errors | 支持模板和链接，并保留部分失败的信息。 |
 
 含义相同处沿用上游原文，环境差异按实际行为说明。无需为措辞一致而接入完整 App Server、审批流程或另一套执行器。

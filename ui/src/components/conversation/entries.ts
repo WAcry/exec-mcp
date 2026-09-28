@@ -13,6 +13,8 @@ export type Entry =
       call: CallListItem;
       /** Questions this call asked; they render under it instead of on their own. */
       questions: UserQuestionView[];
+      /** Messages this call sent to the operator. */
+      messages: AgentMessage[];
     }
   | { kind: "note"; key: string; at: string; note: SessionNote }
   | { kind: "agent"; key: string; at: string; message: AgentMessage }
@@ -36,6 +38,7 @@ export function buildEntries(
 ): Entry[] {
   const entries: Entry[] = [];
   const askedBy = new Map<string, Extract<Entry, { kind: "call" }>>();
+  const byId = new Map<string, Extract<Entry, { kind: "call" }>>();
   for (const call of calls) {
     const entry = {
       kind: "call" as const,
@@ -43,20 +46,26 @@ export function buildEntries(
       at: call.startedAt,
       call,
       questions: [],
+      messages: [],
     };
     entries.push(entry);
+    byId.set(call.id, entry);
     for (const step of call.steps ?? [])
       if (step.name === "request_user_input_async" && step.handle)
         askedBy.set(step.handle, entry);
   }
   if (includeMessages) {
-    for (const message of agentMessages)
-      entries.push({
-        kind: "agent",
-        key: message.id,
-        at: message.createdAt,
-        message,
-      });
+    for (const message of agentMessages) {
+      const sender = message.callId ? byId.get(message.callId) : undefined;
+      if (sender) sender.messages.push(message);
+      else
+        entries.push({
+          kind: "agent",
+          key: message.id,
+          at: message.createdAt,
+          message,
+        });
+    }
     for (const note of notes)
       if (!note.questionId)
         entries.push({

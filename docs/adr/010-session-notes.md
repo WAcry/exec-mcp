@@ -8,7 +8,7 @@ Active, updated 2026-09-28.
 
 Operators can send text from a conversation's composer or answer questions submitted by the agent.
 Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
-Inside exec, the model can send free-text messages with tools.send_message_to_user_async or offer choices with tools.request_user_input_async. It has no answer-query, send-user-note, or conversation-naming tool.
+Inside exec, the model can inform the operator with tools.send_message_to_user_async or ask with choices through tools.request_user_input_async. It has no answer-query, send-user-note, or conversation-naming tool.
 The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
 The composer sits at the bottom of every conversation, shaped like a chat input, so first-time operators find it without a separate entry point.
@@ -25,14 +25,26 @@ Notes do not wake waits or modify running scripts. Stopping an operation still r
 
 ## Agent messages
 
-The [Codex message tool](https://github.com/openai/codex/blob/5c5308fc9a9ee789049d646ef11e5400384b9c6f/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) takes a single message and returns accepted immediately.
-We retain that shape for important updates, informal questions, and replies to the operator during work. The destination is the current conversation's Web timeline.
-User replies use the existing composer and arrive as User Notes with subsequent exec/wait responses; the service cannot inject a new ChatGPT turn.
+The [Codex message tool](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) takes a single message and returns accepted immediately.
+We keep its shape and most of its description. Messages only inform: a blocker or finding the operator must know now, or a brief answer to a question the operator sent while work continues.
+Questions go through request_user_input_async, which offers choices and returns answers. The destination is the current conversation's Web UI.
+
+The description drops three upstream phrases. Codex promises that a reply arrives as a new user message; exec-mcp cannot start a ChatGPT turn,
+and the promise led ChatGPT to wait for replies that never came. The Codex parameter mentions questions, and its description suggests bolding questions;
+both invite asking through a channel that has no answer path. The description instead says messages inform, expect no reply, and route questions to the question tool.
+It keeps the upstream split between messages that need immediate attention and commentary for routine progress, because every message interrupts the operator.
 
 Agent messages are stored separately from user input so they never echo back as user-authored instructions or create pending-question counts.
 They share the existing 72-hour retention and bounded memory pool, survive audit clearing and execution-service restart, and are lost on full process exit.
-The timeline labels them as ChatGPT, renders plain text, and offers reply, copy, and a link to the sending call when that audit record remains available.
 Messages are limited to 30,000 UTF-8 bytes. A missing Web listener or conversation identity fails explicitly. Acceptance confirms storage, not that the operator has read it.
+
+A message can arrive while the operator watches another conversation or is away, and a timeline entry alone scrolls out of sight as calls continue.
+Unread messages therefore stay pinned above the composer, newest first, until the operator dismisses them. The pinned panel collapses to one line while a question is pending.
+Conversations with unread messages rank after those with questions and show a preview and count. The tab badge counts them, and a toast appears elsewhere in the console.
+The toast's timer only runs while the page is visible, so a message that arrives in a background tab is still there on return.
+Read state lives on the server, so it follows the operator across tabs and devices; it is Web-only state and never reaches the model.
+The first notes page carries every unread message, so paging cannot hide one. The timeline shows each message under the call that sent it, in the conversation's color.
+It renders bold, inline code, code blocks, and links without interpreting HTML. There is no reply button, because messages do not ask; the composer stays available for anything the operator wants to add.
 
 ## Asynchronous questions and answers
 

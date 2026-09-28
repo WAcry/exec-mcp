@@ -234,18 +234,19 @@ text(await tools.exec_command({ cmd: String.raw`
 Code Mode 前置代码不改变返回的原始 source 定位。若仅宿主拒绝了构造复杂的请求且确认未执行，
 可以在检查请求后简化或拆分；组合独立操作则能减少外层 tool call，两者由实际任务权衡。
 
-## 异步提问
+## 消息与提问
 
-可以发出更新或回答用户的临时问题，不等待回复。下面的代码在 exec 内执行。
+用户需要马上知道的情况，例如阻塞问题或会改变计划的发现，或者用户在工作途中发来的问题，都可以发消息简短告知，然后继续工作。
+消息只用于告知，不等待回复；常规进度留在 commentary 中。下面的代码在 exec 内执行。
 
 ```js
 text(await tools.send_message_to_user_async({
-  message: "The tests passed. I am checking the package next."
+  message: "Heads-up: staging rejects the migration because the database user lacks ALTER permission. I am finishing the local fix and leaving staging unchanged."
 }));
 ```
 
-消息显示在本对话的 Web 时间线。用户通过输入框回复后，内容随正常 exec/wait 响应作为补充返回。
-两种沟通工具都需要 Web 已启动且宿主提供对话标识。下面的提问接口用于提供可选答案。
+消息会固定在本对话的 Web 界面中，直到用户点“知道了”。用户之后写下的内容仍随后续 exec/wait 响应作为补充返回。
+两种沟通工具都需要 Web 已启动且宿主提供对话标识。需要用户作答时，用 request_user_input_async 提问并给出选项。
 
 ```js
 text(await tools.request_user_input_async({

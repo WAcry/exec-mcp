@@ -165,7 +165,7 @@ describe.each([false, true])(
         "### send_message_to_user_async",
       );
       const message =
-        "The new console is ready.\nShould the original layout be retained?";
+        "The new console is ready.\nThe original layout stays available until you confirm.";
       const running = await f.call("exec", {
         source: `text(await tools.send_message_to_user_async({message:${JSON.stringify(message)}})); yield_control(); await new Promise(r=>setTimeout(r,150)); text('continued');`,
       });
@@ -180,6 +180,43 @@ describe.each([false, true])(
         [],
       );
       expect(noteBlocks(running)).toEqual([]);
+      const summary = async () =>
+        (
+          (await (await f.api("/api/sessions")).json()) as {
+            items: SessionSummary[];
+          }
+        ).items.find((item) => item.id === hashA);
+      expect(await summary()).toMatchObject({
+        unreadMessages: 1,
+        messagePreview: message,
+      });
+      const read = `/api/sessions/${hashA}/messages/read`;
+      expect((await f.api(read)).status).toBe(405);
+      for (const body of [
+        {},
+        { ids: "x" },
+        { ids: [1] },
+        { ids: Array(201).fill("x") },
+      ])
+        expect((await f.api(read, "POST", body)).status).toBe(400);
+      expect(
+        (
+          await f.api("/api/sessions/not-a-real-hash/messages/read", "POST", {
+            ids: [],
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (await f.api(read, "POST", { ids: [page.agentMessages[0]!.id] }))
+          .status,
+      ).toBe(200);
+      expect((await f.page()).agentMessages[0]!.readAt).toEqual(
+        expect.any(String),
+      );
+      expect(await summary()).toMatchObject({
+        unreadMessages: 0,
+        messagePreview: "",
+      });
       await f.send("reply-agent-message", "Keep the new console.");
       const wrong = await f.call(
         "exec",

@@ -49,25 +49,18 @@ export function sigilSpec(id: string): SigilSpec {
   };
 }
 
-export function arcPath(
-  radius: number,
-  start: number,
-  sweep: number,
-  center = 12,
-): string {
-  const point = (degrees: number) => {
-    const radians = ((degrees - 90) * Math.PI) / 180;
-    return [
-      (center + radius * Math.cos(radians)).toFixed(3),
-      (center + radius * Math.sin(radians)).toFixed(3),
-    ].join(" ");
-  };
-  const end = start + Math.min(sweep, 359.9);
-  return `M ${point(start)} A ${radius} ${radius} 0 ${sweep > 180 ? 1 : 0} 1 ${point(end)}`;
-}
-
 export function sigilColor(hue: number, dark: boolean, alpha = 1): string {
   return dark
     ? `hsl(${hue} 62% 68% / ${alpha})`
     : `hsl(${hue} 48% 46% / ${alpha})`;
+}
+
+/** ChatGPT's messages wear their conversation's color, so a card shows which chat is speaking. */
+export function conversationTint(id: string, dark: boolean) {
+  const { hue } = sigilSpec(id);
+  return {
+    accent: sigilColor(hue, dark),
+    border: sigilColor(hue, dark, dark ? 0.42 : 0.36),
+    wash: sigilColor(hue, dark, dark ? 0.1 : 0.055),
+  };
 }

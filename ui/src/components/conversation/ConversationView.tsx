@@ -8,16 +8,25 @@ import {
   useRef,
   useState,
 } from "react";
-import type { SessionNote } from "../../../../src/session-notes-types";
+import type {
+  AgentMessage,
+  SessionNote,
+} from "../../../../src/session-notes-types";
 import { useLive } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
+import { apiFetch } from "../../lib/api";
 import {
   conversationState,
   RECENT_ACTIVITY_MS,
   UNSCOPED,
 } from "../../lib/conversation";
 import { dayKey, dayLabel } from "../../lib/format";
-import { feedback, plural, type Feedback } from "../../lib/locale";
+import {
+  feedback,
+  message as feedbackMessage,
+  plural,
+  type Feedback,
+} from "../../lib/locale";
 import type { Navigate } from "../../lib/router";
 import { useCalls } from "../../lib/use-calls";
 import { isTyping } from "../../lib/use-media";
@@ -25,16 +34,24 @@ import { useMessages } from "../../lib/use-messages";
 import { useNow } from "../../lib/use-now";
 import type { CallListItem } from "../../types";
 import { Button, Loading } from "../ui/Controls";
+import { AgentMessageEntry } from "./AgentMessageEntry";
 import { Composer, type DeliveryOutlook } from "./Composer";
 import { ConversationHeader, type TimelineFilter } from "./ConversationHeader";
 import { buildEntries, buildLinks, hoverKey, type Entry } from "./entries";
+import { MessageDock } from "./MessageDock";
 import { NoteEntry, type Flight } from "./NoteEntry";
 import { QuestionDock } from "./QuestionDock";
 import { QuestionEntry } from "./QuestionEntry";
 import { StepRow } from "./StepRow";
-import { AgentMessageEntry } from "./AgentMessageEntry";
 
 const BOTTOM_SLACK = 80;
+
+function flash(node: HTMLElement) {
+  node.scrollIntoView({ block: "center", behavior: "smooth" });
+  node.classList.remove("locate");
+  void node.offsetWidth;
+  node.classList.add("locate");
+}
 
 export function ConversationView({
   id,
@@ -62,6 +79,21 @@ export function ConversationView({
   });
   const messages = useMessages(unscoped ? undefined : id);
   const filtered = filter !== "all" || !!search;
+  // Dismissals show immediately; the next refresh brings the server's readAt.
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set());
+  const agentMessages = useMemo(
+    () =>
+      messages.agentMessages.map((item) =>
+        !item.readAt && dismissed.has(item.id)
+          ? { ...item, readAt: item.createdAt }
+          : item,
+      ),
+    [messages.agentMessages, dismissed],
+  );
+  const unread = useMemo(
+    () => agentMessages.filter((item) => !item.readAt),
+    [agentMessages],
+  );
 
   const entries = useMemo(
     () =>
@@ -70,15 +102,9 @@ export function ConversationView({
         messages.notes,
         messages.questions,
         !filtered,
-        messages.agentMessages,
+        agentMessages,
       ),
-    [
-      calls.items,
-      messages.notes,
-      messages.questions,
-      messages.agentMessages,
-      filtered,
-    ],
+    [calls.items, messages.notes, messages.questions, agentMessages, filtered],
   );
   const links = useMemo(
     () => buildLinks(calls.items.values(), messages.notes),
@@ -139,12 +165,25 @@ export function ConversationView({
   const locate = useCallback((callId: string) => {
     const node = document.getElementById(`call-${callId}`);
     if (!node) return;
-    node.scrollIntoView({ block: "center", behavior: "smooth" });
-    node.classList.remove("locate");
-    void node.offsetWidth;
-    node.classList.add("locate");
+    flash(node);
     setActive(callId);
   }, []);
+
+  const [seeking, setSeeking] = useState<string | null>(null);
+  const locateMessage = useCallback((target: AgentMessage) => {
+    const node = document.getElementById(`message-${target.id}`);
+    if (node) return flash(node);
+    setFilter("all");
+    setSearch("");
+    setSeeking(target.id);
+  }, []);
+  useEffect(() => {
+    if (!seeking) return;
+    const node = document.getElementById(`message-${seeking}`);
+    if (!node) return;
+    setSeeking(null);
+    flash(node);
+  }, [seeking, entries]);
 
   const scrollToBottom = useCallback((smooth: boolean) => {
     const node = scroller.current;
@@ -176,15 +215,18 @@ export function ConversationView({
     counted.current = count;
   }, [entries.length, loaded, focusCall, locate, scrollToBottom]);
 
-  // Growing rows (a running script, an expanded detail) keep a bottom-pinned view pinned.
+  // Growing rows (a running script, an expanded detail) and docks that change
+  // height keep a bottom-pinned view pinned.
   useEffect(() => {
     const node = content.current;
-    if (!node) return;
+    const viewport = scroller.current;
+    if (!node || !viewport) return;
     const observer = new ResizeObserver(() => {
-      if (atBottom.current && scroller.current && initialized.current)
-        scroller.current.scrollTop = scroller.current.scrollHeight;
+      if (atBottom.current && initialized.current)
+        viewport.scrollTop = viewport.scrollHeight;
     });
     observer.observe(node);
+    observer.observe(viewport);
     return () => observer.disconnect();
   }, []);
 
@@ -277,6 +319,30 @@ export function ConversationView({
     messages.refresh();
     live.refresh();
   }, [messages, live]);
+  const readMessages = useCallback(
+    async (ids: string[]) => {
+      setDismissed((previous) => new Set([...previous, ...ids]));
+      try {
+        await apiFetch(
+          `/api/sessions/${encodeURIComponent(id)}/messages/read`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids }),
+          },
+        );
+      } catch (error) {
+        setDismissed((previous) => {
+          const next = new Set(previous);
+          for (const item of ids) next.delete(item);
+          return next;
+        });
+        setToast(feedbackMessage("agentMessage.readFailed", String(error)));
+      }
+      changed();
+    },
+    [id, changed],
+  );
 
   let previousDay = 0;
 
@@ -389,6 +455,7 @@ export function ConversationView({
                       setDockFocus({ id: questionId, at: Date.now() })
                     }
                     onChanged={changed}
+                    onReadMessages={readMessages}
                   />
                 </Fragment>
               );
@@ -418,6 +485,15 @@ export function ConversationView({
             >
               {feedback(toast, t)}
             </p>
+          )}
+          {!unscoped && (
+            <MessageDock
+              sessionId={id}
+              messages={unread}
+              yieldToQuestion={messages.pendingQuestions > 0}
+              onRead={(ids) => void readMessages(ids)}
+              onLocate={locateMessage}
+            />
           )}
           {!unscoped && (
             <QuestionDock
@@ -453,6 +529,7 @@ function EntryView({
   onLanded,
   onAnswer,
   onChanged,
+  onReadMessages,
 }: {
   entry: Entry;
   sessionId: string;
@@ -469,16 +546,15 @@ function EntryView({
   onLanded(id: string): void;
   onAnswer(id: string): void;
   onChanged(): void;
+  onReadMessages(ids: string[]): Promise<void>;
 }) {
+  const read = (ids: string[]) => void onReadMessages(ids);
   if (entry.kind === "agent")
     return (
       <AgentMessageEntry
         message={entry.message}
-        onLocate={
-          entry.message.callId && calls.has(entry.message.callId)
-            ? onLocate
-            : undefined
-        }
+        sessionId={sessionId}
+        onRead={read}
       />
     );
   if (entry.kind === "call") {
@@ -497,10 +573,20 @@ function EntryView({
           continuations={links.continuations.get(call.id)}
           carried={carried}
           asked={entry.questions.length}
+          messaged={entry.messages.length}
           onToggle={onToggle}
           onHover={onHover}
           onLocate={onLocate}
         />
+        {entry.messages.map((item) => (
+          <AgentMessageEntry
+            key={item.id}
+            attached
+            message={item}
+            sessionId={sessionId}
+            onRead={read}
+          />
+        ))}
         {entry.questions.map((question) => {
           const answerNote = question.answer
             ? notesById.get(question.answer.noteId)

@@ -1,7 +1,14 @@
 import { useMemo, type CSSProperties } from "react";
+import {
+  arcPath,
+  BRAND_CORE,
+  BRAND_RINGS,
+  BRAND_STROKE,
+  BRAND_TILE,
+} from "../../../../src/brand-mark";
 import { useTheme } from "../../context/ThemeContext";
 import { UNSCOPED } from "../../lib/conversation";
-import { arcPath, sigilColor, sigilSpec } from "../../lib/sigil";
+import { sigilColor, sigilSpec } from "../../lib/sigil";
 
 const OPACITY = [0.5, 0.75, 1];
 
@@ -83,13 +90,9 @@ export function Sigil({
   );
 }
 
-const BRAND = [
-  { radius: 3.4, start: 200, sweep: 250 },
-  { radius: 6.2, start: 20, sweep: 210 },
-  { radius: 9, start: 120, sweep: 170 },
-];
-
+/** The MCP icon's geometry in theme colors, so the tile inverts in dark mode. */
 export function BrandMark({ size = 20 }: { size?: number }) {
+  const inset = BRAND_TILE.inset;
   return (
     <svg
       viewBox="0 0 24 24"
@@ -98,19 +101,26 @@ export function BrandMark({ size = 20 }: { size?: number }) {
       className="shrink-0"
       aria-hidden="true"
     >
-      <rect x="0.5" y="0.5" width="23" height="23" rx="6" fill="var(--ink)" />
-      {BRAND.map((ring, index) => (
+      <rect
+        x={inset}
+        y={inset}
+        width={24 - 2 * inset}
+        height={24 - 2 * inset}
+        rx={BRAND_TILE.radius}
+        fill="var(--ink)"
+      />
+      {BRAND_RINGS.map((ring, index) => (
         <path
           key={index}
           d={arcPath(ring.radius, ring.start, ring.sweep)}
           fill="none"
           stroke="var(--bg)"
-          strokeOpacity={[0.62, 0.82, 1][index]}
-          strokeWidth="2.1"
+          strokeOpacity={ring.opacity}
+          strokeWidth={BRAND_STROKE}
           strokeLinecap="round"
         />
       ))}
-      <circle cx="12" cy="12" r="1.3" fill="var(--bg)" />
+      <circle cx="12" cy="12" r={BRAND_CORE} fill="var(--bg)" />
     </svg>
   );
 }

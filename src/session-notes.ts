@@ -241,6 +241,20 @@ export class SessionNotes {
     return { accepted: true };
   }
 
+  /** Dismissal is Web-only state and never reaches the model. */
+  readMessages(id: string, ids: readonly string[]): void {
+    const c = this.require(id);
+    const wanted = new Set(ids);
+    const readAt = new Date(this.now()).toISOString();
+    let changed = false;
+    for (const message of c.messages)
+      if (wanted.has(message.id) && !message.readAt) {
+        message.readAt = readAt;
+        changed = true;
+      }
+    if (changed) this.emit(id);
+  }
+
   ask(
     id: string | undefined,
     raw: RequestUserInput,
@@ -413,15 +427,22 @@ export class SessionNotes {
     const current = Math.max(1, Math.min(page, totalPages));
     const end = Math.max(0, c.notes.length - (current - 1) * 30);
     const messageEnd = Math.max(0, c.messages.length - (current - 1) * 30);
+    const messageStart = Math.max(0, messageEnd - 30);
+    // The first page carries every unread message so none stays unseen behind paging.
+    const olderUnread =
+      current === 1
+        ? c.messages.slice(0, messageStart).filter((m) => !m.readAt)
+        : [];
     return {
       sessionId: id,
       label: c.label,
       pendingCount: pendingCount(c),
       pendingQuestions: pendingQuestions(c),
       items: c.notes.slice(Math.max(0, end - 30), end).map((n) => ({ ...n })),
-      agentMessages: c.messages
-        .slice(Math.max(0, messageEnd - 30), messageEnd)
-        .map((m) => ({ ...m })),
+      agentMessages: [
+        ...olderUnread,
+        ...c.messages.slice(messageStart, messageEnd),
+      ].map((m) => ({ ...m })),
       page: current,
       totalPages,
       maxMessageBytes: NOTE_MAX_BYTES,
@@ -444,6 +465,7 @@ export class SessionNotes {
     );
     for (const c of this.conversations.values()) {
       const previous = merged.get(c.id);
+      const unread = c.messages.filter((message) => !message.readAt);
       merged.set(c.id, {
         ...(previous ?? {
           id: c.id,
@@ -462,6 +484,8 @@ export class SessionNotes {
             .flatMap((r) => r.questions)
             .find((q) => questionPending(c, q))
             ?.title.slice(0, 240) ?? "",
+        unreadMessages: unread.length,
+        messagePreview: unread.at(-1)?.text.slice(0, 240) ?? "",
         canMessage: true,
       });
     }

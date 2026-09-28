@@ -20,6 +20,8 @@ export interface AgentMessage {
   text: string;
   createdAt: string;
   callId?: string;
+  /** Set when the operator dismisses it in the Web UI; the model is never told. */
+  readAt?: string;
 }
 
 export interface SessionNote {

@@ -7,7 +7,7 @@ import {
   type SessionNotesEvent,
 } from "../src/session-notes-types.js";
 import { buildEntries } from "../ui/src/components/conversation/entries.js";
-import { nestedPreview } from "../src/web/call-summary.js";
+import { callListItem, nestedPreview } from "../src/web/call-summary.js";
 import { describeStep, stepKind } from "../ui/src/lib/steps.js";
 import { createTranslator } from "../ui/src/lib/locale.js";
 
@@ -99,6 +99,44 @@ describe("agent messages in the conversation timeline", () => {
     expect(rows.items[0]!.id).toBe("a");
   });
 
+  it("keeps messages unread until the operator dismisses them in the Web UI", () => {
+    let now = 1000;
+    const notes = new SessionNotes(undefined, () => now);
+    const events: SessionNotesEvent[] = [];
+    notes.openWeb((event) => events.push(event));
+    notes.sendMessage("a", { message: "first" });
+    now += 1000;
+    notes.sendMessage("a", { message: "second\nwith detail" });
+    const [first, second] = notes.page("a").agentMessages;
+    expect(
+      notes.sessions([], { page: 1, pageSize: 10 }).items[0],
+    ).toMatchObject({
+      id: "a",
+      unreadMessages: 2,
+      messagePreview: "second\nwith detail",
+    });
+    events.length = 0;
+    now += 1000;
+    notes.readMessages("a", [second!.id, "unknown"]);
+    expect(events).toEqual([{ type: "session:notes", sessionId: "a" }]);
+    expect(notes.page("a").agentMessages.map((m) => m.readAt)).toEqual([
+      undefined,
+      new Date(now).toISOString(),
+    ]);
+    expect(
+      notes.sessions([], { page: 1, pageSize: 10 }).items[0],
+    ).toMatchObject({ unreadMessages: 1, messagePreview: "first" });
+    notes.readMessages("a", [second!.id]);
+    expect(events).toHaveLength(1);
+    notes.readMessages("a", [first!.id]);
+    expect(
+      notes.sessions([], { page: 1, pageSize: 10 }).items[0],
+    ).toMatchObject({ unreadMessages: 0, messagePreview: "" });
+    const result = { content: [], structuredContent: { output: "normal" } };
+    expect(notes.attach(result, "a", "later")).toBe(result);
+    expect(() => notes.readMessages("missing", [first!.id])).toThrow();
+  });
+
   it("paginates messages independently of user replies and merges them chronologically", () => {
     let now = 1000;
     const notes = new SessionNotes(undefined, () => now++);
@@ -106,11 +144,23 @@ describe("agent messages in the conversation timeline", () => {
     for (let i = 0; i < 65; i++)
       notes.sendMessage("a", { message: `message ${i}` });
     notes.enqueue("a", "reply", "human reply");
+    const unread = notes.page("a").agentMessages;
+    expect(unread).toHaveLength(65);
+    notes.readMessages(
+      "a",
+      unread.filter((m) => m.text !== "message 3").map((m) => m.id),
+    );
     const pages = [1, 2, 3].map((p) => notes.page("a", p));
-    expect(pages.map((p) => p.agentMessages.length)).toEqual([30, 30, 5]);
+    // The first page also carries older unread messages.
+    expect(pages.map((p) => p.agentMessages.length)).toEqual([31, 30, 5]);
+    expect(pages[0]!.agentMessages[0]!.text).toBe("message 3");
     expect(pages[0]!.totalPages).toBe(3);
-    const messages = pages.flatMap((p) => p.agentMessages);
-    expect(new Set(messages.map((m) => m.id)).size).toBe(65);
+    const messages = [
+      ...new Map(
+        pages.flatMap((p) => p.agentMessages).map((m) => [m.id, m]),
+      ).values(),
+    ];
+    expect(messages).toHaveLength(65);
     const entries = buildEntries([], pages[0]!.items, [], true, messages);
     expect(entries[0]).toMatchObject({
       kind: "agent",
@@ -129,5 +179,32 @@ describe("agent messages in the conversation timeline", () => {
     expect(
       describeStep({ name, preview: "Update" }, createTranslator("en")),
     ).toEqual({ verb: "Sent you a message", subject: "Update" });
+  });
+
+  it("shows a message under the call that sent it, or on its own when that call is not loaded", () => {
+    const sender = callListItem({
+      id: "call_1",
+      sessionId: "a",
+      tool: "exec",
+      status: "running",
+      startedAt: "2026-09-28T10:00:00.000Z",
+      args: {},
+      subcalls: [],
+    });
+    const message = (id: string, callId: string, createdAt: string) => ({
+      id,
+      text: id,
+      callId,
+      createdAt,
+    });
+    const entries = buildEntries([sender], [], [], true, [
+      message("attached", "call_1", "2026-09-28T10:00:02.000Z"),
+      message("orphan", "call_0", "2026-09-28T09:59:00.000Z"),
+    ]);
+    expect(entries.map((entry) => entry.kind)).toEqual(["agent", "call"]);
+    expect(entries[1]).toMatchObject({
+      kind: "call",
+      messages: [{ id: "attached" }],
+    });
   });
 });

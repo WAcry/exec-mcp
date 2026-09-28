@@ -122,6 +122,16 @@ export function formatBytes(bytes: number, locale: Locale): string {
   })} ${units[unit]}`;
 }
 
+/** One-line previews of agent messages drop the Markdown markers MessageText renders. */
+export function plainMessage(text: string): string {
+  return text
+    .replace(/```[^\n]*\n?/g, "")
+    .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function shortId(id: string, length = 6): string {
   return id.length > length ? id.slice(0, length) : id;
 }

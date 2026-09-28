@@ -516,6 +516,30 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
     throw new HttpError(405, "此问题操作不支持该请求方法。");
   }
 
+  const readRoute = /^\/api\/sessions\/([^/]+)\/messages\/read$/.exec(pathname);
+  if (readRoute) {
+    if (req.method !== "POST")
+      throw new HttpError(405, "此消息操作不支持该请求方法。");
+    let id: string;
+    try {
+      id = decodeURIComponent(readRoute[1]!);
+    } catch {
+      throw new HttpError(400, "会话 ID 无效。");
+    }
+    const body = await readJsonBody(req);
+    const ids =
+      body && typeof body === "object" && "ids" in body ? body.ids : undefined;
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 200 ||
+      !ids.every((value) => typeof value === "string" && value.length <= 100)
+    )
+      throw new HttpError(400, "需要提交最多 200 个消息 ID。");
+    runtime.notes.readMessages(id, ids);
+    jsonResponse(res, 200, { success: true });
+    return;
+  }
+
   const noteRoute = /^\/api\/sessions\/([^/]+)(?:\/notes(?:\/([^/]+))?)?$/.exec(
     pathname,
   );

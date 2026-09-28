@@ -11,9 +11,10 @@ The interface is mainly observational, with actions such as clearing audit histo
 Top-level calls show exec/wait; local and downstream operations use their actual method names in the nested-call view.
 
 Operators come to see what ChatGPT is doing on the machine, so conversations are the primary object. Each opens as one chronological timeline
-of its calls, the operator's messages, and the agent's questions, with a message composer always at the bottom. Answers render under the call that asked,
+of its calls, the operator's messages, and the agent's questions and messages, with a message composer always at the bottom. Answers and agent messages render under the call that sent them,
 waits link to the script they resume, and delivered messages link to the call whose response carried them.
-The list puts conversations waiting for an answer first, then those inside a call, then recency. All activity, processes, tools, files, and settings are secondary pages.
+The list puts conversations waiting for an answer first, then those with unread agent messages, then those inside a call, then recency.
+All activity, processes, tools, files, and settings are secondary pages.
 Routes live in the URL fragment so conversations and calls can be linked and back navigation works; the sign-in token fragment stays separate.
 
 Timeline rows read as actions, such as ran a command, edited files, or asked a question, rather than raw script text.
@@ -31,15 +32,17 @@ CI checks frontend types, production builds, and isolated tarball installation.
 ## Visual language
 
 The console is an operational surface that people scan for long periods. Hierarchy comes from size, weight, and spacing.
-Surfaces are flat with hairline borders and a small radius scale. Only floating layers, such as the question dock, the composer, and menus, cast a restrained shadow.
-Neutral grays and ink carry the interface, and color marks state: green for success or a live connection, blue for work in progress,
+Surfaces are flat with hairline borders and a small radius scale. Only floating layers, such as the docks above the composer, the composer, menus, and toasts, cast a restrained shadow.
+Neutral grays and ink carry the interface, and color marks state: green for success or a live connection, blue for work in progress and unread agent messages,
 amber for something that needs the operator, such as a pending question or memory pressure, and red for failures. Idle and terminated states stay neutral.
 The operator's own messages are inverted ink bubbles, so they read as the operator's voice beside the agent's steps.
 Diffs keep the conventional green and red line tints because that is how people read them.
 
 Each conversation has a deterministic sigil of three orbits derived from its hash, with hues kept away from the state colors.
 The same mark appears in the list, header, activity rows, and process owners, and it rotates only while that conversation is inside a tool call.
-The brand mark and favicon use the same motif, and the favicon gains an amber dot while a question waits, so a background tab still signals it.
+Agent messages take their conversation's hue, so a card or toast shows which conversation is speaking.
+The brand mark, favicon, and MCP server icon share one geometry defined in code. The favicon gains an amber dot while a question waits
+and a blue dot for an unread message, so a background tab still signals it.
 Motion only describes a change: new rows rise in, details open to their real height, reordered conversations glide to their new position,
 and a sent message rises from the composer into the timeline. prefers-reduced-motion turns these effects off.
 

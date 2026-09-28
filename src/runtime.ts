@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import {
   McpServer,
   ResourceTemplate,
+  SERVER_INFO_META_KEY,
   type ServerContext,
   type ResourceLink,
 } from "@modelcontextprotocol/server";
@@ -28,6 +29,7 @@ import { viewImage } from "./host/image.js";
 import { toolError } from "./results.js";
 import { resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
+import { brandIcons } from "./brand-icon.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import type { HostFile } from "./files/contracts.js";
 import { listSkills } from "./skills/index.js";
@@ -67,6 +69,18 @@ function subcallFailed(result: unknown): boolean {
     value.success === false ||
     (typeof value.exit_code === "number" && value.exit_code !== 0)
   );
+}
+
+const IDENTITY = { name: "exec-mcp", title: "Exec MCP", version: VERSION };
+
+/** 2026-era results repeat serverInfo, icons included, unless the result already names its server. */
+function identify<T extends { _meta?: Record<string, unknown> | undefined }>(
+  result: T,
+): T {
+  return {
+    ...result,
+    _meta: { ...result._meta, [SERVER_INFO_META_KEY]: IDENTITY },
+  };
 }
 interface NativeContext {
   callId: string;
@@ -273,7 +287,7 @@ export class ExecRuntime {
   }
   server(): McpServer {
     const server = new McpServer(
-      { name: "exec-mcp", title: "Exec MCP", version: VERSION },
+      { ...IDENTITY, icons: brandIcons() },
       {
         instructions:
           "Exec MCP connects ChatGPT to one specific remote machine operated by the user. exec runs source with this machine's ALL_TOOLS catalog and tools bindings; wait resumes running cells. Tool responses may include additional user messages or answers from this conversation's Web UI (user_notes or a labeled text block), in submission order, received through normal calls.",
@@ -440,7 +454,7 @@ export class ExecRuntime {
                   : "completed",
             output: result,
           });
-          return result;
+          return identify(result);
         } catch (error) {
           const result = toolError(error);
           result.content.push(...takeAttachments());
@@ -455,7 +469,7 @@ export class ExecRuntime {
             error: error instanceof Error ? error.message : String(error),
             output: response,
           });
-          return response;
+          return identify(response);
         }
       },
     );
@@ -525,7 +539,7 @@ export class ExecRuntime {
                   : "completed",
             output: result,
           });
-          return result;
+          return identify(result);
         } catch (error) {
           const result = this.notes.attach(
             boundModelOutput(toolError(error)),
@@ -538,7 +552,7 @@ export class ExecRuntime {
             error: error instanceof Error ? error.message : String(error),
             output: result,
           });
-          return result;
+          return identify(result);
         }
       },
     );

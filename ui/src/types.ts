@@ -137,4 +137,5 @@ export type LiveEvent =
       type: "session:notes";
       sessionId: string;
       questionRequest?: { id: string; count: number };
+      agentMessage?: { id: string };
     };

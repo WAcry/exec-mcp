@@ -337,7 +337,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       additionalProperties: false,
     },
     description:
-      "Send a concise question or update to this conversation's Web UI during ongoing work, including blockers, findings that may change direction, or answers to user questions and status requests. Returns accepted immediately without ending the turn or waiting for a reply. The user can reply through the Web composer; replies arrive as user notes on subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
+      "Send a concise message that needs the user's attention during ongoing work. The message appears in this conversation's Web UI, and the tool returns immediately without ending the turn or waiting for a reply. Use this tool to report a critical blocker or a finding that may change the task's direction, or to answer a user question or status request received while work is still in progress. Use this tool when a message needs the user's immediate attention; use commentary for routine progress and intermediate context. It informs rather than asks: do not expect a reply, and use request_user_input_async when you need an answer. Requires a running Web server and a host-provided conversation ID.",
   },
   {
     name: "list_mcp_resources",

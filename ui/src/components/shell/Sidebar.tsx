@@ -28,7 +28,7 @@ import {
   sortConversations,
   UNSCOPED,
 } from "../../lib/conversation";
-import { listTime, shortId } from "../../lib/format";
+import { listTime, plainMessage, shortId } from "../../lib/format";
 import { plural } from "../../lib/locale";
 import { routeHref, type Navigate, type Route } from "../../lib/router";
 import { describeStep } from "../../lib/steps";
@@ -68,6 +68,7 @@ export function Sidebar({
           item.label,
           item.lastCall?.preview,
           item.lastCall?.step?.preview,
+          item.messagePreview,
         ]
           .filter(Boolean)
           .some((value) => value!.toLowerCase().includes(q)),
@@ -339,6 +340,10 @@ function ConversationRow({
             <span className="min-w-0 truncate text-warn">
               {t("sidebar.asking", summary.questionPreview ?? "")}
             </span>
+          ) : state.state === "message" ? (
+            <span className="min-w-0 truncate font-medium text-ink">
+              {t("sidebar.message", plainMessage(summary.messagePreview ?? ""))}
+            </span>
           ) : state.working ? (
             <>
               <Spinner size={10} className="text-run" />
@@ -381,6 +386,19 @@ function ConversationRow({
                 )}
               >
                 {state.questions}
+              </span>
+            )}
+            {!!state.unread && (
+              <span
+                className="flex h-4 min-w-4 items-center justify-center rounded-full bg-run px-1 tabular text-[10px] font-semibold text-surface"
+                title={plural(
+                  t,
+                  state.unread,
+                  "sidebar.messageUnread",
+                  "sidebar.messagesUnread",
+                )}
+              >
+                {state.unread}
               </span>
             )}
           </span>

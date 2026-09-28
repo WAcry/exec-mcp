@@ -2,7 +2,7 @@
 
 English | [简体中文](002-tool-discovery.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-09-28.
 
 ## Entry points and contract sources
 
@@ -22,6 +22,14 @@ We describe these boundaries without hardcoding a connector alias or changing th
 tool_search and the BM25 index have been removed, with no replacement schema/read/call API or discovery handshake.
 This drops built-in relevance ranking and synonym recall in exchange for fewer interfaces and consistent catalog and invocation behavior.
 The Web downstream view filters its current catalog and shows full contracts and connection errors without executing search probes.
+
+## Server identity
+
+serverInfo carries a generated icon: 64 and 256 px PNGs, which MCP clients must support, and an SVG for clients that scale it.
+All three are data URIs, so the icon needs neither a public asset URL nor an authentication exception.
+Code draws it from the same geometry as the Web brand mark and favicon, without binary assets. Tools carry no icons; clients fall back to the server's.
+Protocol revision 2026-07-28 repeats serverInfo in every result's _meta, which would add about 14 KB to each exec and wait response.
+Those results name the server themselves without the icon, which the SDK prefers over its own copy. initialize, server/discover, and listings keep the icon.
 
 ## Startup and catalog updates
 
@@ -92,6 +100,7 @@ Codex Code Mode Only uses ALL_TOOLS; other model modes may still expose search t
 | Outer budgets and a 110-second wait | Fits the target connector while retaining nested values for JS processing under ADR-003. |
 | Shell overrides, EOF/resize/terminate, and zero wait | Preserves supported process operations and per-call overrides of configured defaults. |
 | Native MCP image/file blocks, Skills, and Web questions | Fits ChatGPT file and message delivery and provides independent Skill discovery; notify injection is not connected. |
+| Agent messages promise no reply and send questions to request_user_input_async | exec-mcp cannot start a ChatGPT turn, so a promised reply never arrives; see [ADR-010](010-session-notes.md#agent-messages). |
 | Direct resource URI reads and aggregate errors | Supports templates and links while retaining partial-failure information. |
 
 Use upstream wording where the meaning matches and explain actual environment differences.

@@ -4,10 +4,32 @@ export const messages = {
     en: "Message from ChatGPT",
     zh: "ChatGPT 发来的消息",
   },
-  "agentMessage.reply": { en: "Reply", zh: "回复" },
-  "agentMessage.source": { en: "View sending step", zh: "查看发送步骤" },
+  "agentMessage.sent": { en: "sent you a message", zh: "给你发来消息" },
+  "agentMessage.unread": { en: "Unread", zh: "未读" },
+  "agentMessage.unreadOne": { en: "1 unread", zh: "1 条未读" },
+  "agentMessage.unreadMany": { en: "{0} unread", zh: "{0} 条未读" },
+  "agentMessage.copy": { en: "Copy message", zh: "复制消息" },
+  "agentMessage.dismiss": { en: "Got it", zh: "知道了" },
+  "agentMessage.dismissAll": { en: "Dismiss all", zh: "全部知道了" },
+  "agentMessage.dock": {
+    en: "Unread messages from ChatGPT",
+    zh: "ChatGPT 的未读消息",
+  },
+  "agentMessage.newer": { en: "Newer message", zh: "较新的消息" },
+  "agentMessage.older": { en: "Older message", zh: "较早的消息" },
+  "agentMessage.collapse": { en: "Collapse", zh: "收起" },
+  "agentMessage.locate": { en: "Show in timeline", zh: "在时间线中查看" },
+  "agentMessage.view": { en: "View", zh: "查看" },
+  "agentMessage.readFailed": {
+    en: "Could not mark the message as read: {0}",
+    zh: "无法将消息标为已读：{0}",
+  },
   "timeline.earlierMessages": { en: "Earlier messages", zh: "更早的消息" },
-  "step.messaged": { en: "Sent you a message", zh: "给你发了消息" },
+  "step.messaged": { en: "Sent you a message", zh: "给你发了一条消息" },
+  "step.messagedMany": {
+    en: "Sent you {0} messages",
+    zh: "给你发了 {0} 条消息",
+  },
   "live.message": { en: "Sending you a message", zh: "正在给你发消息" },
   "notification.newMessage": {
     en: "Conversation {0} has a new message from ChatGPT. Click to view.",
@@ -16,6 +38,12 @@ export const messages = {
   "notification.messageTitle": {
     en: "EXEC MCP · Message",
     zh: "EXEC MCP · 新消息",
+  },
+  "sidebar.message": { en: "Says: {0}", zh: "消息：{0}" },
+  "sidebar.messageUnread": { en: "1 unread message", zh: "1 条未读消息" },
+  "sidebar.messagesUnread": {
+    en: "{0} unread messages",
+    zh: "{0} 条未读消息",
   },
   "app.title": { en: "EXEC MCP Console", zh: "EXEC MCP 控制台" },
   "app.checkingAuth": {

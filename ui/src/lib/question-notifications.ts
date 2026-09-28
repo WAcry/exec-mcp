@@ -14,7 +14,7 @@ export type QuestionNotificationState =
   | "paused"
   | "error";
 
-/** Page-bound notification delivery; never polls questions or alters their answers. */
+/** Page-bound notifications for questions and agent messages. Shares the existing preference and deduplication history. */
 export class QuestionNotifications {
   private paused = false;
   private failed = false;
@@ -85,7 +85,7 @@ export class QuestionNotifications {
   }
 
   async receive(event: SessionNotesEvent): Promise<void> {
-    const request = event.questionRequest;
+    const request = event.questionRequest ?? event.agentMessage;
     if (
       this.closed ||
       event.type !== "session:notes" ||
@@ -103,9 +103,18 @@ export class QuestionNotifications {
       const shortId = `${event.sessionId.slice(0, 8)}…${event.sessionId.slice(-4)}`;
       if (
         !this.show(
-          this.t("notification.newQuestions", shortId, request.count),
-          `exec-mcp-question-${request.id}`,
+          event.questionRequest
+            ? this.t(
+                "notification.newQuestions",
+                shortId,
+                event.questionRequest.count,
+              )
+            : this.t("notification.newMessage", shortId),
+          `exec-mcp-${event.questionRequest ? "question" : "message"}-${request.id}`,
           event.sessionId,
+          event.questionRequest
+            ? this.t("notification.title")
+            : this.t("notification.messageTitle"),
         )
       )
         return;
@@ -149,15 +158,17 @@ export class QuestionNotifications {
       }
   }
 
-  private show(body: string, tag: string, sessionId?: string): boolean {
+  private show(
+    body: string,
+    tag: string,
+    sessionId?: string,
+    title = this.t("notification.title"),
+  ): boolean {
     try {
-      const notification = new window.Notification(
-        this.t("notification.title"),
-        {
-          body,
-          tag,
-        },
-      );
+      const notification = new window.Notification(title, {
+        body,
+        tag,
+      });
       this.active.add(notification);
       if (this.active.size > 32) {
         const oldest = this.active.values().next().value!;

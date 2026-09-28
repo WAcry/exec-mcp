@@ -11,6 +11,15 @@ export interface SessionNotesEvent {
   type: "session:notes";
   sessionId: string;
   questionRequest?: { id: string; count: number };
+  agentMessage?: { id: string };
+}
+
+/** Agent-authored text for the Web timeline, never enqueued as user input. */
+export interface AgentMessage {
+  id: string;
+  text: string;
+  createdAt: string;
+  callId?: string;
 }
 
 export interface SessionNote {
@@ -30,6 +39,7 @@ export interface SessionNotesPage {
   pendingCount: number;
   pendingQuestions: number;
   items: SessionNote[];
+  agentMessages: AgentMessage[];
   page: number;
   totalPages: number;
   maxMessageBytes: number;

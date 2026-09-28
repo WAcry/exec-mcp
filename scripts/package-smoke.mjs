@@ -304,7 +304,9 @@ enabled = true
   const uiBundleResponse = await fetch(new URL(uiScript, started.web));
   assert.equal(uiBundleResponse.status, 200);
   const uiBundle = await uiBundleResponse.text();
-  assert.ok(uiBundle.includes("Interface language"));
+  assert.ok(
+    uiBundle.includes("Auto follows your browser. Changes apply immediately."),
+  );
   assert.ok(uiBundle.includes("界面语言"));
   const webStatus = await fetch(new URL("/api/status", started.web));
   assert.equal(webStatus.status, 200);
@@ -531,6 +533,13 @@ enabled = true
     ),
     { create: "function", read: "undefined" },
   );
+  const sentMessage = await scopedCall(
+    'text(await tools.send_message_to_user_async({message:"PACKAGED_AGENT_MESSAGE"}));',
+  );
+  assert.deepEqual(valueOf(sentMessage), { accepted: true });
+  const messagePage = await (await fetch(notesUrl)).json();
+  assert.equal(messagePage.agentMessages[0].text, "PACKAGED_AGENT_MESSAGE");
+  assert.equal(messagePage.pendingCount, 0);
   const asked = await scopedCall(
     'text(await tools.request_user_input_async({questions:[{title:"Which packaged mode?",options:["Safe","Fast"]}]}));',
   );

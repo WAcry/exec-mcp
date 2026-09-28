@@ -3,6 +3,10 @@ import { MAX_PAYLOAD_BYTES } from "./limits.js";
 import { normalizeResult } from "./results.js";
 import { randomHandle } from "./util.js";
 import {
+  SEND_MESSAGE_TO_USER_SCHEMA,
+  type SendMessageToUser,
+} from "./agent-messages.js";
+import {
   REQUEST_USER_INPUT_SCHEMA,
   QUESTION_ANSWER_SCHEMA,
   type RequestUserInput,
@@ -22,6 +26,7 @@ import {
   NOTES_RESPONSE_BYTES,
   USER_NOTE_TEXT_PREFIX,
   type SessionNote,
+  type AgentMessage,
   type SessionNotesEvent,
   type SessionNotesPage,
 } from "./session-notes-types.js";
@@ -34,6 +39,7 @@ interface Conversation {
   sequence: number;
   notes: SessionNote[];
   requests: UserQuestionRequest[];
+  messages: AgentMessage[];
 }
 
 export class SessionNoteError extends Error {
@@ -60,7 +66,7 @@ export function modelTextBytes(result: CallToolResult): number {
 }
 
 const profileBytes = (c: Conversation) => 1024 + c.label.length * 2;
-const noteBytes = (n: SessionNote) =>
+const noteBytes = (n: Pick<SessionNote, "text">) =>
   1024 + n.text.length * 2 + Buffer.byteLength(n.text);
 const pendingCount = (c: Conversation) =>
   c.notes.filter((n) => n.status === "pending").length;
@@ -126,6 +132,7 @@ export class SessionNotes {
       sequence: 0,
       notes: [],
       requests: [],
+      messages: [],
     });
     this.bytes += 1024;
   }
@@ -201,6 +208,37 @@ export class SessionNotes {
     conversation.touched = this.now();
     this.bytes += noteBytes(note);
     return { ...note };
+  }
+
+  sendMessage(
+    id: string | undefined,
+    raw: SendMessageToUser,
+    callId?: string,
+  ): { accepted: true } {
+    if (!this.webUsers)
+      throw new SessionNoteError(503, "异步消息需要已启动的 Web 控制台。");
+    if (!id)
+      throw new SessionNoteError(400, "宿主未提供对话标识，无法确定消息归属。");
+    const { message } = SEND_MESSAGE_TO_USER_SCHEMA.parse(raw);
+    if (Buffer.byteLength(message) > NOTE_MAX_BYTES)
+      throw new SessionNoteError(
+        413,
+        `消息最多 ${NOTE_MAX_BYTES} UTF-8 字节。`,
+      );
+    this.observe(id);
+    const c = this.require(id);
+    const entry: AgentMessage = {
+      id: randomHandle("msg"),
+      text: message,
+      createdAt: new Date(this.now()).toISOString(),
+      ...(callId && callId !== "audit-disabled" ? { callId } : {}),
+    };
+    this.admit(noteBytes(entry));
+    c.messages.push(entry);
+    c.touched = this.now();
+    this.bytes += noteBytes(entry);
+    this.emit(id, undefined, { id: entry.id });
+    return { accepted: true };
   }
 
   ask(
@@ -344,16 +382,7 @@ export class SessionNotes {
       ),
     };
     const delta = requestBytes(replacement) - requestBytes(request);
-    this.admit(
-      delta +
-        noteBytes({
-          id: noteId,
-          sequence: c.sequence + 1,
-          text,
-          createdAt: answeredAt,
-          status: "pending",
-        }),
-    );
+    this.admit(delta + noteBytes({ text }));
     const note = this.insertNote(c, noteId, text, questionId);
     question.answer = answer;
     request.touched = replacement.touched;
@@ -377,15 +406,22 @@ export class SessionNotes {
 
   page(id: string, page = 1): SessionNotesPage {
     const c = this.require(id);
-    const totalPages = Math.max(1, Math.ceil(c.notes.length / 30));
+    const totalPages = Math.max(
+      1,
+      Math.ceil(Math.max(c.notes.length, c.messages.length) / 30),
+    );
     const current = Math.max(1, Math.min(page, totalPages));
     const end = Math.max(0, c.notes.length - (current - 1) * 30);
+    const messageEnd = Math.max(0, c.messages.length - (current - 1) * 30);
     return {
       sessionId: id,
       label: c.label,
       pendingCount: pendingCount(c),
       pendingQuestions: pendingQuestions(c),
       items: c.notes.slice(Math.max(0, end - 30), end).map((n) => ({ ...n })),
+      agentMessages: c.messages
+        .slice(Math.max(0, messageEnd - 30), messageEnd)
+        .map((m) => ({ ...m })),
       page: current,
       totalPages,
       maxMessageBytes: NOTE_MAX_BYTES,
@@ -551,7 +587,17 @@ export class SessionNotes {
         this.bytes -= requestBytes(request);
         return false;
       });
-      if (!c.notes.length && !c.requests.length && c.touched <= deadline) {
+      c.messages = c.messages.filter((message) => {
+        if (Date.parse(message.createdAt) > deadline) return true;
+        this.bytes -= noteBytes(message);
+        return false;
+      });
+      if (
+        !c.notes.length &&
+        !c.requests.length &&
+        !c.messages.length &&
+        c.touched <= deadline
+      ) {
         this.bytes -= profileBytes(c);
         this.conversations.delete(id);
       }
@@ -561,6 +607,7 @@ export class SessionNotes {
   private emit(
     id: string,
     questionRequest?: SessionNotesEvent["questionRequest"],
+    agentMessage?: SessionNotesEvent["agentMessage"],
   ): void {
     for (const listener of this.listeners) {
       try {
@@ -568,6 +615,7 @@ export class SessionNotes {
           type: "session:notes",
           sessionId: id,
           ...(questionRequest ? { questionRequest } : {}),
+          ...(agentMessage ? { agentMessage } : {}),
         });
       } catch {
         /* Observers never change delivery. */

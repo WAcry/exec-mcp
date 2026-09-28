@@ -32,6 +32,7 @@ import { NoteEntry, type Flight } from "./NoteEntry";
 import { QuestionDock } from "./QuestionDock";
 import { QuestionEntry } from "./QuestionEntry";
 import { StepRow } from "./StepRow";
+import { AgentMessageEntry } from "./AgentMessageEntry";
 
 const BOTTOM_SLACK = 80;
 
@@ -69,8 +70,15 @@ export function ConversationView({
         messages.notes,
         messages.questions,
         !filtered,
+        messages.agentMessages,
       ),
-    [calls.items, messages.notes, messages.questions, filtered],
+    [
+      calls.items,
+      messages.notes,
+      messages.questions,
+      messages.agentMessages,
+      filtered,
+    ],
   );
   const links = useMemo(
     () => buildLinks(calls.items.values(), messages.notes),
@@ -311,7 +319,7 @@ export function ConversationView({
               className="pointer-events-none absolute top-6 bottom-10 left-[82px] w-px bg-line sm:left-[90px]"
             />
           )}
-          {calls.hasEarlier && (
+          {(calls.hasEarlier || (!filtered && messages.hasEarlierNotes)) && (
             <div className="flex justify-center pb-2">
               <Button
                 size="sm"
@@ -319,18 +327,20 @@ export function ConversationView({
                 disabled={calls.loadingEarlier}
                 onClick={() => {
                   prepend.current = scroller.current?.scrollHeight ?? 0;
-                  void calls.loadEarlier();
-                  messages.loadEarlierNotes();
+                  if (calls.hasEarlier) void calls.loadEarlier();
+                  if (!filtered) messages.loadEarlierNotes();
                 }}
               >
                 {calls.loadingEarlier
                   ? t("common.loading")
-                  : plural(
-                      t,
-                      calls.total - calls.items.size,
-                      "timeline.earlierOne",
-                      "timeline.earlier",
-                    )}
+                  : !calls.hasEarlier
+                    ? t("timeline.earlierMessages")
+                    : plural(
+                        t,
+                        calls.total - calls.items.size,
+                        "timeline.earlierOne",
+                        "timeline.earlier",
+                      )}
               </Button>
             </div>
           )}
@@ -460,6 +470,17 @@ function EntryView({
   onAnswer(id: string): void;
   onChanged(): void;
 }) {
+  if (entry.kind === "agent")
+    return (
+      <AgentMessageEntry
+        message={entry.message}
+        onLocate={
+          entry.message.callId && calls.has(entry.message.callId)
+            ? onLocate
+            : undefined
+        }
+      />
+    );
   if (entry.kind === "call") {
     const call = entry.call;
     const carried = links.carried.get(call.id);

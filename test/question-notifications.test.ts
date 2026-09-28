@@ -80,6 +80,28 @@ function browser(permission: NotificationPermission = "granted") {
 }
 
 describe("browser question notification delivery", () => {
+  it("notifies agent messages once through the same preference without exposing the body or counting questions", async () => {
+    const b = browser();
+    const message: SessionNotesEvent = {
+      type: "session:notes",
+      sessionId: "conversation",
+      agentMessage: { id: "msg_one" },
+    };
+    const other = new QuestionNotifications(b.open, b.changed);
+    await Promise.all([b.notifier.receive(message), other.receive(message)]);
+    expect(b.shown).toHaveLength(1);
+    expect(b.shown[0]!.title).toBe("EXEC MCP · 新消息");
+    expect(b.shown[0]!.options.body).toContain("ChatGPT 的新消息");
+    expect(b.shown[0]!.options.tag).toBe("exec-mcp-message-msg_one");
+    b.shown[0]!.onclick?.(new Event("click", { cancelable: true }));
+    expect(b.open).toHaveBeenCalledWith("conversation");
+    b.notifier.pause();
+    await b.notifier.receive({ ...message, agentMessage: { id: "msg_two" } });
+    expect(b.shown).toHaveLength(1);
+    await other.receive({ type: "session:notes", sessionId: "conversation" });
+    expect(b.shown).toHaveLength(1);
+    other.dispose();
+  });
   it("uses the current UI language for new notifications without resetting delivery history", async () => {
     const b = browser();
     let translate = createTranslator("en");

@@ -6,6 +6,7 @@ import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import type { NativeToolName } from "./tool-names.js";
 import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
+import { SEND_MESSAGE_TO_USER_SCHEMA } from "./agent-messages.js";
 import {
   RESOURCE_LIST_SCHEMA,
   RESOURCE_READ_SCHEMA,
@@ -325,6 +326,18 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Ask the user one or more questions during ongoing work. Submits questions to this conversation's Web UI and immediately returns accepted, without waiting for answers. Answers include the question, choice and optional note, delivered as user notes with subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
+  },
+  {
+    name: "send_message_to_user_async",
+    schema: SEND_MESSAGE_TO_USER_SCHEMA,
+    output: {
+      type: "object",
+      properties: { accepted: { const: true, type: "boolean" } },
+      required: ["accepted"],
+      additionalProperties: false,
+    },
+    description:
+      "Send a concise question or update to this conversation's Web UI during ongoing work, including blockers, findings that may change direction, or answers to user questions and status requests. Returns accepted immediately without ending the turn or waiting for a reply. The user can reply through the Web composer; replies arrive as user notes on subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
   },
   {
     name: "list_mcp_resources",

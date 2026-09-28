@@ -1,5 +1,22 @@
 // UI-owned text only. Logs, questions, notes and third-party data keep their original language.
 export const messages = {
+  "agentMessage.label": {
+    en: "Message from ChatGPT",
+    zh: "ChatGPT 发来的消息",
+  },
+  "agentMessage.reply": { en: "Reply", zh: "回复" },
+  "agentMessage.source": { en: "View sending step", zh: "查看发送步骤" },
+  "timeline.earlierMessages": { en: "Earlier messages", zh: "更早的消息" },
+  "step.messaged": { en: "Sent you a message", zh: "给你发了消息" },
+  "live.message": { en: "Sending you a message", zh: "正在给你发消息" },
+  "notification.newMessage": {
+    en: "Conversation {0} has a new message from ChatGPT. Click to view.",
+    zh: "对话 {0} 收到 ChatGPT 的新消息，点击查看。",
+  },
+  "notification.messageTitle": {
+    en: "EXEC MCP · Message",
+    zh: "EXEC MCP · 新消息",
+  },
   "app.title": { en: "EXEC MCP Console", zh: "EXEC MCP 控制台" },
   "app.checkingAuth": {
     en: "Checking console access…",
@@ -529,18 +546,18 @@ export const messages = {
   "question.copyDraft": { en: "Copy draft", zh: "复制草稿" },
   "question.discard": { en: "Discard draft", zh: "丢弃草稿" },
 
-  "notification.label": { en: "Question notifications", zh: "提问通知" },
+  "notification.label": { en: "Conversation notifications", zh: "对话通知" },
   "notification.default": {
-    en: "Get a system notification when ChatGPT asks a question.",
-    zh: "ChatGPT 提问时通过系统通知提醒你。",
+    en: "Get a system notification when ChatGPT asks a question or sends you a message.",
+    zh: "ChatGPT 提问或发来消息时，通过系统通知提醒你。",
   },
   "notification.enabled": {
-    en: "On. Clicking a notification opens the question.",
-    zh: "已开启。点击通知即可打开对应问题。",
+    en: "On. Clicking a notification opens the conversation.",
+    zh: "已开启。点击通知即可打开对应对话。",
   },
   "notification.paused": {
     en: "Paused in this browser.",
-    zh: "此浏览器已暂停提问通知。",
+    zh: "此浏览器已暂停对话通知。",
   },
   "notification.denied": {
     en: "Notifications are blocked. Allow them in the browser's site settings.",
@@ -551,8 +568,8 @@ export const messages = {
     zh: "系统通知需要在 localhost、127.0.0.1 或 HTTPS 下使用。",
   },
   "notification.unsupported": {
-    en: "This browser can't show page notifications. Pending questions still appear in the console.",
-    zh: "此浏览器不支持页面通知，待回答的问题仍会显示在控制台中。",
+    en: "This browser can't show page notifications. Questions and messages still appear in the console.",
+    zh: "此浏览器不支持页面通知，问题和消息仍会显示在控制台中。",
   },
   "notification.error": {
     en: "The notification could not be shown. Check browser and system notification settings, then retry.",
@@ -567,8 +584,8 @@ export const messages = {
   "notification.retry": { en: "Retry", zh: "重试" },
   "notification.test": { en: "Send a test", zh: "测试通知" },
   "notification.help": {
-    en: "Keep this page open. Notifications show only a short conversation ID and a count; closed pages get no push, and Do Not Disturb may hide alerts.",
-    zh: "请保持页面打开。通知只包含简短的对话标识和数量；页面关闭后没有推送，勿扰模式可能隐藏提醒。",
+    en: "Keep this page open. Notifications omit message content; closed pages get no push, and Do Not Disturb may hide alerts.",
+    zh: "请保持页面打开。通知不展示消息正文；页面关闭后没有推送，勿扰模式可能隐藏提醒。",
   },
   "notification.testBody": {
     en: "Test notification. New questions will appear like this.",

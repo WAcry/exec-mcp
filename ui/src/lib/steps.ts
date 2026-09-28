@@ -1,12 +1,13 @@
-import type { CallListItem, CallStepSummary } from "../types";
-import { visibleKeys } from "./format";
-import type { MessageKey, Translate } from "./locale";
+import type { CallListItem, CallStepSummary } from "../types.js";
+import { visibleKeys } from "./format.js";
+import type { MessageKey, Translate } from "./locale.js";
 
 export type StepKind =
   | "command"
   | "stdin"
   | "patch"
   | "question"
+  | "message"
   | "image"
   | "export"
   | "import"
@@ -25,6 +26,8 @@ export function stepKind(name: string): StepKind {
       return "patch";
     case "request_user_input_async":
       return "question";
+    case "send_message_to_user_async":
+      return "message";
     case "view_image":
       return "image";
     case "export_file":
@@ -81,6 +84,7 @@ const LIVE_VERB: Partial<Record<StepKind, MessageKey>> = {
   stdin: "live.stdin",
   patch: "live.patch",
   question: "live.question",
+  message: "live.message",
   image: "live.image",
   export: "live.export",
   import: "live.import",
@@ -127,6 +131,8 @@ function describeFinished(
       return { verb: t("step.edited"), subject: preview, code: true };
     case "question":
       return { verb: t("step.asked"), subject: preview };
+    case "message":
+      return { verb: t("step.messaged"), subject: preview };
     case "image":
       return { verb: t("step.viewedImage"), subject: preview, code: true };
     case "export":

@@ -91,6 +91,7 @@ describe("self-contained model-visible contracts", () => {
       "apply_patch",
       "view_image",
       "request_user_input_async",
+      "send_message_to_user_async",
       "list_mcp_resources",
       "list_mcp_resource_templates",
       "read_mcp_resource",

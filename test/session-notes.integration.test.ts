@@ -157,6 +157,64 @@ async function fixture(legacy = false) {
 describe.each([false, true])(
   "Web side notes over actual MCP (legacy=%s)",
   (legacy) => {
+    it("delivers agent messages to Web before the script ends and receives human replies through normal waits", async () => {
+      const f = await fixture(legacy);
+      const listed = (await f.client.listTools()).tools;
+      expect(listed.map((t) => t.name)).toEqual(["exec", "wait"]);
+      expect(listed[0]!.description).toContain(
+        "### send_message_to_user_async",
+      );
+      const message =
+        "The new console is ready.\nShould the original layout be retained?";
+      const running = await f.call("exec", {
+        source: `text(await tools.send_message_to_user_async({message:${JSON.stringify(message)}})); yield_control(); await new Promise(r=>setTimeout(r,150)); text('continued');`,
+      });
+      expect(running.isError).not.toBe(true);
+      expect(jsonOutput(running)).toEqual({ accepted: true });
+      const page = await f.page();
+      expect(page.agentMessages).toEqual([
+        expect.objectContaining({ text: message, callId: expect.any(String) }),
+      ]);
+      expect(page.pendingCount).toBe(0);
+      expect((await f.page(sessionScopeKey(scopeB)!)).agentMessages).toEqual(
+        [],
+      );
+      expect(noteBlocks(running)).toEqual([]);
+      await f.send("reply-agent-message", "Keep the new console.");
+      const wrong = await f.call(
+        "exec",
+        { source: "text('other conversation');" },
+        scopeB,
+      );
+      expect(noteBlocks(wrong)).toEqual([]);
+      const done = await f.call("wait", { cell_id: cellId(running) });
+      expect(JSON.stringify(done)).toContain("continued");
+      expect(noteBlocks(done)).toEqual([
+        { type: "text", text: "用户额外补充：\nKeep the new console." },
+      ]);
+      f.activity.clear();
+      expect((await f.page()).agentMessages[0]!.text).toBe(message);
+      const invalid = await f.call("send_message_to_user_async", {
+        message: "bad",
+        session_id: scopeB,
+      });
+      expect(invalid.isError).toBe(true);
+      expect((await f.page()).agentMessages).toHaveLength(1);
+      const unscoped = await f.client.callTool({
+        name: "exec",
+        arguments: {
+          source:
+            "text(await tools.send_message_to_user_async({message:'unscoped'}));",
+        },
+      });
+      expect(unscoped.isError).toBe(true);
+      expect((await f.page()).agentMessages).toHaveLength(1);
+      await f.web.close();
+      expect(
+        (await f.call("send_message_to_user_async", { message: "offline" }))
+          .isError,
+      ).toBe(true);
+    });
     it("streams one private notification hint for a submitted question request without changing tool acceptance", async () => {
       const f = await fixture(legacy);
       const controller = new AbortController();
@@ -828,6 +886,9 @@ it("keeps the same notes store across an execution-service restart, not a new co
     ).status,
   ).toBe(200);
   await api(`/api/sessions/${hashA}`, "PATCH", { label: "manual" });
+  server.runtime.notes.sendMessage(hashA, {
+    message: "Keep this agent update too.",
+  });
   await controller.restart();
   expect(controller.current.server.runtime.notes).toBe(server.runtime.notes);
   const page = (await (
@@ -835,6 +896,9 @@ it("keeps the same notes store across an execution-service restart, not a new co
   ).json()) as SessionNotesPage;
   expect(page.label).toBe("manual");
   expect(page.pendingCount).toBe(1);
+  expect(page.agentMessages.map((message) => message.text)).toEqual([
+    "Keep this agent update too.",
+  ]);
   const next = await clientFor(controller.current.server.url);
   const response = await next.callTool({
     name: "exec",

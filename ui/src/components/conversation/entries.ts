@@ -1,6 +1,9 @@
-import type { SessionNote } from "../../../../src/session-notes-types";
-import type { UserQuestionView } from "../../../../src/user-questions-types";
-import type { CallListItem, CallStatus } from "../../types";
+import type {
+  SessionNote,
+  AgentMessage,
+} from "../../../../src/session-notes-types.js";
+import type { UserQuestionView } from "../../../../src/user-questions-types.js";
+import type { CallListItem, CallStatus } from "../../types.js";
 
 export type Entry =
   | {
@@ -12,6 +15,7 @@ export type Entry =
       questions: UserQuestionView[];
     }
   | { kind: "note"; key: string; at: string; note: SessionNote }
+  | { kind: "agent"; key: string; at: string; message: AgentMessage }
   | {
       kind: "question";
       key: string;
@@ -20,7 +24,7 @@ export type Entry =
       order: number;
     };
 
-const RANK = { call: 0, question: 1, note: 2 } as const;
+const RANK = { call: 0, question: 1, agent: 2, note: 3 } as const;
 
 /** One chronological story; answers live inside their question, not as loose notes. */
 export function buildEntries(
@@ -28,6 +32,7 @@ export function buildEntries(
   notes: readonly SessionNote[],
   questions: readonly UserQuestionView[],
   includeMessages: boolean,
+  agentMessages: readonly AgentMessage[] = [],
 ): Entry[] {
   const entries: Entry[] = [];
   const askedBy = new Map<string, Extract<Entry, { kind: "call" }>>();
@@ -45,6 +50,13 @@ export function buildEntries(
         askedBy.set(step.handle, entry);
   }
   if (includeMessages) {
+    for (const message of agentMessages)
+      entries.push({
+        kind: "agent",
+        key: message.id,
+        at: message.createdAt,
+        message,
+      });
     for (const note of notes)
       if (!note.questionId)
         entries.push({

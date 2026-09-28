@@ -23,6 +23,7 @@ const KIND_LABEL = {
   stdin: "kind.stdin",
   patch: "kind.patch",
   question: "kind.question",
+  message: "agentMessage.label",
   image: "kind.image",
   export: "kind.export",
   import: "kind.import",
@@ -282,6 +283,12 @@ function Body({ subcall, kind }: { subcall: SubCallRecord; kind: StepKind }) {
     }
     case "question":
       return <QuestionBody subcall={subcall} />;
+    case "message":
+      return (
+        <p className="text-sm whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
+          {asText(objectValue(subcall.input)?.message)}
+        </p>
+      );
     case "export":
       return <ExportBody subcall={subcall} />;
     default:

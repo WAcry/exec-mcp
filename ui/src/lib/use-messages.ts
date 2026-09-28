@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   SessionNote,
+  AgentMessage,
   SessionNotesPage,
 } from "../../../src/session-notes-types";
 import type {
@@ -17,6 +18,7 @@ export interface ConversationMessages {
   available: boolean;
   label: string;
   notes: SessionNote[];
+  agentMessages: AgentMessage[];
   questions: UserQuestionView[];
   pendingNotes: number;
   pendingQuestions: number;
@@ -30,6 +32,7 @@ const initial: ConversationMessages = {
   available: false,
   label: "",
   notes: [],
+  agentMessages: [],
   questions: [],
   pendingNotes: 0,
   pendingQuestions: 0,
@@ -70,13 +73,20 @@ export function useMessages(sessionId: string | undefined) {
         if (disposed) return;
         const first = noteResults[0]!;
         const notes = new Map<string, SessionNote>();
-        for (const page of noteResults)
+        const agentMessages = new Map<string, AgentMessage>();
+        for (const page of noteResults) {
           for (const note of page.items) notes.set(note.id, note);
+          for (const message of page.agentMessages ?? [])
+            agentMessages.set(message.id, message);
+        }
         setState({
           loaded: true,
           available: true,
           label: first.label,
           notes: [...notes.values()].sort((a, b) => a.sequence - b.sequence),
+          agentMessages: [...agentMessages.values()].sort((a, b) =>
+            a.createdAt.localeCompare(b.createdAt),
+          ),
           questions: questions.items,
           pendingNotes: first.pendingCount,
           pendingQuestions: first.pendingQuestions,

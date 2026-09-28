@@ -69,6 +69,7 @@ function subcallFailed(result: unknown): boolean {
   );
 }
 interface NativeContext {
+  callId: string;
   cwd: string;
   explicitWorkdir: boolean;
   scope: string | undefined;
@@ -238,6 +239,13 @@ export class ExecRuntime {
           sessionScopeKey(ctx.scope),
           input as RequestUserInput,
         );
+      case "send_message_to_user_async":
+        throwIfAborted(ctx.signal);
+        return this.notes.sendMessage(
+          sessionScopeKey(ctx.scope),
+          input as { message: string },
+          ctx.callId,
+        );
       case "list_mcp_resources":
         return this.downstream.listResources(
           input as ResourceListInput,
@@ -342,6 +350,7 @@ export class ExecRuntime {
                   {
                     cwd,
                     explicitWorkdir: args.workdir !== undefined,
+                    callId: callTracker.id,
                     scope,
                     files: args.files,
                     signal: nested.signal,

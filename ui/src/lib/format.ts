@@ -1,4 +1,4 @@
-import type { Locale, Translate } from "./locale";
+import type { Locale, Translate } from "./locale.js";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;

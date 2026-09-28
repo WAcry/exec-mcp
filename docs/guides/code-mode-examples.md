@@ -237,6 +237,17 @@ inspect it and simplify or split as appropriate. Combining independent operation
 
 ## Asynchronous questions
 
+Send an update or reply to an interim user question without waiting for a response. This code runs inside exec.
+
+```js
+text(await tools.send_message_to_user_async({
+  message: "The tests passed. I am checking the package next."
+}));
+```
+
+The message appears in this conversation's Web timeline. Replies from the composer arrive through normal exec/wait responses as user notes.
+Both communication tools require a running Web server and a host-provided conversation ID. The question form below provides answer choices.
+
 ```js
 text(await tools.request_user_input_async({
   questions: [{

@@ -8,7 +8,7 @@ Active, updated 2026-09-28.
 
 Operators can send text from a conversation's composer or answer questions submitted by the agent.
 Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
-The model has only tools.request_user_input_async inside exec for asking questions. It has no answer-query, send-user-note, or conversation-naming tool.
+Inside exec, the model can send free-text messages with tools.send_message_to_user_async or offer choices with tools.request_user_input_async. It has no answer-query, send-user-note, or conversation-naming tool.
 The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
 The composer sits at the bottom of every conversation, shaped like a chat input, so first-time operators find it without a separate entry point.
@@ -22,6 +22,17 @@ Successful, running, and ordinary execution-error responses from exec/wait can a
 Nested tool values remain unchanged. MCP tools/list, resources/read, and Web reads do not consume messages.
 Messages are selected at return time, so a note submitted during a wait can accompany that response.
 Notes do not wake waits or modify running scripts. Stopping an operation still requires its termination method.
+
+## Agent messages
+
+The [Codex message tool](https://github.com/openai/codex/blob/5c5308fc9a9ee789049d646ef11e5400384b9c6f/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) takes a single message and returns accepted immediately.
+We retain that shape for important updates, informal questions, and replies to the operator during work. The destination is the current conversation's Web timeline.
+User replies use the existing composer and arrive as User Notes with subsequent exec/wait responses; the service cannot inject a new ChatGPT turn.
+
+Agent messages are stored separately from user input so they never echo back as user-authored instructions or create pending-question counts.
+They share the existing 72-hour retention and bounded memory pool, survive audit clearing and execution-service restart, and are lost on full process exit.
+The timeline labels them as ChatGPT, renders plain text, and offers reply, copy, and a link to the sending call when that audit record remains available.
+Messages are limited to 30,000 UTF-8 bytes. A missing Web listener or conversation identity fails explicitly. Acceptance confirms storage, not that the operator has read it.
 
 ## Asynchronous questions and answers
 
@@ -53,6 +64,7 @@ Before accepting an answer, validate the encoded question, selection, and note t
 ## Browser notifications
 
 After a new request is saved, the Web SSE event includes its request ID and question count. The browser uses native Notification for a system alert.
+New agent messages use the same notification preference and deduplication mechanism, sending only a message ID in the event. Their alerts omit message content and open the conversation.
 The event omits question and answer text. Repeated request_key submissions, answers, withdrawals, labels, and ordinary notes do not trigger new alerts.
 Clicking a notification focuses the page and opens the conversation, where the question waits in the dock. Notifications contain only a short hash and count;
 full questions and labels stay in the authenticated page.

@@ -76,6 +76,7 @@ Signing out, clearing browser cookies, or rotating the access token requires a n
 
 Type in the message box at the bottom of a conversation and press Enter. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
 Queued messages can be withdrawn, and the timeline shows which call delivered each one. If ChatGPT has finished its turn, copy the text into the original conversation instead.
+ChatGPT can send updates or answer your interim questions in the same timeline while continuing to work. These entries are labeled ChatGPT; Reply focuses the message box and keeps your draft.
 
 ### Answer questions
 
@@ -87,7 +88,7 @@ Answers and unsolicited notes use the same delivery path.
 ### Notifications and settings
 
 Use the bell next to the machine name in the sidebar, or the prompt shown with a pending question, to enable notifications and grant browser permission.
-New questions trigger a notification that opens the corresponding conversation.
+New questions and messages from ChatGPT trigger a notification that opens the corresponding conversation.
 Keep the page open and connected. If the browser cannot notify, permission is denied, or Do Not Disturb is active, questions remain available on the page.
 
 The console can toggle existing MCP services and Skills, change supported settings, and restart the execution service. Saving and applying configuration are separate steps.

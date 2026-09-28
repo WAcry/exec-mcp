@@ -236,6 +236,17 @@ Code Mode 前置代码不改变返回的原始 source 定位。若仅宿主拒�
 
 ## 异步提问
 
+可以发出更新或回答用户的临时问题，不等待回复。下面的代码在 exec 内执行。
+
+```js
+text(await tools.send_message_to_user_async({
+  message: "The tests passed. I am checking the package next."
+}));
+```
+
+消息显示在本对话的 Web 时间线。用户通过输入框回复后，内容随正常 exec/wait 响应作为补充返回。
+两种沟通工具都需要 Web 已启动且宿主提供对话标识。下面的提问接口用于提供可选答案。
+
 ```js
 text(await tools.request_user_input_async({
   questions: [{

@@ -15,6 +15,7 @@ import { nestedPreview } from "../../../../src/web/call-summary";
 import type { SubCallRecord } from "../../types";
 import { CodeView, OutputView, RichText } from "../ui/CodeSurface";
 import { DiffView } from "../ui/DiffView";
+import { MediaPreview } from "../ui/MediaPreview";
 import { Spinner } from "../ui/StatusNode";
 import { StepIcon } from "../ui/StepIcon";
 
@@ -212,15 +213,7 @@ function ToolResultBody({ output }: { output: unknown }) {
       {parsed.structured !== undefined && (
         <CodeView code={asText(parsed.structured)} language="json" />
       )}
-      {parsed.media.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {parsed.media.map((item, index) => (
-            <Chip key={index}>
-              {item.type} · <span className="font-mono">{item.label}</span>
-            </Chip>
-          ))}
-        </div>
-      )}
+      <MediaPreview items={parsed.media} />
     </div>
   );
 }
@@ -283,6 +276,10 @@ function Body({ subcall, kind }: { subcall: SubCallRecord; kind: StepKind }) {
     }
     case "question":
       return <QuestionBody subcall={subcall} />;
+    case "image":
+      return subcall.output === undefined ? null : (
+        <ToolResultBody output={subcall.output} />
+      );
     case "message":
       return (
         <p className="text-sm whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">

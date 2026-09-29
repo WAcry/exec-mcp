@@ -114,6 +114,11 @@ Details show truncation notices. Attachment metadata includes name, type, and si
 
 Record count, text, and nested calls are bounded. Large text keeps its head and tail; nested calls retain the earliest and rolling latest records.
 These rules affect only the Web copy. MCP results, terminal output, and file operations keep their semantics.
+
+Base64 cut down to an audit preview cannot be displayed and crowds out the rest of a result, so images in recorded results are kept separately.
+PNG, JPEG, GIF, and WebP images up to 16 MiB each share a 64 MiB budget; identical images are kept once, and the oldest leave first.
+The audit keeps each block's type, size, and a content-hash reference. Images are served only to authenticated pages, with their stored type and nosniff.
+Other image formats, audio, and embedded blobs keep type and size only. Clearing history or evicting a call releases its images.
 The configuration page hides credentials, header/env values, and command arguments. Explicit commands and results may still contain sensitive information,
 so treat the console as a high-privilege page. Dashboard counts cover retained records only.
 

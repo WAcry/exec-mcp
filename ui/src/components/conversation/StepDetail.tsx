@@ -12,6 +12,7 @@ import type { CallRecord } from "../../types";
 import { CopyButton } from "../ui/CopyButton";
 import { CodeView, OutputView } from "../ui/CodeSurface";
 import { Button, Loading } from "../ui/Controls";
+import { MediaPreview } from "../ui/MediaPreview";
 import { NestedCall } from "./NestedCall";
 
 function useCallDetail(id: string, live: boolean) {
@@ -200,19 +201,7 @@ export function StepDetail({ id, running }: { id: string; running: boolean }) {
                     collapsedLines={10}
                   />
                 )}
-                {result.media.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 text-2xs text-ink-3">
-                    {result.media.map((item, index) => (
-                      <span
-                        key={index}
-                        className="rounded-md bg-hover px-1.5 py-0.5"
-                      >
-                        {item.type} ·{" "}
-                        <span className="font-mono">{item.label}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <MediaPreview items={result.media} />
               </>
             )}
             {result.notes.map((note, index) => (

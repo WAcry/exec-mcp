@@ -11,6 +11,7 @@ import type {
 } from "./types.js";
 import { snapshotAuditValue, truncateAuditText } from "./snapshot.js";
 import { nestedPreview } from "./call-summary.js";
+import { AuditMedia } from "./audit-media.js";
 
 export type ActivityEvent =
   | { type: "call:start"; callId: string; sessionId: string }
@@ -53,17 +54,21 @@ export class ActivityStore {
   private callsById = new Map<string, CallRecord>();
   private sessions = new Map<string, SessionSummary>();
   private listeners = new Set<(event: ActivityEvent) => void>();
+  /** Images from recorded results, bounded separately from the records. */
+  readonly media: AuditMedia;
 
   constructor(
     options: {
       maxCalls?: number;
       maxSubcalls?: number;
       enabled?: boolean;
+      media?: AuditMedia;
     } = {},
   ) {
     this.maxCalls = options.maxCalls ?? 10_000;
     this.maxSubcalls = options.maxSubcalls ?? 50;
     this.enabled = options.enabled ?? true;
+    this.media = options.media ?? new AuditMedia();
     if (!Number.isSafeInteger(this.maxCalls) || this.maxCalls < 1)
       throw new Error("活动审计 maxCalls 必须是正安全整数。");
     if (!Number.isSafeInteger(this.maxSubcalls) || this.maxSubcalls < 2)
@@ -141,6 +146,7 @@ export class ActivityStore {
       const removed = this.calls.pop();
       if (removed) {
         this.callsById.delete(removed.id);
+        this.media.release(removed.id);
         // Rebuild after counting the new call. When both calls belong to the
         // same session, rebuilding first and incrementing afterward counts the
         // new call twice.
@@ -151,6 +157,8 @@ export class ActivityStore {
     this.emit({ type: "call:start", callId: id, sessionId });
 
     let finished = false;
+    const withMedia = (value: unknown) =>
+      this.callsById.has(id) ? this.media.extract(value, id) : value;
 
     return {
       id,
@@ -160,7 +168,7 @@ export class ActivityStore {
         const output =
           subcallInput.output === undefined
             ? undefined
-            : snapshotAuditValue(subcallInput.output, 8192);
+            : snapshotAuditValue(withMedia(subcallInput.output), 8192);
         const error =
           subcallInput.error === undefined
             ? undefined
@@ -213,7 +221,7 @@ export class ActivityStore {
             const output =
               result.output === undefined
                 ? undefined
-                : snapshotAuditValue(result.output, 8192);
+                : snapshotAuditValue(withMedia(result.output), 8192);
             const error =
               result.error === undefined
                 ? undefined
@@ -244,7 +252,7 @@ export class ActivityStore {
         call.endedAt = new Date(endTime).toISOString();
         call.durationMs = endTime - startTime;
         if (output !== undefined && this.callsById.has(id)) {
-          const snapshot = snapshotAuditValue(output, 16 * 1024);
+          const snapshot = snapshotAuditValue(withMedia(output), 16 * 1024);
           call.output = snapshot.value;
           if (snapshot.truncated)
             call.truncatedFields = (call.truncatedFields ?? 0) + 1;
@@ -423,6 +431,7 @@ export class ActivityStore {
     this.calls = [];
     this.callsById.clear();
     this.sessions.clear();
+    this.media.clear();
     this.emit({ type: "call:clear" });
   }
 

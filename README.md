@@ -66,7 +66,7 @@ The interface initially follows your browser's language. Change it under Setting
 The choice is saved in this browser. Select Auto to follow the browser again. Commands, questions, and user messages keep their original text.
 
 Open the Web address printed at startup. Each ChatGPT conversation appears in the sidebar and opens as a live timeline of its commands, patches, questions,
-and your messages; select a step to see its full script, output, and what was returned to ChatGPT.
+and your messages; select a step to see its full script, output, and images, and what was returned to ChatGPT.
 Processes, Tools, Files, and Settings cover running commands and memory, downstream MCP servers and Skills, exported files, and configuration.
 Unnamed conversations show a short hash and a generated mark; click the title to rename one.
 After your first LAN sign-in, the browser keeps the session and renews it while you use the console. It expires after 30 days without a visit, and normal service restarts do not require the token again.

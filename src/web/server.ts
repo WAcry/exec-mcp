@@ -645,6 +645,19 @@ async function handleApiRoute(context: RouteContext): Promise<void> {
     return;
   }
 
+  const mediaRoute = /^\/api\/media\/([a-f0-9]{64})$/.exec(pathname);
+  if (mediaRoute && req.method === "GET") {
+    const item = runtime.activity.media.get(mediaRoute[1]!);
+    if (!item) throw new HttpError(404, "图片已不在审计记录中。");
+    res.writeHead(200, {
+      "Content-Type": item.mimeType,
+      "Content-Length": item.data.length,
+      "Cache-Control": "no-store",
+    });
+    res.end(item.data);
+    return;
+  }
+
   if (pathname === "/api/skills" && req.method === "GET") {
     const saved = context.controller
       ? await context.controller.editor.read()

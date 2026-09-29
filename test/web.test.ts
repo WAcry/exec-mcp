@@ -18,6 +18,7 @@ import type { Config } from "../src/config.js";
 import { startServer } from "../src/server.js";
 import { startWebServer, type WebServerInstance } from "../src/web/server.js";
 import { ActivityStore } from "../src/web/activity.js";
+import { encodePng, renderBrandMark } from "../src/brand-icon.js";
 import { cellId } from "./helpers.js";
 
 interface ResponseResult {
@@ -876,6 +877,63 @@ describe("Web management data and actions", () => {
     expect(detail.status).toBe(200);
     expect(detail.text).toContain("PRIVATE_DETAIL_COMMAND");
     expect(detail.text).toContain("PRIVATE_FINAL_OUTPUT");
+  });
+
+  it("serves images kept from recorded results by reference until the audit is cleared", async () => {
+    const { web, activity } = await startWeb();
+    const image = encodePng(16, renderBrandMark(16));
+    const block = {
+      type: "image",
+      data: image.toString("base64"),
+      mimeType: "image/png",
+    };
+    const tracker = activity.startCall({
+      tool: "exec",
+      sessionId: "scope-digest",
+      args: { source: "image((await tools.view_image({path})).content[0]);" },
+    });
+    tracker.recordSubcall({
+      name: "view_image",
+      durationMs: 2,
+      input: { path: "/tmp/shot.png" },
+      output: { content: [block] },
+      status: "success",
+    });
+    tracker.finish({ status: "completed", output: { content: [block] } });
+
+    const detail = await request(
+      web,
+      `/api/calls/${encodeURIComponent(tracker.id)}`,
+    );
+    expect(detail.text).not.toContain(block.data.slice(0, 48));
+    const call = detail.json<{
+      subcalls: { output: { content: { media: string; bytes: number }[] } }[];
+      output: { content: { media: string }[] };
+    }>();
+    const kept = call.subcalls[0]!.output.content[0]!;
+    expect(kept.bytes).toBe(image.length);
+    expect(call.output.content[0]!.media).toBe(kept.media);
+
+    const served = await request(web, `/api/media/${kept.media}`);
+    expect(served.status).toBe(200);
+    expect(served.headers).toMatchObject({
+      "content-type": "image/png",
+      "content-length": String(image.length),
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+    });
+    expect((await request(web, `/api/media/${"0".repeat(64)}`)).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await request(web, "/api/calls", {
+          method: "DELETE",
+          headers: actionHeaders(),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await request(web, `/api/media/${kept.media}`)).status).toBe(404);
   });
 
   it("records yielded and terminated Code Mode outcomes instead of labeling both completed", async () => {

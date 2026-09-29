@@ -246,6 +246,18 @@
   animation: fade-in 180ms var(--ease-standard) both;
 }
 
+/* Transparent pixels in a captured image stay distinguishable from the page. */
+.checker {
+  background-color: var(--sunken);
+  background-image: conic-gradient(
+    var(--line) 25%,
+    transparent 0 50%,
+    var(--line) 0 75%,
+    transparent 0
+  );
+  background-size: 16px 16px;
+}
+
 /* A located call fades from a highlight rather than blinking. */
 @keyframes locate {
   0%,

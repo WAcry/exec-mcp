@@ -1,4 +1,4 @@
-import { USER_NOTE_TEXT_PREFIX } from "../../../src/session-notes-types";
+import { USER_NOTE_TEXT_PREFIX } from "../../../src/session-notes-types.js";
 
 export interface ParsedResult {
   /** The audit replaced the whole value with a bounded preview. */
@@ -8,8 +8,16 @@ export interface ParsedResult {
   text: string;
   notes: string[];
   structured?: unknown;
-  media: { type: string; label: string }[];
+  media: MediaBlock[];
   isError: boolean;
+}
+
+export interface MediaBlock {
+  type: string;
+  label: string;
+  bytes?: number;
+  /** ID of the copy the audit kept; missing when the image was not retained. */
+  media?: string;
 }
 
 const HEADER =
@@ -78,19 +86,27 @@ export function parseToolResult(output: unknown): ParsedResult {
       if (!texts.length && result.status === undefined) {
         const header = HEADER.exec(text);
         if (header) {
-          result.status = header[1];
+          result.status = header[1]!;
           result.wallSeconds = Number(header[2]);
           text = text.slice(header[0].length);
         }
       }
       texts.push(text);
     } else if (typeof block.type === "string") {
+      const resource = objectValue(block.resource);
       const label =
         (typeof block.name === "string" && block.name) ||
         (typeof block.mimeType === "string" && block.mimeType) ||
         (typeof block.uri === "string" && block.uri) ||
+        (typeof resource?.uri === "string" && resource.uri) ||
         block.type;
-      result.media.push({ type: block.type, label });
+      const bytes = block.bytes ?? resource?.bytes;
+      result.media.push({
+        type: block.type,
+        label,
+        ...(typeof bytes === "number" ? { bytes } : {}),
+        ...(typeof block.media === "string" ? { media: block.media } : {}),
+      });
     }
   }
   result.text = texts.join("\n").replace(/^\n+/, "");

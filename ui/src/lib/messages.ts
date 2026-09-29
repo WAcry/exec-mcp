@@ -25,6 +25,11 @@ export const messages = {
     zh: "无法将消息标为已读：{0}",
   },
   "timeline.earlierMessages": { en: "Earlier messages", zh: "更早的消息" },
+  "media.open": { en: "Open full size", zh: "查看原图" },
+  "media.gone": {
+    en: "no longer kept in the audit",
+    zh: "已不在审计记录中",
+  },
   "step.messaged": { en: "Sent you a message", zh: "给你发了一条消息" },
   "step.messagedMany": {
     en: "Sent you {0} messages",

@@ -7,7 +7,7 @@ English | [简体中文](CHANGELOG.zh.md)
 First stable release of exec-mcp for connecting ChatGPT to a user-operated machine.
 
 Code Mode provides exec and wait, with nested shell commands, patches, file transfer, Skill discovery, and downstream MCP tools and resources.
-The Web console supports English and Simplified Chinese, call auditing, and conversation notes, questions, and messages from ChatGPT with browser notifications.
+The Web console supports English and Simplified Chinese, call auditing, and conversation notes, questions, and messages from ChatGPT with browser notifications. ChatGPT can name each conversation on its first call.
 MCP clients that display server icons show the Exec MCP mark.
 OpenAI Secure MCP Tunnel, Cloudflare Named Tunnel, and Tailscale Funnel are supported. CI covers Linux, Windows, and macOS on Node.js 20, 22, and 24.
 

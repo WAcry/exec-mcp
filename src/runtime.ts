@@ -260,6 +260,11 @@ export class ExecRuntime {
           input as { message: string },
           ctx.callId,
         );
+      case "set_conversation_title":
+        return this.notes.setTitle(
+          sessionScopeKey(ctx.scope),
+          (input as { title: string }).title,
+        );
       case "list_mcp_resources":
         return this.downstream.listResources(
           input as ResourceListInput,

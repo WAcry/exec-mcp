@@ -101,6 +101,7 @@ Codex Code Mode Only uses ALL_TOOLS; other model modes may still expose search t
 | Shell overrides, EOF/resize/terminate, and zero wait | Preserves supported process operations and per-call overrides of configured defaults. |
 | Native MCP image/file blocks, Skills, and Web questions | Fits ChatGPT file and message delivery and provides independent Skill discovery; notify injection is not connected. |
 | Agent messages promise no reply and send questions to request_user_input_async | exec-mcp cannot start a ChatGPT turn, so a promised reply never arrives; see [ADR-010](010-session-notes.md#agent-messages). |
+| The model titles conversations with set_conversation_title | Codex titles threads with a hidden model call on the user's message, which exec-mcp never receives; see [ADR-010](010-session-notes.md#conversation-titles). |
 | Direct resource URI reads and aggregate errors | Supports templates and links while retaining partial-failure information. |
 
 Use upstream wording where the meaning matches and explain actual environment differences.

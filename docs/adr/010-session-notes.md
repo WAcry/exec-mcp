@@ -8,13 +8,13 @@ Active, updated 2026-09-28.
 
 Operators can send text from a conversation's composer or answer questions submitted by the agent.
 Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
-Inside exec, the model can inform the operator with tools.send_message_to_user_async or ask with choices through tools.request_user_input_async. It has no answer-query, send-user-note, or conversation-naming tool.
+Inside exec, the model can inform the operator with tools.send_message_to_user_async, ask with choices through tools.request_user_input_async, and title the conversation once with tools.set_conversation_title. It has no answer-query or send-user-note tool.
 The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
 The composer sits at the bottom of every conversation, shaped like a chat input, so first-time operators find it without a separate entry point.
 Its hint follows the conversation's state: while ChatGPT is inside a call or was active moments ago, the message should arrive with the next response;
 when it is idle, the hint says the message waits for the next tool call and offers to copy the text into ChatGPT instead.
-Unlabeled conversations show Untitled conversation, a short hash prefix, and their sigil. Operators rename them inline for Web identification only.
+Unlabeled conversations show Untitled conversation, a short hash prefix, and their sigil. Operators rename them inline for Web identification only; [conversation titles](#conversation-titles) cover names set by the model.
 Ownership uses the SHA-256 digest of `_meta["openai/session"]`, independently of MCP connections, native sessions, cells, terminals, and working directories.
 Actual calls carrying that identifier establish recipients. Unidentified groups cannot receive messages.
 
@@ -45,6 +45,24 @@ The toast's timer only runs while the page is visible, so a message that arrives
 Read state lives on the server, so it follows the operator across tabs and devices; it is Web-only state and never reaches the model.
 The first notes page carries every unread message, so paging cannot hide one. The timeline shows each message under the call that sent it, in the conversation's color.
 It renders bold, inline code, code blocks, and links without interpreting HTML. There is no reply button, because messages do not ask; the composer stays available for anything the operator wants to add.
+
+## Conversation titles
+
+ChatGPT sends no conversation title in `_meta`, and the service never sees the user's message. Pinned Codex titles a thread in its TUI with a hidden model call on the first user message
+([thread_title.rs](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/app/thread_title.rs)); exec-mcp has no such input,
+so the model sets a title with tools.set_conversation_title in its first exec, next to its real work. The description keeps Codex's style rules:
+an imperative task title in the user's language, without quotes, markdown, or trailing punctuation. It suggests 3 to 8 words instead of Codex's 36 characters and under five words,
+because Codex constrains a structured output while this model writes the string by hand and cannot count characters reliably. The schema accepts 120 characters;
+storage collapses whitespace and keeps at most the 256-byte label limit.
+
+Each conversation record accepts one model title, only while it has no label. Later calls return set: false, so the name stays stable,
+and an operator's label always wins, as a saved name does in Codex; clearing a model title does not invite another.
+A missing Web listener, conversation identity, or capacity also returns set: false instead of failing, because an exception would stop the rest of the first script for a cosmetic result.
+The result carries no label, which stays Web-only.
+
+Labels are lost when the whole process exits or a record expires, and a model may skip the call. When a response delivers notes to a conversation that can still be titled,
+a text block after the notes suggests setting one in the next exec. It is not a user note, uses only space left in the notes budget, and never appears without notes, so ordinary responses stay unchanged.
+exec/wait results are textual; a structured envelope keeps only its result and notes.
 
 ## Asynchronous questions and answers
 

@@ -9,6 +9,7 @@ export const NATIVE_TOOL_TITLES = {
   view_image: "View image",
   request_user_input_async: "Ask user asynchronously",
   send_message_to_user_async: "Message user asynchronously",
+  set_conversation_title: "Set conversation title",
   list_mcp_resources: "List MCP resources",
   list_mcp_resource_templates: "List MCP resource templates",
   read_mcp_resource: "Read MCP resource",

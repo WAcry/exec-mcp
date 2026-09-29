@@ -24,6 +24,7 @@ import {
   NOTE_MAX_BYTES,
   NOTE_RETENTION_MS,
   NOTES_RESPONSE_BYTES,
+  TITLE_REMINDER,
   USER_NOTE_TEXT_PREFIX,
   type SessionNote,
   type AgentMessage,
@@ -34,6 +35,7 @@ import {
 interface Conversation {
   id: string;
   label: string;
+  titled: boolean;
   firstSeen: string;
   touched: number;
   sequence: number;
@@ -127,6 +129,7 @@ export class SessionNotes {
     this.conversations.set(id, {
       id,
       label: "",
+      titled: false,
       firstSeen: new Date(this.now()).toISOString(),
       touched: this.now(),
       sequence: 0,
@@ -162,6 +165,27 @@ export class SessionNotes {
     conversation.touched = this.now();
     this.bytes += delta;
     this.emit(id);
+  }
+
+  /** One agent title per unlabeled conversation. It runs beside real work, so nothing here throws. */
+  setTitle(id: string | undefined, title: string): { set: boolean } {
+    if (!id || !this.webUsers) return { set: false };
+    this.observe(id);
+    const c = this.conversations.get(id);
+    if (!c || c.label || c.titled) return { set: false };
+    let label = "";
+    for (const character of title.replace(/\s+/g, " ").trim()) {
+      if (Buffer.byteLength(label + character) > NOTE_LABEL_BYTES) break;
+      label += character;
+    }
+    const delta = 2 * label.length;
+    if (!label || this.bytes + delta > this.maximumBytes) return { set: false };
+    c.label = label;
+    c.titled = true;
+    c.touched = this.now();
+    this.bytes += delta;
+    this.emit(id);
+    return { set: true };
   }
 
   enqueue(id: string, messageId: string, text: string): SessionNote {
@@ -570,6 +594,14 @@ export class SessionNotes {
         remaining -= bytes;
       }
       if (!selected.length) return result;
+      // exec/wait results are textual; a structured envelope keeps only its result and notes.
+      if (
+        !structured &&
+        !conversation.label &&
+        !conversation.titled &&
+        Buffer.byteLength(TITLE_REMINDER) + 2 <= remaining
+      )
+        response.content.push({ type: "text", text: TITLE_REMINDER });
       // The media/transport boundary remains independent of the model text budget.
       if (
         Buffer.byteLength(JSON.stringify(response)) > MAX_PAYLOAD_BYTES ||

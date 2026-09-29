@@ -21,11 +21,15 @@ import {
   nodeCommand,
   nativeRequest,
   observeTerminal,
+  texts,
 } from "./helpers.js";
 import type { TerminalResult } from "../src/host/terminal.js";
 import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { modelTextBytes } from "../src/session-notes.js";
-import type { SessionNotesPage } from "../src/session-notes-types.js";
+import {
+  TITLE_REMINDER,
+  type SessionNotesPage,
+} from "../src/session-notes-types.js";
 import type { SessionSummary } from "../src/web/types.js";
 import type { UserQuestionsPage } from "../src/user-questions-types.js";
 
@@ -443,6 +447,37 @@ describe.each([false, true])(
         (await f.call("exec", { source: "text('ordinary work continues');" }))
           .isError,
       ).not.toBe(true);
+    });
+
+    it("titles a conversation once from exec and reminds only while it is untitled", async () => {
+      const f = await fixture(legacy);
+      await f.send("before-title", "Please keep going.");
+      const reminded = await f.probe();
+      expect(noteBlocks(reminded)).toHaveLength(1);
+      expect(texts(reminded).at(-1)).toBe(TITLE_REMINDER);
+      const titled = await f.call("exec", {
+        source:
+          "text([await tools.set_conversation_title({title:'Review release notes'}), await tools.set_conversation_title({title:'Rename it'})]);",
+      });
+      expect(titled.isError, JSON.stringify(titled)).not.toBe(true);
+      expect(jsonOutput(titled)).toEqual([{ set: true }, { set: false }]);
+      expect((await f.page()).label).toBe("Review release notes");
+      await f.send("after-title", "Thanks.");
+      const quiet = await f.probe();
+      expect(noteBlocks(quiet)).toHaveLength(1);
+      expect(JSON.stringify(quiet)).not.toContain(TITLE_REMINDER);
+      const unscoped = await f.client.callTool(
+        nativeRequest("set_conversation_title", { title: "No scope" }),
+      );
+      expect(jsonOutput(unscoped)).toEqual({ set: false });
+      await f.web.close();
+      const offline = await f.call(
+        "set_conversation_title",
+        { title: "Web closed" },
+        scopeB,
+      );
+      expect(offline.isError).not.toBe(true);
+      expect(jsonOutput(offline)).toEqual({ set: false });
     });
 
     it("accepts Web answers during a long terminal wait without waking it or leaking answers into another conversation", async () => {

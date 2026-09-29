@@ -177,6 +177,9 @@ export const IMAGE_SCHEMA = z
       .optional(),
   })
   .strict();
+const TITLE_SCHEMA = z
+  .object({ title: z.string().trim().min(1).max(120) })
+  .strict();
 const PATCH_SCHEMA = z.string().min(1);
 const SKILL_INVOCATION_RULE =
   "Skills can be selected by their trigger descriptions; explicit-only skills are read only when the user explicitly requests them.";
@@ -338,6 +341,18 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Send a concise message that needs the user's attention during ongoing work. The message appears in this conversation's Web UI, and the tool returns immediately without ending the turn or waiting for a reply. Use this tool to report a critical blocker or a finding that may change the task's direction, or to answer a user question or status request received while work is still in progress. Use this tool when a message needs the user's immediate attention; use commentary for routine progress and intermediate context. It informs rather than asks: do not expect a reply, and use request_user_input_async when you need an answer. Requires a running Web server and a host-provided conversation ID.",
+  },
+  {
+    name: "set_conversation_title",
+    schema: TITLE_SCHEMA,
+    output: {
+      type: "object",
+      properties: { set: { type: "boolean" } },
+      required: ["set"],
+      additionalProperties: false,
+    },
+    description:
+      "Sets this conversation's title in the Web UI. Call once in your first exec with a task title for the user's request: 3 to 8 words, starting with an imperative verb, in the user's language, without quotes, markdown or trailing punctuation. Only the first title is kept; set is false when nothing changed.",
   },
   {
     name: "list_mcp_resources",

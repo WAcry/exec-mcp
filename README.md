@@ -68,7 +68,7 @@ The choice is saved in this browser. Select Auto to follow the browser again. Co
 Open the Web address printed at startup. Each ChatGPT conversation appears in the sidebar and opens as a live timeline of its commands, patches, questions,
 and your messages; select a step to see its full script, output, and images, and what was returned to ChatGPT.
 Processes, Tools, Files, and Settings cover running commands and memory, downstream MCP servers and Skills, exported files, and configuration.
-Unnamed conversations show a short hash and a generated mark; click the title to rename one.
+ChatGPT can name each conversation on its first call; unnamed ones show a short hash and a generated mark. Click the title to rename one; ChatGPT cannot change a name you set.
 After your first LAN sign-in, the browser keeps the session and renews it while you use the console. It expires after 30 days without a visit, and normal service restarts do not require the token again.
 Signing out, clearing browser cookies, or rotating the access token requires a new sign-in.
 

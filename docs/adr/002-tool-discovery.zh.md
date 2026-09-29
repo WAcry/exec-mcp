@@ -102,6 +102,7 @@ Codex 的 Code Mode Only 使用 ALL_TOOLS；其他模型模式仍可能提供搜
 | Shell 单次覆盖、EOF/resize/terminate 和零等待 | 保留现有进程操作；配置默认值允许单次参数覆盖。 |
 | 原生 MCP 图片/文件块、Skills 和 Web 问答 | 适配 ChatGPT 的文件及消息交付方式，提供独立的 Skill 发现；未接入 notify 注入。 |
 | Agent 消息不承诺回复，提问交给 request_user_input_async | exec-mcp 无法开启 ChatGPT 的新轮次，承诺的回复不会到来，见 [ADR-010](010-session-notes.zh.md#agent-发来的消息)。 |
+| 由模型通过 set_conversation_title 为对话命名 | Codex 根据用户消息另起隐藏的模型调用生成标题，而 exec-mcp 收不到用户消息，见 [ADR-010](010-session-notes.zh.md#对话标题)。 |
 | 资源直接 URI 读取与聚合 errors | 支持模板和链接，并保留部分失败的信息。 |
 
 含义相同处沿用上游原文，环境差异按实际行为说明。无需为措辞一致而接入完整 App Server、审批流程或另一套执行器。

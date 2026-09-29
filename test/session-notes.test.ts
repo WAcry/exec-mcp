@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { SessionNotes, modelTextBytes } from "../src/session-notes.js";
 import {
+  NOTE_LABEL_BYTES,
   NOTE_MAX_BYTES,
   NOTE_RETENTION_MS,
   NOTES_RESPONSE_BYTES,
+  TITLE_REMINDER,
+  USER_NOTE_TEXT_PREFIX,
 } from "../src/session-notes-types.js";
 import { MAX_PAYLOAD_BYTES } from "../src/limits.js";
 
 const result = (text = "normal"): CallToolResult => ({
   content: [{ type: "text", text }],
 });
+const reminder = { type: "text", text: TITLE_REMINDER };
 function fixture(maximum?: number) {
   let now = Date.UTC(2026, 8, 20);
   const store = new SessionNotes(maximum, () => now);
@@ -44,7 +48,7 @@ describe("ephemeral session notes", () => {
     store.observe("b");
     expect(() => store.enqueue("b", "id", "message")).toThrow();
     store.enqueue("a", "id", "existing pending message");
-    expect(store.attach(result(), "a", "call").content).toHaveLength(2);
+    expect(store.attach(result(), "a", "call").content).toHaveLength(3);
   });
 
   it("defaults to hashes, keeps manual labels separate from routing and de-duplicates per conversation", () => {
@@ -101,6 +105,7 @@ describe("ephemeral session notes", () => {
     expect(response.content.slice(1)).toEqual([
       { type: "text", text: "用户额外补充：\n" + "L".repeat(5000) },
       { type: "text", text: "用户额外补充：\nshort" },
+      reminder,
     ]);
     expect(store.page("a").items.every((n) => n.callId === "fits")).toBe(true);
     const next = result();
@@ -288,6 +293,7 @@ describe("ephemeral session notes", () => {
       content: [
         { type: "text", text: "Script completed" },
         { type: "text", text: "用户额外补充：\n  原文\n保留缩进与换行。  " },
+        reminder,
       ],
     });
     expect(response.structuredContent).toBeUndefined();
@@ -353,6 +359,7 @@ describe("ephemeral session notes", () => {
     expect(store.attach(result("small"), "a", "later").content).toEqual([
       { type: "text", text: "small" },
       { type: "text", text: "用户额外补充：\nmessage" },
+      reminder,
     ]);
   });
 
@@ -379,7 +386,7 @@ describe("ephemeral session notes", () => {
     store.enqueue("a", "empty", "no text budget dependency");
     expect(
       store.attach({ content: [] }, "a", "audit-disabled").content,
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     expect(store.page("a").items.at(-1)?.callId).toBeUndefined();
   });
 
@@ -490,5 +497,82 @@ describe("ephemeral session notes", () => {
     store.observe("a");
     expect(store.page("a").items).toHaveLength(0);
     store.enqueue("a", "new", "after expiry");
+  });
+
+  it("lets the agent title an unlabeled conversation once, without throwing or overriding the operator", () => {
+    expect(new SessionNotes().setTitle("a", "No Web")).toEqual({ set: false });
+    const { store, events, advance } = fixture();
+    expect(store.setTitle(undefined, "No scope")).toEqual({ set: false });
+    expect(store.setTitle("a", "  Review\n release   notes ")).toEqual({
+      set: true,
+    });
+    expect(store.page("a").label).toBe("Review release notes");
+    expect(events).toEqual([{ type: "session:notes", sessionId: "a" }]);
+    expect(store.setTitle("a", "Rename it")).toEqual({ set: false });
+    store.rename("a", "");
+    expect(store.setTitle("a", "Rename it")).toEqual({ set: false });
+    expect(store.page("a").label).toBe("");
+
+    store.rename("b", "Operator name");
+    expect(store.setTitle("b", "Agent name")).toEqual({ set: false });
+    expect(store.page("b").label).toBe("Operator name");
+    store.rename("b", "");
+    expect(store.setTitle("b", "汉".repeat(120))).toEqual({ set: true });
+    expect(store.page("b").label).toBe(
+      "汉".repeat(Math.floor(NOTE_LABEL_BYTES / 3)),
+    );
+
+    advance(NOTE_RETENTION_MS + 1);
+    store.observe("a");
+    expect(store.setTitle("a", "Name again after expiry")).toEqual({
+      set: true,
+    });
+  });
+
+  it("reminds the agent after delivered notes only while it can still title the conversation", () => {
+    const { store } = fixture();
+    const plain = result();
+    expect(store.attach(plain, "a", "no-notes")).toBe(plain);
+    store.enqueue("a", "structured", "first");
+    const structured: CallToolResult = {
+      content: [],
+      structuredContent: { ok: true },
+    };
+    expect(store.attach(structured, "a", "call").structuredContent).toEqual({
+      result: { ok: true },
+      user_notes: ["first"],
+    });
+    store.enqueue("a", "text", "second");
+    expect(store.attach(result(), "a", "text-call").content).toEqual([
+      { type: "text", text: "normal" },
+      { type: "text", text: USER_NOTE_TEXT_PREFIX + "second" },
+      reminder,
+    ]);
+
+    const full = result("x".repeat(35_998));
+    const room = NOTES_RESPONSE_BYTES - modelTextBytes(full);
+    const tight = "t".repeat(
+      room - Buffer.byteLength(USER_NOTE_TEXT_PREFIX) - 2 - 10,
+    );
+    store.enqueue("a", "tight", tight);
+    const crowded = store.attach(full, "a", "tight-call");
+    expect(crowded.content.at(-1)).toEqual({
+      type: "text",
+      text: USER_NOTE_TEXT_PREFIX + tight,
+    });
+    expect(modelTextBytes(crowded)).toBe(NOTES_RESPONSE_BYTES - 10);
+
+    store.setTitle("a", "Name the conversation");
+    store.enqueue("a", "titled", "after naming");
+    expect(store.attach(result(), "a", "titled-call").content).toEqual([
+      { type: "text", text: "normal" },
+      { type: "text", text: USER_NOTE_TEXT_PREFIX + "after naming" },
+    ]);
+    store.rename("a", "");
+    store.enqueue("a", "cleared", "operator cleared the title");
+    expect(store.attach(result(), "a", "cleared-call").content).toHaveLength(2);
+    store.rename("b", "Operator name");
+    store.enqueue("b", "labeled", "operator label");
+    expect(store.attach(result(), "b", "labeled-call").content).toHaveLength(2);
   });
 });

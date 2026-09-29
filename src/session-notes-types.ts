@@ -7,7 +7,7 @@ export const NOTE_RETENTION_MS = 72 * 60 * 60 * 1000;
 export const USER_NOTE_TEXT_PREFIX = "用户额外补充：\n";
 /** Model-visible hint after delivered notes while the agent can still title the conversation. */
 export const TITLE_REMINDER =
-  "This conversation has no title in the Web UI; consider setting one with tools.set_conversation_title in your next exec.";
+  "This conversation has no title; consider setting one with tools.set_conversation_title in your next exec.";
 
 /** Web-only change event. Question text and answers stay behind the existing API. */
 export interface SessionNotesEvent {

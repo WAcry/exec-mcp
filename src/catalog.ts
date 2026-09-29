@@ -352,7 +352,7 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       additionalProperties: false,
     },
     description:
-      "Sets this conversation's title in the Web UI. Call once in your first exec with a task title for the user's request: 3 to 8 words, starting with an imperative verb, in the user's language, without quotes, markdown or trailing punctuation. Only the first title is kept; set is false when nothing changed.",
+      "Sets a title for this conversation so the user can easily find and manage it. Call once in your first exec with 3 to 8 words summarizing the user's task, in the user's language. Only the first title is kept.",
   },
   {
     name: "list_mcp_resources",

@@ -50,9 +50,10 @@ Agent 消息与用户输入分别存储，不会作为用户指令返回给模�
 
 ChatGPT 不在 `_meta` 中提供对话标题，服务也看不到用户消息。固定版本的 Codex 在 TUI 收到首条用户消息后，另起一次隐藏的模型调用为 thread 生成标题
 （[thread_title.rs](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/app/thread_title.rs)）；exec-mcp 没有这份输入，
-因此由模型在第一次 exec 里顺手调用 tools.set_conversation_title 设置标题。描述沿用 Codex 的风格规则：
-以祈使动词开头的任务标题，使用用户的语言，不带引号、Markdown 或句末标点。建议长度改为 3 到 8 个词，而不是 Codex 的最多 36 字符、尽量少于五个词，
-因为 Codex 约束的是结构化输出，这里的模型手写字符串，数不准字符。schema 接受 120 个字符；
+因此由模型在第一次 exec 里顺手调用 tools.set_conversation_title 设置标题。描述只保留 ChatGPT 用好它所需的信息：
+用途、在第一次 exec 中调用一次、用 3 到 8 个词概括用户的任务、使用用户的语言，以及只保留第一个标题。
+建议按词计长，而不是 Codex 的最多 36 字符、尽量少于五个词，因为 Codex 约束的是结构化输出，这里的模型手写字符串，数不准字符。
+Codex 的祈使动词和标点规则、Web 界面以及 set 的含义都不写，它们不影响调用。schema 接受 120 个字符；
 保存时合并空白，并截断到 256 字节的标签上限以内。
 
 每条对话记录只接受一次模型标题，而且仅在尚无标签时生效。之后的调用返回 set: false，名称因此保持稳定；

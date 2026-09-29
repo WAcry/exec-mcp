@@ -50,9 +50,10 @@ It renders bold, inline code, code blocks, and links without interpreting HTML. 
 
 ChatGPT sends no conversation title in `_meta`, and the service never sees the user's message. Pinned Codex titles a thread in its TUI with a hidden model call on the first user message
 ([thread_title.rs](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/app/thread_title.rs)); exec-mcp has no such input,
-so the model sets a title with tools.set_conversation_title in its first exec, next to its real work. The description keeps Codex's style rules:
-an imperative task title in the user's language, without quotes, markdown, or trailing punctuation. It suggests 3 to 8 words instead of Codex's 36 characters and under five words,
-because Codex constrains a structured output while this model writes the string by hand and cannot count characters reliably. The schema accepts 120 characters;
+so the model sets a title with tools.set_conversation_title in its first exec, next to its real work. The description keeps only what ChatGPT needs to use it well:
+the purpose, calling once in the first exec, 3 to 8 words summarizing the user's task, the user's language, and that only the first title is kept.
+It suggests words instead of Codex's 36 characters and under five words, because Codex constrains a structured output while this model writes the string by hand and cannot count characters reliably.
+Codex's imperative-verb and punctuation rules, the Web UI, and the meaning of set are omitted; they do not change the call. The schema accepts 120 characters;
 storage collapses whitespace and keeps at most the 256-byte label limit.
 
 Each conversation record accepts one model title, only while it has no label. Later calls return set: false, so the name stays stable,

@@ -153,13 +153,13 @@ describe("HTTP proxy environment without version-dependent global Node flags", (
     await checked;
     await network.close();
     await expect(network.fetch("http://pending.example.test/")).rejects.toThrow(
-      "关闭",
+      "The HTTP client is closed",
     );
   });
   it("reports invalid proxy configuration without echoing credentials", () => {
     expect(() =>
       client({ HTTPS_PROXY: "not a URL with PRIVATE_PROXY_PASSWORD" }),
-    ).toThrow("代理配置无效");
+    ).toThrow("The HTTP proxy settings are not valid");
     let error = "";
     try {
       client({ HTTPS_PROXY: "not a URL with PRIVATE_PROXY_PASSWORD" });

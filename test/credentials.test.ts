@@ -96,7 +96,7 @@ describe("explicit bearer credential sources", () => {
       "auth.token_file",
     );
     expect(() => readTokenFile(root, "auth.token_file")).toThrow(
-      "普通 token 文件",
+      "regular token file",
     );
     for (const value of ["", " \n\r\t", "PRIVATE_DATA".repeat(7000)]) {
       await writeFile(file, value);

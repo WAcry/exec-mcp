@@ -6,13 +6,11 @@ import { ConfigEditor } from "../src/web/config-edit.js";
 
 vi.mock("../src/config.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("../src/config.js")>();
-  // The same shape as the validation error class in config.ts.
-  class ConfigError extends Error {}
   return {
     ...original,
     parseConfig(text: string, filename: string) {
       if (text.includes("validation-failure"))
-        throw new ConfigError("- server.port: Expected a number.");
+        throw new original.ConfigError("- server.port: Expected a number.");
       if (text.includes("other-failure"))
         throw new Error("secret-value-from-the-file");
       return original.parseConfig(text, filename);

@@ -1,4 +1,4 @@
-name: 验证
+name: CI
 on:
   push:
   pull_request:
@@ -22,8 +22,15 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
           registry-url: https://registry.npmjs.org
-      - name: 运行时信息
+      - name: Show runtime
         run: node -e "console.log(JSON.stringify({node:process.version,platform:process.platform,arch:process.arch}))"
-      - run: npm ci --no-audit --no-fund
-      - run: npm run check
-      - run: npm run test:package
+      # The first pwsh launch on a fresh runner can take longer than a test deadline.
+      - name: Warm up PowerShell
+        shell: bash
+        run: if command -v pwsh >/dev/null; then time pwsh -NoLogo -NoProfile -NonInteractive -Command "Write-Output ready"; fi
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check
+        run: npm run check
+      - name: Package smoke test
+        run: npm run test:package

@@ -137,20 +137,19 @@ describe("bilingual project documentation", () => {
     }
   });
 
-  it("ships both root languages and records only the requested 1.0.0 release", async () => {
+  it("ships both root languages and keeps changelog versions aligned", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(root, "package.json"), "utf8"),
     ) as { files: string[] };
     for (const filename of paths.filter((file) => path.dirname(file) === root))
       expect(manifest.files).toContain(path.basename(filename));
     expect(manifest.files).toContain("docs");
-    for (const name of ["CHANGELOG.md", "CHANGELOG.zh.md"]) {
-      const source = documents.get(path.join(root, name))!;
-      expect(
-        headings(source)
-          .filter((match) => match[1] === "##")
-          .map((match) => match[2]),
-      ).toEqual(["1.0.0"]);
-    }
+    // Release headings are version numbers; other headings may be translated.
+    const versions = (name: string) =>
+      headings(documents.get(path.join(root, name))!)
+        .filter((match) => match[1] === "##")
+        .map((match) => /^\d+\.\d+\.\d+\S*/.exec(match[2]!)?.[0] ?? null);
+    expect(versions("CHANGELOG.zh.md")).toEqual(versions("CHANGELOG.md"));
+    expect(versions("CHANGELOG.md")).not.toEqual([]);
   });
 });

@@ -141,7 +141,7 @@ describe("explicit bearer credential sources", () => {
       "invalid-token-with-空格-".repeat(3),
     ]) {
       await writeFile(file, value);
-      await expect(startServer(selected)).rejects.toThrow("至少 32");
+      await expect(startServer(selected)).rejects.toThrow("at least 32");
     }
     await expect(
       startServer({
@@ -152,7 +152,7 @@ describe("explicit bearer credential sources", () => {
           token_file: file,
         },
       }),
-    ).rejects.toThrow("二选一");
+    ).rejects.toThrow("only one of token_env and token_file");
     expect(process.env.EXEC_MCP_ACCESS_TOKEN).toBe(token);
   });
 });

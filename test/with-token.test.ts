@@ -169,16 +169,16 @@ describe("CLI adapter for external token consumers", () => {
       ["BAD=ENV", filename, "--", process.execPath],
       ["TOKEN", filename, "wrong", process.execPath],
     ])
-      await expect(runWithToken(args)).rejects.toThrow("用法");
+      await expect(runWithToken(args)).rejects.toThrow("Usage");
     await expect(
       runWithToken(["TOKEN", filename, "--", path.join(root, "absent-client")]),
-    ).rejects.toThrow("可用的原生可执行文件");
+    ).rejects.toThrow("native executable file");
   });
   it("offers help without reading any token or launching a process", async () => {
     const { root } = await setup();
     const result = await invoke(root, ["with-token", "--help"]);
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("环境变量名 token文件 -- 可执行文件");
+    expect(result.stdout).toContain("ENV_NAME TOKEN_FILE -- EXECUTABLE");
     await expect(runWithToken([], AbortSignal.abort())).rejects.toThrow();
   });
   it("cancels its own foreground helper while leaving the encrypted source intact", async () => {

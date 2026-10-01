@@ -54,7 +54,9 @@ Cloudflare uses Named Tunnel environment credentials or an explicit token file. 
 Tailscale checks node DNS and existing ports before starting in the foreground, without --bg or reset.
 Vendor terminal output is retained, and the user answers authorization prompts.
 
-Operators manage token files and the parent environment. The service prints connection addresses and status, not credentials.
+Operators manage token files and the parent environment. The service prints connection addresses and status. It never prints MCP or tunnel credentials.
+The Web access key is the one exception: when [web].host is `0.0.0.0` or `::`, the LAN sign-in links printed at startup contain it.
+Protect the service output, for example a service log, like the key itself. [ADR-009](009-web-console.md#remembering-browser-sign-in) explains these links.
 See the [connection guide](../guides/connections.md) for installation and identity-provider setup. Cancellation and responses must follow the actual protocol;
 claim host capabilities in contracts only after validation.
 
@@ -109,7 +111,8 @@ Configuration, credentials, and runtime data use platform-specific user director
 Installation must not depend on a developer's home, company Devspace, or shell profile. Installation and removal manage only this product's files and processes,
 leaving other programs' ports, tunnels, and services intact. Validate fresh installation in an isolated environment.
 
-The service does not write credentials into Git, logs, or tool descriptions. Explicit user output of environment values and command results remains unchanged.
+Apart from the LAN sign-in links described above, the service does not write credentials into Git, logs, or tool descriptions.
+Explicit user output of environment values and command results remains unchanged.
 Ingress authenticates the caller; external MCP services require their own authorization. Downstream tools and resources can be proxied,
 while UI, sampling, elicitation, and file binding have no transparent proxy support.
 [ADR-005](005-file-transfer.md) covers this service's file binding and separate download endpoint. That endpoint exposes only explicit exports

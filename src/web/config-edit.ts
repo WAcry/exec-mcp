@@ -115,7 +115,10 @@ export function setTomlBoolean(
     );
   }
   if (parent.some((part) => typeof part === "number"))
-    throw new ConfigEditError(422, "无法定位配置条目，请在配置文件中修改。");
+    throw new ConfigEditError(
+      422,
+      "Cannot find this configuration entry. Edit the configuration file directly.",
+    );
   return (
     source +
     `${newline}[${parent.map((part) => JSON.stringify(part)).join(".")}]${newline}${JSON.stringify(leaf)} = ${value}${newline}`
@@ -184,7 +187,7 @@ export class ConfigEditor {
     } catch {
       throw new ConfigEditError(
         422,
-        "无法读取或解析 config.toml；请在终端检查配置。",
+        "Cannot read or parse config.toml. Check the configuration in a terminal.",
       );
     }
   }
@@ -195,7 +198,10 @@ export class ConfigEditor {
     return this.mutex.run(async () => {
       const current = await this.read();
       if (current.revision !== revision)
-        throw new ConfigEditError(409, "配置已被其他操作修改，请刷新后重试。");
+        throw new ConfigEditError(
+          409,
+          "Another change updated the configuration. Refresh and try again.",
+        );
       let source = current.source;
       if (change.kind === "mcp") {
         const servers = current.raw.mcp_servers as
@@ -204,7 +210,7 @@ export class ConfigEditor {
         if (!servers || !Object.hasOwn(servers, change.name))
           throw new ConfigEditError(
             404,
-            "MCP 配置项不存在；此入口仅切换已有服务。",
+            "This MCP server is not in the configuration. This control only turns existing servers on or off.",
           );
         source = setTomlBoolean(
           source,
@@ -226,7 +232,7 @@ export class ConfigEditor {
         if (!skill)
           throw new ConfigEditError(
             404,
-            "该目录中未发现此 Skill，请刷新 Skill 列表。",
+            "This Skill is not in the folder. Refresh the Skill list.",
           );
         const rules = current.config.skills?.config ?? [];
         let matchingPath: number | undefined;
@@ -256,7 +262,7 @@ export class ConfigEditor {
       } catch {
         throw new ConfigEditError(
           422,
-          "此配置写法无法安全地只切换该字段，请在终端编辑。",
+          "The way this configuration is written does not let the console change only this field safely. Edit it in a terminal.",
         );
       }
       const temporary = path.join(
@@ -272,7 +278,7 @@ export class ConfigEditor {
         if ((await this.read()).revision !== revision)
           throw new ConfigEditError(
             409,
-            "配置已被其他操作修改，请刷新后重试。",
+            "Another change updated the configuration. Refresh and try again.",
           );
         await rename(temporary, current.filename);
       } finally {

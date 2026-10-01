@@ -191,7 +191,7 @@ describe("foreground provider plans", () => {
     async (serving) => {
       const { config } = await configured();
       fixture.serving = serving;
-      await expect(prepareTunnel(config)).rejects.toThrow("不会覆盖");
+      await expect(prepareTunnel(config)).rejects.toThrow("does not replace");
       expect(fixture.started).toHaveLength(0);
       expect(fixture.commands.some((item) => item.args.includes("reset"))).toBe(
         false,
@@ -222,7 +222,9 @@ describe("foreground provider plans", () => {
     );
     const { config } = await configured();
     config.port = (server.address() as AddressInfo).port;
-    await expect(prepareTunnel(config)).rejects.toThrow("未返回认证挑战");
+    await expect(prepareTunnel(config)).rejects.toThrow(
+      "did not return an authentication challenge",
+    );
     expect(fixture.commands).toEqual([]);
     expect(fixture.started).toEqual([]);
   });
@@ -235,9 +237,9 @@ describe("foreground provider plans", () => {
         access: "openai-tunnel",
         mcpServers: [],
       }),
-    ).rejects.toThrow("公网模式");
+    ).rejects.toThrow("public mode");
     await expect(prepareTunnel({ ...config, port: 0 })).rejects.toThrow(
-      "随机端口",
+      "random port",
     );
     await expect(
       prepareTunnel({
@@ -248,7 +250,7 @@ describe("foreground provider plans", () => {
           token_file: "missing",
         },
       }),
-    ).rejects.toThrow("找不到");
+    ).rejects.toThrow("Cannot find");
     expect(fixture.started).toEqual([]);
   });
   it("rejects another tailscale node, a logged-out client, malformed status and missing token files", async () => {
@@ -257,14 +259,16 @@ describe("foreground provider plans", () => {
       BackendState: "NeedsLogin",
       Self: { DNSName: "node.tailnet.ts.net." },
     };
-    await expect(prepareTunnel(config)).rejects.toThrow("已登录");
+    await expect(prepareTunnel(config)).rejects.toThrow("signed in");
     fixture.status = {
       BackendState: "Running",
       Self: { DNSName: "different.tailnet.ts.net." },
     };
-    await expect(prepareTunnel(config)).rejects.toThrow("本节点");
+    await expect(prepareTunnel(config)).rejects.toThrow("this node");
     fixture.invalidJson = true;
-    await expect(prepareTunnel(config)).rejects.toThrow("未修改现有配置");
+    await expect(prepareTunnel(config)).rejects.toThrow(
+      "did not change the current configuration",
+    );
     const cloudflare = await configured("cloudflare");
     await rm(cloudflare.tokenFile);
     await expect(prepareTunnel(cloudflare.config)).rejects.toThrow(
@@ -333,7 +337,7 @@ describe("owned Tunnel process lifecycle", () => {
     expect(fixture.started[0]!.tokenFileEnvUnchanged).toBe(true);
     delete process.env.TUNNEL_TOKEN_FILE;
     await expect(prepareTunnel(config)).rejects.toThrow(
-      "需要 tunnel.token_file",
+      "needs tunnel.token_file",
     );
   });
   it("does not fall back to an inherited token when an explicitly selected file is missing or empty", async () => {
@@ -380,7 +384,7 @@ describe("owned Tunnel process lifecycle", () => {
   it("does not replay failed launches and does no work when already cancelled", async () => {
     const { config } = await configured("cloudflare");
     fixture.exitCode = 2;
-    await expect(runTunnel(config)).rejects.toThrow("已退出");
+    await expect(runTunnel(config)).rejects.toThrow("tunnel client stopped");
     expect(fixture.started).toHaveLength(1);
     await expect(
       runTunnel(config, { signal: AbortSignal.abort() }),

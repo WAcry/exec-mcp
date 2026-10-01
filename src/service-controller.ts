@@ -26,7 +26,8 @@ export class ServiceController {
   }
 
   restart(): Promise<void> {
-    if (this.closed) return Promise.reject(new Error("服务已停止。"));
+    if (this.closed)
+      return Promise.reject(new Error("The service is stopped."));
     if (this.operation) return this.operation;
     this.state = "restarting";
     this.error = undefined;
@@ -37,7 +38,7 @@ export class ServiceController {
           this.error =
             error instanceof Error
               ? error.message
-              : "重启失败；请检查终端和配置。";
+              : "The restart failed. Check the terminal output and the configuration.";
         }
         throw error;
       })

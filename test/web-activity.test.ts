@@ -32,7 +32,7 @@ describe("bounded Web activity audit", () => {
     const call = activity.getCall(tracker.id)!;
     expect(call.args.source).toContain("START");
     expect(call.args.source).toContain("END");
-    expect(call.args.source).toContain("审计记录省略");
+    expect(call.args.source).toContain("audit omitted");
     expect(call.args.source).not.toContain(secretMiddle);
     expect(call.subcalls).toHaveLength(5);
     expect(call.subcalls.slice(0, 1).map((item) => item.input)).toMatchObject([

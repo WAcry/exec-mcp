@@ -83,7 +83,9 @@ Each configuration file has its own persisted Web access key using lightweight t
 Initialization is atomic. Explicit rotation persists the new key before replacing the active value.
 Read or write failure is an error; it does not create a temporary key or borrow another instance's or tunnel's credentials.
 
-CLI login links carry the key in the URL fragment, which is removed from the address bar after use.
+When [web].host is `0.0.0.0` or `::`, `exec-mcp serve` prints LAN sign-in links at startup. Each link carries the access key in the URL fragment,
+and the browser removes it from the address bar after use. The service output, for example a service log, therefore contains the key and must be protected like the key itself.
+The printed loopback address carries no key, and MCP and tunnel credentials are never printed.
 Keys are not stored in localStorage, and query parameters do not authenticate.
 Sign-in issues an HMAC cookie with a 30-day lifetime, Max-Age, and `HttpOnly; SameSite=Strict; Path=/api`.
 It contains a signed credential; the server checks signature and expiry while the access key stays on the machine.

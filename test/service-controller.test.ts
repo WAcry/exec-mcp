@@ -167,6 +167,6 @@ describe("managed runtime replacement", () => {
     await restart;
     await stopping;
     expect(s.controller.state).toBe("stopped");
-    await expect(s.controller.restart()).rejects.toThrow("停止");
+    await expect(s.controller.restart()).rejects.toThrow("stopped");
   });
 });

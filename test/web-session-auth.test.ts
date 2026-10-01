@@ -108,12 +108,12 @@ describe("remembered Web browser authentication", () => {
     const auth = new WebSessionAuth(config);
     const filename = webTokenPath(config);
     await writeFile(filename, `${TOKEN_FILE_PREFIX}broken`);
-    expect(() => new WebSessionAuth(config)).toThrow("Web 登录凭据");
+    expect(() => new WebSessionAuth(config)).toThrow("Web access key");
     expect(await readFile(filename, "utf8")).toBe(`${TOKEN_FILE_PREFIX}broken`);
     await rm(filename);
     await mkdir(filename);
     const old = auth.token;
-    expect(() => auth.rotate()).toThrow("已有凭据未被替换");
+    expect(() => auth.rotate()).toThrow("existing key did not change");
     expect(auth.token).toBe(old);
     expect(auth.verifyCookie(auth.issueCookie(start), start)).toBe(true);
   });

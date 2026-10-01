@@ -229,7 +229,10 @@ path = "./project with spaces/.agents/skills/packaged-skill/SKILL.md"
 enabled = true
 `,
   );
-  assert.match(await executeCli(["doctor", "--config", config]), /V8 探针通过/);
+  assert.match(
+    await executeCli(["doctor", "--config", config]),
+    /V8 probe passed/,
+  );
   child = spawn(process.execPath, [cli, "serve", "--config", config], {
     cwd: isolated,
     windowsHide: true,
@@ -259,7 +262,9 @@ enabled = true
     child.stdout.on("data", (text) => {
       output += text;
       const mcp = output.match(/http:\/\/127\.0\.0\.1:\d+\/mcp/)?.[0];
-      const web = output.match(/本机访问：(http:\/\/127\.0\.0\.1:\d+\/)/)?.[1];
+      const web = output.match(
+        /Local access: (http:\/\/127\.0\.0\.1:\d+\/)/,
+      )?.[1];
       if (mcp && web) {
         clearTimeout(timer);
         resolve({ mcp, web });

@@ -81,7 +81,9 @@ export async function startServer(
   }
   const onerror = (): void => {
     // Never print SDK error payloads: they may include credentials or user input.
-    console.error("MCP 传输出现异常；检查客户端连接与本机就绪状态。");
+    console.error(
+      "An MCP transport error occurred. Check the client connection and make sure that the local server is ready.",
+    );
   };
   const modern = createMcpHandler(() => runtime.server(), {
     legacy: "reject",
@@ -215,7 +217,7 @@ export async function startServer(
         server.closeAllConnections();
         await stopped;
         if (results.some((result) => result.status === "rejected"))
-          throw new Error("部分服务清理失败。");
+          throw new Error("Some service cleanup steps failed.");
       })();
       return closing;
     },

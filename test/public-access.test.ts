@@ -105,7 +105,7 @@ describe("public ingress configuration", () => {
     }
     expect(() =>
       parseConfig(CONFIG_TEMPLATE + '\n[auth]\ntype="bearer"\n', "config.toml"),
-    ).toThrow("私有模式");
+    ).toThrow("private mode");
     for (const url of [
       "http://example.test",
       "https://user:secret@example.test",
@@ -150,14 +150,14 @@ describe("public ingress configuration", () => {
         base.replace(":8443", ":9000") + '\n[tunnel]\nprovider="tailscale"\n',
         file,
       ),
-    ).toThrow("443/8443/10000");
+    ).toThrow("443, 8443, or 10000");
     expect(() =>
       parseConfig(
         base.replace("node.tailnet.ts.net:8443", "random.example") +
           '\n[tunnel]\nprovider="tailscale"\n',
         file,
       ),
-    ).toThrow("本节点");
+    ).toThrow("this node");
   });
   it("does not admit weak or absent bearer credentials, including for direct programmatic startup", async () => {
     const config: Config = {
@@ -165,12 +165,12 @@ describe("public ingress configuration", () => {
       auth: { type: "bearer", token_env: tokenName },
     };
     delete process.env[tokenName];
-    await expect(startServer(config)).rejects.toThrow("至少 32");
+    await expect(startServer(config)).rejects.toThrow("at least 32");
     process.env[tokenName] = "short";
-    await expect(startServer(config)).rejects.toThrow("至少 32");
+    await expect(startServer(config)).rejects.toThrow("at least 32");
     await expect(
       startServer({ ...config, auth: undefined } as unknown as Config),
-    ).rejects.toThrow("认证");
+    ).rejects.toThrow("needs public_url and auth");
   });
 });
 

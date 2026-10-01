@@ -11,7 +11,7 @@ import {
 import path from "node:path";
 import TOML from "@iarna/toml";
 import { parseTOML, type AST } from "toml-eslint-parser";
-import { parseConfig, type Config } from "../config.js";
+import { ConfigError, parseConfig, type Config } from "../config.js";
 import { AsyncMutex, resolveUserPath } from "../util.js";
 import { discoverSkills } from "../skills/discover.js";
 
@@ -40,9 +40,7 @@ export class ConfigEditError extends Error {
  * values and stay hidden.
  */
 function safeConfigMessage(error: unknown): string | undefined {
-  return error instanceof Error && error.constructor.name === "ConfigError"
-    ? error.message
-    : undefined;
+  return error instanceof ConfigError ? error.message : undefined;
 }
 export interface ConfigDocument {
   filename: string;

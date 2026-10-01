@@ -33,11 +33,7 @@ export function mcpServerView(
 type HttpServer = Extract<
   DownstreamMcpServerConfig,
   { transport: "streamable-http" }
-> & {
-  /** Header name to the environment variable that holds its value. */
-  envHeaders?: Readonly<Record<string, string>>;
-  bearerTokenEnvVar?: string;
-};
+>;
 
 /** Names only: header values and variable values are credentials. */
 function httpServerView<Policy extends object>(

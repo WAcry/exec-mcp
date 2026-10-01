@@ -342,7 +342,7 @@ function unauthorized(): HttpError {
   return new HttpError(
     401,
     "unauthorized",
-    "This Web UI request needs a valid access token.",
+    "This Web UI request needs a valid Web access key.",
   );
 }
 
@@ -465,7 +465,7 @@ const ROUTES: CompiledRoute[] = [
         throw new HttpError(
           401,
           "invalid_token",
-          "The access token is not correct.",
+          "The Web access key is not correct.",
         );
       res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
       json<Api.VerifyResponse>(res, 200, { valid: true });
@@ -869,7 +869,7 @@ const ROUTES: CompiledRoute[] = [
   route({
     method: "POST",
     path: "/api/auth/regenerate-token",
-    loopback: "Only this machine can rotate the LAN access token.",
+    loopback: "Only this machine can rotate the Web access key.",
     handle({ res, auth, sse, lanUrls }) {
       auth.rotate();
       // Existing EventSource responses were authorized with the previous token.

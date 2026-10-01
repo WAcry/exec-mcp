@@ -189,7 +189,7 @@ Web configuration toggles edit only existing MCP services, discovered Skills, lo
 Restart failure leaves the management page available for repair. Temporary execution, terminals, export links, and old audit records are not restored.
 
 For LAN access, set host explicitly to `0.0.0.0` or `::` and visit the machine's actual IP or hostname.
-Use the startup access token or a link containing #token=… for the first sign-in. The browser then removes that token from the address bar.
+Use the Web access key printed at startup or a link containing #token=… for the first sign-in. The browser then removes the key from the address bar.
 The HttpOnly login cookie survives browser closure, refresh, and ordinary service restart. Console visits renew it; it expires after 30 days without a visit.
 It applies to the browser and host where saved. Private browsing or clearing site data removes it.
 Signing out clears this browser's cookie. Rotating the key locally invalidates all old sign-ins, links, and event streams.

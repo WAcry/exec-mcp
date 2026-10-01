@@ -96,7 +96,7 @@ export const messages = {
 
   "auth.title": { en: "Sign in to this machine", zh: "登录这台机器" },
   "auth.help": {
-    en: "Enter the access token from the server's startup log, or open the LAN link that contains #token=….",
+    en: "Enter the Web access key from the server's startup log, or open the LAN link that contains #token=….",
     zh: "输入服务启动日志中的访问密钥，或直接打开带 #token=… 的局域网链接。",
   },
   "auth.remember": {
@@ -107,10 +107,10 @@ export const messages = {
     en: "This machine's own browser needs no token. LAN access must be enabled in the configuration.",
     zh: "本机浏览器访问无需密钥；局域网访问需要在配置中开启。",
   },
-  "auth.token": { en: "Access token", zh: "访问密钥" },
-  "auth.placeholder": { en: "Paste the access token", zh: "粘贴访问密钥" },
+  "auth.token": { en: "Web access key", zh: "访问密钥" },
+  "auth.placeholder": { en: "Paste the Web access key", zh: "粘贴访问密钥" },
   "auth.invalid": {
-    en: "The access token is invalid or has been rotated. Check the server startup log.",
+    en: "The Web access key is invalid or has been rotated. Check the server startup log.",
     zh: "密钥不正确或已更换，请查看服务启动日志中的访问密钥。",
   },
   "auth.verifying": { en: "Verifying…", zh: "验证中…" },
@@ -925,7 +925,7 @@ export const messages = {
     zh: "启用 Web 控制台",
   },
   "config.accessHelp": {
-    en: "LAN access requires [web].host set to 0.0.0.0 or ::. Sign in once with the access token; later visits renew the browser session.",
+    en: "LAN access requires [web].host set to 0.0.0.0 or ::. Sign in once with the Web access key; later visits renew the browser session.",
     zh: "[web].host 设为 0.0.0.0 或 :: 时才开放局域网。首次用访问密钥登录，之后访问会自动续期。",
   },
   "config.loopback": { en: "On this machine", zh: "本机" },
@@ -953,7 +953,7 @@ export const messages = {
     zh: "请重新登录后继续。",
   },
   "error.invalidToken": {
-    en: "The access token is not correct.",
+    en: "The Web access key is not correct.",
     zh: "访问密钥不正确。",
   },
   "error.forbiddenOrigin": {

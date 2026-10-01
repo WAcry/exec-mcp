@@ -151,7 +151,7 @@ npm run check
 npm run test:package
 ```
 
-Checks cover tests, types, and builds. The isolated installation check packs a temporary copy of the source and installs it in a temporary directory.
+Checks cover types, lint, tests, builds, and formatting. The isolated installation check packs a temporary copy of the source and installs it in a temporary directory.
 It leaves the checkout's dist unchanged and does not publish to npm.
 Developers can read the [architecture](docs/architecture.md); coding agents should start with [AGENTS.md](AGENTS.md).
 See [Code Mode examples](docs/guides/code-mode-examples.md) for usage.

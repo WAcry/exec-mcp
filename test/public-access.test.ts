@@ -47,7 +47,9 @@ async function setup() {
   };
   let keyFetches = 0;
   const authFetch: typeof fetch = async (input) => {
-    expect(String(input)).toBe(issuer + "jwks");
+    expect(input instanceof Request ? input.url : String(input)).toBe(
+      issuer + "jwks",
+    );
     keyFetches++;
     return Response.json({ keys: [jwk] });
   };

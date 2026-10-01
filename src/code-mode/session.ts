@@ -373,6 +373,8 @@ export class CodeModeSession {
   ): Promise<RuntimeOutcome> {
     return new Promise((resolve, reject) => {
       monitorStreamFailure(stream, "execution");
+      // The stream handlers below are hoisted function declarations.
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       const session = this;
       let cellId: string | undefined;
       let settled = false;
@@ -609,8 +611,7 @@ export class CodeModeSession {
   }
 
   #handleToolCall(call: ProtoMessage): void {
-    let task!: Promise<void>;
-    task = this.#dispatchToolCall(call)
+    const task: Promise<void> = this.#dispatchToolCall(call)
       .catch((error: unknown) => {
         this.#fail(error instanceof Error ? error : new Error(String(error)));
       })

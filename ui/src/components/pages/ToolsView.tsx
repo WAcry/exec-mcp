@@ -218,7 +218,7 @@ function McpTab() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [management.data?.revision, management.data?.generation, refresh]);
+  }, [management.data?.revision, management.data?.generation, refresh, t]);
 
   const parsed = useMemo(
     () =>
@@ -372,6 +372,7 @@ function SkillsTab() {
     refresh,
     management.data?.revision,
     management.data?.generation,
+    t,
   ]);
   const usage = data ? (data.totalChars / Math.max(1, data.maxChars)) * 100 : 0;
   return (

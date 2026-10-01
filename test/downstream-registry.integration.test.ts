@@ -427,6 +427,8 @@ async function legacyHttpFixture(): Promise<{
     hangCall: false,
     callSessions: [] as (string | undefined)[],
   };
+  // A failure in this test server surfaces as a test error.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
   const server = createServer(async (request, response) => {
     if (request.method !== "POST") {
       response.writeHead(405).end();

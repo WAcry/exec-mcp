@@ -569,8 +569,13 @@ cell_id identifies a script. session_id identifies a terminal that remains usabl
 ## Local tools
 ${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
-const WAIT_DEFAULT =
-  DEFAULT_WAIT_YIELD_TIME_MS === MAX_WAIT_YIELD_TIME_MS
-    ? `${DEFAULT_WAIT_YIELD_TIME_MS} ms (also the maximum)`
-    : `${DEFAULT_WAIT_YIELD_TIME_MS} ms, at most ${MAX_WAIT_YIELD_TIME_MS}`;
+function waitDefault(defaultMs: number, maxMs: number): string {
+  return defaultMs === maxMs
+    ? `${defaultMs} ms (also the maximum)`
+    : `${defaultMs} ms, at most ${maxMs}`;
+}
+const WAIT_DEFAULT = waitDefault(
+  DEFAULT_WAIT_YIELD_TIME_MS,
+  MAX_WAIT_YIELD_TIME_MS,
+);
 export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;

@@ -100,7 +100,7 @@ export function CodeView({
     const grammar = language === "text" ? undefined : Prism.languages[language];
     return grammar
       ? Prism.highlight(code, grammar, language)
-      : Prism.util.encode(code).toString();
+      : (Prism.util.encode(code) as string);
   }, [code, language]);
   return (
     <CodeSurface

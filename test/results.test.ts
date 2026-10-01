@@ -65,7 +65,7 @@ describe("lossless result boundary", () => {
   });
   it("keeps large text intact without spill or duplicate structured output", async () => {
     const text = "大结果😀".repeat(5000);
-    const nested = await prepareNestedToolResult({ text });
+    const nested = prepareNestedToolResult({ text });
     expect(JSON.parse(nested.toString())).toEqual({ text });
     const result = outputItemsToCallToolResult([{ type: "text", text }], false);
     expect(result).toEqual({ content: [{ type: "text", text }] });

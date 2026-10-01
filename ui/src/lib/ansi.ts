@@ -13,6 +13,7 @@ export interface AnsiSegment extends AnsiStyle {
 
 // CSI (including SGR), OSC terminated by BEL or ST, and single-character escapes.
 const ESCAPE =
+  // eslint-disable-next-line no-control-regex -- matches terminal escape sequences
   /\x1b\[([0-9;?]*)([@-~])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 
 function paletteColor(index: number): string {
@@ -30,7 +31,7 @@ function applySgr(style: AnsiStyle, parameters: string): AnsiStyle {
   const codes = parameters === "" ? [0] : parameters.split(";").map(Number);
   let next: AnsiStyle = { ...style };
   for (let index = 0; index < codes.length; index++) {
-    const code = codes[index]!;
+    const code = codes[index];
     if (code === 0) next = {};
     else if (code === 1) next.bold = true;
     else if (code === 2) next.dim = true;
@@ -50,7 +51,7 @@ function applySgr(style: AnsiStyle, parameters: string): AnsiStyle {
     else if (code === 38 || code === 48) {
       const key = code === 38 ? "fg" : "bg";
       if (codes[index + 1] === 5 && codes[index + 2] !== undefined) {
-        next[key] = paletteColor(codes[index + 2]!);
+        next[key] = paletteColor(codes[index + 2]);
         index += 2;
       } else if (codes[index + 1] === 2 && codes[index + 4] !== undefined) {
         next[key] =

@@ -11,7 +11,7 @@ export interface SubCallRecord {
   timestamp: string;
   durationMs: number;
   input: unknown;
-  output?: unknown | undefined;
+  output?: unknown;
   error?: string | undefined;
   /** running: recorded at start so the console can show the call in progress. */
   status: "running" | "success" | "error";
@@ -44,7 +44,7 @@ export interface CallRecord {
   subcalls: SubCallRecord[];
   omittedSubcalls?: number | undefined;
   truncatedFields?: number | undefined;
-  output?: unknown | undefined;
+  output?: unknown;
   error?: string | undefined;
 }
 

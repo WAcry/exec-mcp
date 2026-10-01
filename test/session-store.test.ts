@@ -48,7 +48,7 @@ describe("native session store/load", () => {
     const writer = await run(value, 'store("finished",42);yield_control();');
     const id = cellId(writer);
     const deadline = Date.now() + 3000;
-    let visible = false;
+    let visible: boolean;
     do {
       visible = jsonOutput<boolean>(
         await run(value, 'text(load("finished")===42);'),

@@ -35,8 +35,10 @@ export function asText(value: unknown): string {
   if (typeof value === "string") return value;
   if (value === undefined) return "";
   try {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- fallback for values JSON cannot encode
     return JSON.stringify(value, null, 2) ?? String(value);
   } catch {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- fallback for values JSON cannot encode
     return String(value);
   }
 }

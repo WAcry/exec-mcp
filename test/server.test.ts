@@ -351,6 +351,7 @@ describe("ingress boundaries", () => {
         { signal: controller.signal },
       );
     } catch {
+      // The aborted wait is expected to reject.
     } finally {
       clearTimeout(timer);
     }

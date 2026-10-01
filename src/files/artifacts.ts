@@ -122,6 +122,7 @@ export class ArtifactStore {
         leaf === "." ||
         leaf === ".." ||
         leaf.length > 255 ||
+        // eslint-disable-next-line no-control-regex -- file names must not contain control characters
         /[\x00-\x1f\x7f/\\]/u.test(leaf)
       )
         throw new Error(
@@ -159,7 +160,9 @@ export class ArtifactStore {
           );
         this.#sweep();
         // Let removals in progress return their space before the quota check.
-        await Promise.all([...this.#all].map((record) => record.removing));
+        await Promise.all(
+          [...this.#all].flatMap((record) => record.removing ?? []),
+        );
         charge = Number(before.size) + 4096;
         if (charge > this.config.max_export_bytes - this.#usedBytes) {
           charge = 0;
@@ -352,7 +355,9 @@ export class ArtifactStore {
         await Promise.allSettled([...this.#operations]);
       for (const record of this.#all) this.#retire(record);
       try {
-        await Promise.all([...this.#all].map((record) => record.removing));
+        await Promise.all(
+          [...this.#all].flatMap((record) => record.removing ?? []),
+        );
       } finally {
         if (this.#root)
           await rm(await this.#root, { recursive: true, force: true });

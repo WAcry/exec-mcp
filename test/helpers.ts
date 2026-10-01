@@ -53,7 +53,9 @@ export function jsonOutput<T = Record<string, unknown>>(
   for (const text of texts(result).toReversed()) {
     try {
       return JSON.parse(text) as T;
-    } catch {}
+    } catch {
+      // Not JSON; try the previous text block.
+    }
   }
   throw new Error(`Missing JSON output: ${texts(result).join("\n")}`);
 }

@@ -393,6 +393,8 @@ describe("native host pressure reclamation", () => {
     const nativeStart = CodeModeHostProcess.prototype.start;
     vi.spyOn(CodeModeHostProcess.prototype, "start").mockImplementation(
       function (this: CodeModeHostProcess) {
+        // vi.spyOn needs a function expression to receive the instance.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
         host = this;
         return nativeStart.call(this);
       },

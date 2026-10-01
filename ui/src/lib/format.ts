@@ -142,13 +142,17 @@ export function utf8Bytes(text: string): number {
 
 /** Shows control characters sent to a terminal instead of hiding them. */
 export function visibleKeys(chars: string): string {
-  return chars
-    .replace(/\r\n|\n|\r/g, "⏎")
-    .replace(/\t/g, "⇥")
-    .replace(/\x1b/g, "⎋")
-    .replace(/[\x00-\x1f]/g, (char) =>
-      char.charCodeAt(0) === 0
-        ? "^@"
-        : `^${String.fromCharCode(char.charCodeAt(0) + 64)}`,
-    );
+  return (
+    chars
+      .replace(/\r\n|\n|\r/g, "⏎")
+      .replace(/\t/g, "⇥")
+      // eslint-disable-next-line no-control-regex -- shows control characters as symbols
+      .replace(/\x1b/g, "⎋")
+      // eslint-disable-next-line no-control-regex -- shows control characters as symbols
+      .replace(/[\x00-\x1f]/g, (char) =>
+        char.charCodeAt(0) === 0
+          ? "^@"
+          : `^${String.fromCharCode(char.charCodeAt(0) + 64)}`,
+      )
+  );
 }

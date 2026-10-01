@@ -97,7 +97,7 @@ export class PublicAccess {
     const value = request.headers.authorization;
     const match =
       typeof value === "string" &&
-      /^Bearer ([A-Za-z0-9._~+\/-]+=*)$/i.exec(value);
+      /^Bearer ([A-Za-z0-9._~+/-]+=*)$/i.exec(value);
     if (!match) {
       this.deny(response, 401);
       return false;

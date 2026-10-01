@@ -14,7 +14,7 @@ import { TOP_LEVEL_TOOL_NAMES } from "../src/tool-names.js";
 import { describeContract, nativeContracts } from "../src/catalog.js";
 import { resolveShell } from "../src/host/shell.js";
 
-const cleanups: (() => unknown | Promise<unknown>)[] = [];
+const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();
   vi.restoreAllMocks();

@@ -139,7 +139,8 @@ serveStdio(()=>{
       ],
     });
     resources.push(() => registry.close());
-    const tools = await registry.listTools();
+    await registry.initialize();
+    const tools = registry.bindingSnapshot();
     expect(tools).toHaveLength(1);
     const result = await registry.callTool(tools[0]!.id);
     expect(result.structuredContent).toEqual(expected);

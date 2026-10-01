@@ -152,6 +152,112 @@ export function grpcError(error: unknown, operation: string): Error {
   return new Error(`Code Mode ${operation} failed: ${message.slice(0, 512)}`);
 }
 
+interface StreamFailureMonitor {
+  release(): void;
+  throwIfFailed(): void;
+}
+
+/**
+ * Keeps a readable gRPC stream's error event handled across async handoffs.
+ * grpc-js emits a non-OK error immediately before terminal status, including
+ * after cancel() has already settled the operation that owned the stream.
+ */
+export function monitorStreamFailure(
+  stream: grpc.ClientReadableStream<ProtoMessage>,
+  operation: string,
+): StreamFailureMonitor {
+  let failure: Error | undefined;
+  let released = false;
+  const onError = (error: Error): void => {
+    failure ??= grpcError(error, operation);
+  };
+  const onEnd = (): void => {
+    failure ??= new Error(`Code Mode ${operation} stream ended unexpectedly`);
+  };
+  const onStatus = (): void => release();
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    stream.removeListener("error", onError);
+    stream.removeListener("end", onEnd);
+    stream.removeListener("status", onStatus);
+  };
+
+  stream.on("error", onError);
+  stream.on("end", onEnd);
+  stream.once("status", onStatus);
+  return {
+    release,
+    throwIfFailed(): void {
+      if (failure !== undefined) throw failure;
+    },
+  };
+}
+
+export function firstStreamMessage(
+  stream: grpc.ClientReadableStream<ProtoMessage>,
+  timeoutMs: number,
+  operation: string,
+): Promise<ProtoMessage> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      stream.cancel();
+      reject(new Error(`Code Mode ${operation} timed out`));
+    }, timeoutMs);
+    const onData = (message: ProtoMessage): void => {
+      cleanup();
+      stream.pause();
+      resolve(message);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(grpcError(error, operation));
+    };
+    const onEnd = (): void => {
+      cleanup();
+      reject(new Error(`Code Mode ${operation} stream ended early`));
+    };
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      stream.removeListener("data", onData);
+      stream.removeListener("error", onError);
+      stream.removeListener("end", onEnd);
+    };
+    stream.once("data", onData);
+    stream.once("error", onError);
+    stream.once("end", onEnd);
+  });
+}
+
+export function streamReady(
+  stream: grpc.ClientReadableStream<ProtoMessage>,
+  timeoutMs: number,
+  operation: string,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => finish(new Error(`Code Mode ${operation} timed out`)),
+      timeoutMs,
+    );
+    const finish = (error?: Error): void => {
+      clearTimeout(timer);
+      stream.removeListener("metadata", onMetadata);
+      stream.removeListener("error", onError);
+      stream.removeListener("end", onEnd);
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const onMetadata = (): void => finish();
+    const onError = (error: Error): void => finish(grpcError(error, operation));
+    const onEnd = (): void =>
+      finish(new Error(`Code Mode ${operation} stream ended early`));
+    stream.once("metadata", onMetadata);
+    stream.once("error", onError);
+    stream.once("end", onEnd);
+  });
+}
+
 function loadCodeModeHostConstructor(): CodeModeHostConstructor {
   const packageDefinition = protoLoader.loadSync(resolveProtoPath(), {
     defaults: false,

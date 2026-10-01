@@ -42,6 +42,7 @@ function service(
   options: CodeModeServiceOptions = {},
 ) {
   const reads: number[] = [];
+  const errors: Error[] = [];
   const reader = vi.fn(async (pid: number) => {
     reads.push(pid);
     return samples.length > 1 ? samples.shift()! : samples[0]!;
@@ -50,10 +51,11 @@ function service(
     memoryHighWaterBytes: 1000,
     memoryReader: reader,
     memoryCheckIntervalMs: 60_000,
+    onError: (error) => errors.push(error),
     ...options,
   });
   services.push(value);
-  return { value, reads, reader };
+  return { value, reads, reader, errors };
 }
 const run = (
   value: CodeModeService,
@@ -311,10 +313,15 @@ describe("native host pressure reclamation", () => {
     }
   });
   it("recycles an empty but resident host and can immediately serve the same metadata scope again", async () => {
-    const { value, reads } = service([1200, 1200, 500]);
+    const { value, reads, errors } = service([1200, 1200, 500]);
     await run(value, 'store("old",7);');
     await value.checkMemory();
     expect(opened[0]!.usable).toBe(false);
+    expect(errors.map((error) => error.message)).toEqual([
+      expect.stringMatching(
+        /^Restarting the Code Mode host \(PID \d+\) because memory was \d+ MiB after all native sessions were reclaimed/,
+      ),
+    ]);
     expect(jsonOutput(await run(value, 'text(load("old")===undefined);'))).toBe(
       true,
     );

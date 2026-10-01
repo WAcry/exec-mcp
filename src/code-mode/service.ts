@@ -26,6 +26,7 @@ import { CodeModeSession, type RuntimeOutcome } from "./session.js";
 import {
   SessionPool,
   MEMORY_RECLAIMED_TEXT,
+  SESSION_IDLE_MS,
   type RetirementReason,
   type SessionLease,
 } from "./session-pool.js";
@@ -51,8 +52,15 @@ export { INVALIDATED_CELL_RETENTION_MS } from "./cell-registry.js";
 export const INDETERMINATE_CELL_TEXT =
   "Code Mode host 在执行期间退出；结果不确定，工具副作用可能已发生，请先检查状态，勿自动重试。";
 
+/** Host failures and memory restarts go to the service's stderr by default. */
+function logError(error: Error): void {
+  process.stderr.write(`${error.message}\n`);
+}
+
 export class CodeModeService {
   readonly #admission = new WeightedAdmissionQueue();
+  readonly #cellIdleMs: number;
+  readonly #cellSweep: NodeJS.Timeout;
   readonly #cells = new CellRegistry(MEMORY_RECLAIMED_TEXT);
   readonly #defaultExecYieldTimeMs: number;
   readonly #defaultWaitYieldTimeMs: number;
@@ -101,7 +109,7 @@ export class CodeModeService {
     if (this.#maxYieldTimeMs !== undefined) {
       validateNonNegativeSafeInteger(this.#maxYieldTimeMs, "maxYieldTimeMs");
     }
-    const onError = options.onError ?? (() => undefined);
+    const onError = options.onError ?? logError;
     const memoryHighWater =
       options.memoryHighWaterBytes ??
       MEMORY_DEFAULTS.code_mode_high_water_mib * MiB;
@@ -151,6 +159,14 @@ export class CodeModeService {
       pool: this.#pool,
       reader: options.memoryReader ?? readProcessMemory,
     });
+    // A yielded cell holds its session lease until wait collects the result.
+    // Stop cells nobody observes so their sessions follow idle retention.
+    this.#cellIdleMs = options.sessionIdleMs ?? SESSION_IDLE_MS;
+    this.#cellSweep = setInterval(
+      () => this.#stopUnobservedCells(),
+      Math.min(this.#cellIdleMs, 60_000),
+    );
+    this.#cellSweep.unref();
   }
 
   async exec(request: CodeModeExecRequest): Promise<CodeModeToolResult> {
@@ -231,6 +247,7 @@ export class CodeModeService {
     validateYieldTime(yieldTimeMs, "yield-time_ms", MAX_WAIT_YIELD_TIME_MS);
     const scope = sessionScopeKey(request.sessionScope);
     const owner = this.#cells.owner(request.cellId, scope);
+    const endObservation = this.#cells.observe(owner);
     const startedAt = performance.now();
     const observe = async (): Promise<CodeModeToolResult> => {
       try {
@@ -270,11 +287,15 @@ export class CodeModeService {
         throw owner.lease.reclaimed ? new Error(MEMORY_RECLAIMED_TEXT) : error;
       }
     };
-    if (request.terminate === true) return observe();
-    return owner.observer.run(
-      request.signal ?? new AbortController().signal,
-      observe,
-    );
+    try {
+      if (request.terminate === true) return await observe();
+      return await owner.observer.run(
+        request.signal ?? new AbortController().signal,
+        observe,
+      );
+    } finally {
+      endObservation();
+    }
   }
 
   close(): Promise<void> {
@@ -304,6 +325,7 @@ export class CodeModeService {
 
   async #close(): Promise<void> {
     this.#stopping = true;
+    clearInterval(this.#cellSweep);
     await this.#memory.stop();
     this.#cells.clear();
     await this.#pool.close();
@@ -395,6 +417,13 @@ export class CodeModeService {
     void this.#terminateOwner(owner);
   }
 
+  #stopUnobservedCells(): void {
+    if (this.#stopping) return;
+    const message = `This exec cell was stopped because no wait call observed it for ${formatDuration(this.#cellIdleMs)}. Its unread output is lost, and side effects are not rolled back. Check the current state before you run the work again.`;
+    for (const owner of this.#cells.takeUnobserved(this.#cellIdleMs, message))
+      void this.#terminateOwner(owner);
+  }
+
   async #terminateOwner(owner: CellOwner): Promise<void> {
     try {
       await owner.session.terminate(owner.hostCellId);
@@ -420,6 +449,21 @@ export class CodeModeService {
   #requireRunning(): void {
     if (this.#stopping) throw new Error("Code Mode service is shutting down");
   }
+}
+
+function formatDuration(milliseconds: number): string {
+  const units: [number, string][] = [
+    [3_600_000, "hour"],
+    [60_000, "minute"],
+    [1_000, "second"],
+  ];
+  for (const [size, unit] of units) {
+    if (milliseconds >= size) {
+      const value = Math.round(milliseconds / size);
+      return `${value} ${unit}${value === 1 ? "" : "s"}`;
+    }
+  }
+  return `${milliseconds} ms`;
 }
 
 function notifyState(

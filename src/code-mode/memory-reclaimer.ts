@@ -168,7 +168,11 @@ export class MemoryReclaimer {
       if (!closing) {
         // Empty but resident allocator state can be released by replacing the host.
         // Live replacement generations are deliberately left to the next sample.
-        if (this.#pool.size === 0 && current()) await this.#restartHost(host);
+        if (this.#pool.size === 0 && current())
+          await this.#restartHost(
+            host,
+            `memory was ${mib(bytes)} MiB after all native sessions were reclaimed`,
+          );
         return;
       }
       let timeout: NodeJS.Timeout | undefined;
@@ -189,7 +193,10 @@ export class MemoryReclaimer {
         if (current()) {
           const remaining = await this.#read(host);
           if (current() && remaining > this.#highWaterBytes)
-            await this.#restartHost(host);
+            await this.#restartHost(
+              host,
+              `a reclaimed session did not close within ${this.#closeTimeoutMs} ms and memory was ${mib(remaining)} MiB`,
+            );
         }
         return;
       } finally {
@@ -210,9 +217,14 @@ export class MemoryReclaimer {
     return bytes;
   }
 
-  #restartHost(host: HostIdentity): Promise<void> {
+  #restartHost(host: HostIdentity, reason: string): Promise<void> {
     if (this.#restarting) return this.#restarting;
     if (this.#stopped || this.#host.identity !== host) return Promise.resolve();
+    this.#report(
+      new Error(
+        `Restarting the Code Mode host (PID ${host.pid}) because ${reason}, above the ${mib(this.#highWaterBytes)} MiB high-water mark. All native sessions, running cells and stored values on this host are lost.`,
+      ),
+    );
     this.#restarting = (async () => {
       this.#invalidateAll();
       await this.#host.stop();
@@ -230,4 +242,8 @@ export class MemoryReclaimer {
       /* Observability is not execution control. */
     }
   }
+}
+
+function mib(bytes: number): number {
+  return Math.round(bytes / (1024 * 1024));
 }

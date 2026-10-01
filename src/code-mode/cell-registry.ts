@@ -16,6 +16,10 @@ export interface CellOwner {
   /** Keeps the native session in use until the cell result is collected. */
   lease: SessionLease;
   takeAttachments?: CodeModeExecRequest["takeAttachments"];
+  /** When the cell last yielded or a wait call for it started or ended. */
+  lastObservedAt: number;
+  /** Wait calls in progress, including calls queued behind the observer. */
+  observing: number;
 }
 
 interface InvalidatedCell {
@@ -42,14 +46,55 @@ export class CellRegistry {
   /** Records the owner of a yielded cell and returns its public handle. */
   track(
     handle: string | undefined,
-    owner: Omit<CellOwner, "observer">,
+    owner: Omit<CellOwner, "observer" | "lastObservedAt" | "observing">,
+    now = Date.now(),
   ): string {
     const id = handle ?? randomHandle("cell");
-    this.#owners.set(id, {
-      ...owner,
-      observer: this.#owners.get(id)?.observer ?? new CancellableMutex(),
-    });
+    const existing = this.#owners.get(id);
+    if (existing === undefined) {
+      this.#owners.set(id, {
+        ...owner,
+        observer: new CancellableMutex(),
+        lastObservedAt: now,
+        observing: 0,
+      });
+    } else {
+      // Keep the same object: wait calls in progress hold a reference to it.
+      Object.assign(existing, owner, { lastObservedAt: now });
+    }
     return id;
+  }
+
+  /** Marks a wait call for this cell as started. Call the result when it ends. */
+  observe(owner: CellOwner, now = Date.now()): () => void {
+    owner.observing += 1;
+    owner.lastObservedAt = now;
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      owner.observing -= 1;
+      owner.lastObservedAt = Date.now();
+    };
+  }
+
+  /**
+   * Removes cells that no wait call has observed for idleMs and records why.
+   * The caller stops each returned cell and releases its lease.
+   */
+  takeUnobserved(
+    idleMs: number,
+    message: string,
+    now = Date.now(),
+  ): CellOwner[] {
+    const taken: CellOwner[] = [];
+    for (const [handle, owner] of this.#owners) {
+      if (owner.observing > 0 || now - owner.lastObservedAt < idleMs) continue;
+      this.#owners.delete(handle);
+      this.#record(handle, owner.scope, message);
+      taken.push(owner);
+    }
+    return taken;
   }
 
   /** Forgets a cell whose final result was returned. */

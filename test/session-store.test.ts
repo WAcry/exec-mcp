@@ -289,7 +289,7 @@ describe("native session store/load", () => {
     expect(jsonOutput(await run(value, 'text(load("keep"));'))).toBe(5);
   });
 
-  it("expires idle storage but never expires an unconsumed cell", async () => {
+  it("keeps storage while a yielded cell is observed, then expires it when idle", async () => {
     const value = service(250);
     await run(value, 'store("cached",7);');
     const pending = await value.exec({
@@ -297,12 +297,13 @@ describe("native session store/load", () => {
       tools: [],
       sessionScope: "conversation-a",
     });
-    await pause(550);
+    await pause(150);
     expect(jsonOutput(await run(value, 'text(load("cached"));'))).toBe(7);
-    await value.wait({
+    const final = await value.wait({
       cellId: cellId(pending),
       sessionScope: "conversation-a",
     });
+    expect(texts(final).join("\n")).toContain("final");
     await pause(550);
     expect(
       jsonOutput(await run(value, 'text(load("cached")===undefined);')),

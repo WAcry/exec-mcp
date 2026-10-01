@@ -2,7 +2,7 @@
 
 English | [简体中文](003-results-lifecycle.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-10-01.
 
 ## Deduplication and presentation
 
@@ -58,9 +58,18 @@ leaving transport margin. The task can keep running; completion, an explicit yie
 There is no standalone sleep tool, background model polling, or persistent task scheduler.
 
 Cancelling one wait stops observation only. Terminating a cell requests cancellation of unfinished nested calls.
+Cancelling an exec request terminates its cell. If the host has not yet reported the cell, the cancellation returns at once,
+and the service terminates the cell when its ID arrives; tool calls from a cancelled exec do not run.
+A completion that loses a race with a cancellation counts as cancelled and does not fail the native session.
 Terminals whose session_id has already been returned require explicit termination. Removing an observer detaches its listeners and leaves undelivered output for later collection.
 Cancellation, disconnection, host failure, or failed result delivery can leave effective side effects. Reconnection never replays scripts or downstream calls automatically.
 Scripts must await promises that need to finish; unawaited work may be discarded. Host message injection through notify is not connected.
+
+A yielded cell keeps its native session in use until wait returns its final result, so its store and memory stay allocated.
+A cell that no wait call observes for the idle retention period is terminated and releases its session,
+which then follows normal idle retention. A wait in progress counts as observation, including one queued behind another wait.
+A later wait for that cell_id returns the reason. Unread output is lost, side effects remain, and terminals it started stay independent.
+The alternative, keeping unobserved cells until memory pressure, held conversations past their idle retention without a reader.
 
 ## Native store/load
 
@@ -71,7 +80,7 @@ The pinned version ignores some heap settings, so those fields cannot count as e
 
 Each cell reads a starting snapshot, and load returns a copy. Writes merge when the cell finishes, including writes before a script error.
 Terminating an uncommitted cell discards its writes. Concurrent writes to the same key have no transaction guarantee, and store/load is not real-time communication between active cells.
-Finishing one cell leaves other cells in the conversation intact. Completed results can still be retrieved by their original cell_id.
+Finishing one cell leaves other cells in the conversation intact. Completed results can still be retrieved by their original cell_id within the idle retention period.
 
 Conversations are grouped by a digest of the host's openai/session value. Connections, turns, and working directories can change without changing that association.
 Without an identifier, ordinary execution still works and store/load fails instead of creating global shared storage. The connection layer handles authentication.
@@ -89,7 +98,9 @@ If no idle candidate remains and memory is still high, reclaim the least recentl
 Stop reclaiming active sessions below the high-water mark. A pass considers only generations present at its start, leaving new instances for the next pass.
 
 If closing fails while memory stays high, or freeing all state leaves it high, the shared host may be restarted.
-That affects other native sessions and must be reported. If the old host's termination cannot be confirmed, do not start another beside it; later recovery can retry.
+That affects other native sessions. The service writes the restart and its reason to stderr, and later waits for lost cells return the reclamation message.
+An unexpected host exit is also written to stderr with the host's recent stderr output.
+If the old host's termination cannot be confirmed, do not start another beside it; later recovery can retry.
 Sampling and reclamation lag behind allocation, so bursts may still exhaust memory. Independent terminals are retained, and callers explicitly write persistent data to files.
 
 ## Execution status and diagnostics

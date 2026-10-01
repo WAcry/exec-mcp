@@ -14,6 +14,9 @@ import { ActivityStore } from "./web/activity.js";
 import { ConfigEditor } from "./web/config-edit.js";
 import { ServiceController } from "./service-controller.js";
 import { runWithToken, WITH_TOKEN_USAGE } from "./with-token.js";
+import { SessionNotes } from "./session-notes.js";
+import { sessionNotesPath } from "./session-notes-file.js";
+import { ProtocolCounter } from "./http/protocol-stats.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (argv[0] === "with-token") {
@@ -112,6 +115,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const config = initial.config;
   const web = effectiveWebConfig(config.web);
   const activity = new ActivityStore({ enabled: web.enabled });
+  // Conversation messages outlive the process; audit records stay in memory.
+  const notes = new SessionNotes(undefined, undefined, {
+    file: sessionNotesPath(filename),
+  });
   const startup = new AbortController();
   const cancelStartup = () => startup.abort(new Error("Startup was canceled."));
   process.once("SIGINT", cancelStartup);
@@ -120,6 +127,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     server = await startServer(config, {
       activity,
+      notes,
+      protocol: new ProtocolCounter(),
       signal: startup.signal,
       onDownstreamProgress: (event) =>
         console.error(
@@ -190,7 +199,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       controller.close(),
       ...(webServer ? [webServer.close()] : []),
     ];
-    void Promise.allSettled(tasks).then((results) => {
+    void Promise.allSettled(tasks).then(async (results) => {
+      // Last, so changes from calls that ended during shutdown are saved too.
+      await notes.close();
       if (results.some((result) => result.status === "rejected")) {
         console.error("A cleanup error occurred while the service stopped.");
         process.exitCode = 1;

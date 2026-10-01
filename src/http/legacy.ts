@@ -11,7 +11,14 @@ interface LegacySession {
   readonly transport: WebStandardStreamableHTTPServerTransport;
   activeResponses: number;
   lastUsedAt: number;
+  /** Counted as opened once the client finished initialize. */
+  opened?: true;
   closePromise?: Promise<void>;
+}
+
+export interface LegacySessionEvents {
+  opened(): void;
+  closed(): void;
 }
 
 /** Keeps 2025 protocol requests on one transport so cancellation reaches the active call. */
@@ -20,6 +27,7 @@ export class LegacySessionRouter {
   readonly #factory: () => McpServer;
   readonly #idleMs: number;
   readonly #onError: (error: Error) => void;
+  readonly #events: LegacySessionEvents | undefined;
   readonly #sessions = new Map<string, LegacySession>();
   readonly #sweepTimer: NodeJS.Timeout;
   #closed = false;
@@ -27,13 +35,14 @@ export class LegacySessionRouter {
   constructor(
     factory: () => McpServer,
     onError: (error: Error) => void,
-    options: { idleMs: number; sweepMs: number },
+    options: { idleMs: number; sweepMs: number; events?: LegacySessionEvents },
   ) {
     assertPositiveSafeInteger(options.idleMs, "legacySessionIdleMs");
     assertPositiveSafeInteger(options.sweepMs, "legacySessionSweepMs");
     this.#factory = factory;
     this.#idleMs = options.idleMs;
     this.#onError = onError;
+    this.#events = options.events;
     this.#sweepTimer = setInterval(() => this.#sweep(), options.sweepMs);
     this.#sweepTimer.unref();
   }
@@ -88,6 +97,8 @@ export class LegacySessionRouter {
         if (this.#sessions.has(sessionId))
           throw new Error("MCP session ID collision");
         this.#sessions.set(sessionId, session);
+        session.opened = true;
+        this.#notify("opened");
       },
       onsessionclosed: (sessionId) => {
         if (this.#sessions.get(sessionId) === session)
@@ -150,6 +161,7 @@ export class LegacySessionRouter {
   #closeSession(session: LegacySession): Promise<void> {
     session.closePromise ??= (async () => {
       this.#all.delete(session);
+      if (session.opened) this.#notify("closed");
       const sessionId = session.transport.sessionId;
       if (
         sessionId !== undefined &&
@@ -160,6 +172,14 @@ export class LegacySessionRouter {
       await session.server.close();
     })();
     return session.closePromise;
+  }
+
+  #notify(event: keyof LegacySessionEvents): void {
+    try {
+      this.#events?.[event]();
+    } catch {
+      // Counting must not change session handling.
+    }
   }
 
   #sweep(): void {

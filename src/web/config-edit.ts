@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "./api-types.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   readFile,
@@ -26,6 +27,7 @@ export type ConfigToggle =
 export class ConfigEditError extends Error {
   constructor(
     readonly status: number,
+    readonly code: ApiErrorCode,
     message: string,
   ) {
     super(message);
@@ -117,6 +119,7 @@ export function setTomlBoolean(
   if (parent.some((part) => typeof part === "number"))
     throw new ConfigEditError(
       422,
+      "config_entry_missing",
       "Cannot find this configuration entry. Edit the configuration file directly.",
     );
   return (
@@ -187,6 +190,7 @@ export class ConfigEditor {
     } catch {
       throw new ConfigEditError(
         422,
+        "config_unreadable",
         "Cannot read or parse config.toml. Check the configuration in a terminal.",
       );
     }
@@ -200,6 +204,7 @@ export class ConfigEditor {
       if (current.revision !== revision)
         throw new ConfigEditError(
           409,
+          "config_conflict",
           "Another change updated the configuration. Refresh and try again.",
         );
       let source = current.source;
@@ -210,6 +215,7 @@ export class ConfigEditor {
         if (!servers || !Object.hasOwn(servers, change.name))
           throw new ConfigEditError(
             404,
+            "config_entry_missing",
             "This MCP server is not in the configuration. This control only turns existing servers on or off.",
           );
         source = setTomlBoolean(
@@ -232,6 +238,7 @@ export class ConfigEditor {
         if (!skill)
           throw new ConfigEditError(
             404,
+            "config_entry_missing",
             "This Skill is not in the folder. Refresh the Skill list.",
           );
         const rules = current.config.skills?.config ?? [];
@@ -262,6 +269,7 @@ export class ConfigEditor {
       } catch {
         throw new ConfigEditError(
           422,
+          "config_unsafe_edit",
           "The way this configuration is written does not let the console change only this field safely. Edit it in a terminal.",
         );
       }
@@ -278,6 +286,7 @@ export class ConfigEditor {
         if ((await this.read()).revision !== revision)
           throw new ConfigEditError(
             409,
+            "config_conflict",
             "Another change updated the configuration. Refresh and try again.",
           );
         await rename(temporary, current.filename);

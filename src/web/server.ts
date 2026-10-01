@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod/v4";
 import type { ExecRuntime } from "../runtime.js";
 import { defaultConfigPath, type Config } from "../config.js";
 import { SseBroker } from "./events.js";
@@ -25,13 +26,15 @@ import type { ServiceController } from "../service-controller.js";
 import { ConfigEditError, type ConfigToggle } from "./config-edit.js";
 import { resolveUserPath } from "../util.js";
 import { callListItem } from "./call-summary.js";
-import { SessionNoteError } from "../session-notes.js";
+import { SessionNoteError, type SessionNotes } from "../session-notes.js";
 import { QUESTION_ANSWER_SCHEMA } from "../user-questions.js";
 import { NOTE_MAX_BYTES } from "../session-notes-types.js";
+import type { ProtocolCounter } from "../http/protocol-stats.js";
+import type { ActivityStore } from "./activity.js";
+import type * as Api from "./api-types.js";
 import {
   WEB_ACTION_HEADER,
   WEB_COOKIE,
-  applyCorsForAllowedOrigin,
   applyWebSecurityHeaders,
   isTrustedLoopbackRequest,
   parseCookies,
@@ -43,6 +46,8 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const JSON_BODY_BYTES = 64 * 1024;
+// JSON escaping can make a valid 30 KB message larger than the usual management body cap.
+const NOTE_BODY_BYTES = NOTE_MAX_BYTES * 6 + 2048;
 
 export interface WebServerInstance {
   server: Server;
@@ -63,11 +68,14 @@ export interface WebServerOptions {
   configPath?: string | undefined;
   mcpUrl?: string | undefined;
   controller?: ServiceController;
+  /** MCP wire counts when no controller supplies the current server. */
+  protocol?: ProtocolCounter | undefined;
 }
 
-class HttpError extends Error {
+export class HttpError extends Error {
   constructor(
     readonly status: number,
+    readonly code: Api.ApiErrorCode,
     message: string,
   ) {
     super(message);
@@ -109,10 +117,37 @@ export async function startWebServer(
   const mcpUrl = options.mcpUrl ? new URL(options.mcpUrl) : undefined;
   const exposed = webIsExposed(web);
   const sse = new SseBroker();
-  let observedActivity = runtime.activity;
-  let unsubscribeActivity = observedActivity.subscribe((event) => {
-    sse.broadcast(event);
-  });
+  const currentRuntime = () =>
+    options.controller?.current.server.runtime ?? runtime;
+
+  // Follow the runtime the controller serves now; a restart rebinds at once.
+  let observedActivity: ActivityStore | undefined;
+  let unsubscribeActivity = () => {};
+  let observedNotes: SessionNotes | undefined;
+  let unsubscribeNotes = () => {};
+  const bind = () => {
+    const active = currentRuntime();
+    let reset = false;
+    if (active.activity !== observedActivity) {
+      unsubscribeActivity();
+      reset = observedActivity !== undefined;
+      observedActivity = active.activity;
+      unsubscribeActivity = observedActivity.subscribe((event) =>
+        sse.broadcast(event),
+      );
+    }
+    if (active.notes !== observedNotes) {
+      unsubscribeNotes();
+      observedNotes = active.notes;
+      unsubscribeNotes = observedNotes.openWeb((event) => sse.broadcast(event));
+    }
+    // Calls from a replaced store would return 404, so open timelines start over.
+    if (reset) sse.broadcast({ type: "call:clear" } satisfies Api.LiveEvent);
+  };
+  const unbind = () => {
+    unsubscribeActivity();
+    unsubscribeNotes();
+  };
 
   let publicDir = options.publicDir;
   if (!publicDir) {
@@ -139,25 +174,12 @@ export async function startWebServer(
   const server = createServer(async (req, res) => {
     applyWebSecurityHeaders(res, isTrustedLoopbackRequest(req));
     if (!requestOriginAllowed(req)) {
-      jsonResponse(res, 403, {
-        error: "forbidden_origin",
-        message: "Web UI 仅接受同源请求。",
-      });
-      return;
-    }
-    applyCorsForAllowedOrigin(req, res);
-
-    if (req.method === "OPTIONS") {
-      res.setHeader(
-        "Access-Control-Allow-Methods",
-        "GET, POST, DELETE, OPTIONS",
+      fail(
+        res,
+        403,
+        "forbidden_origin",
+        "The Web UI accepts only same-origin requests.",
       );
-      res.setHeader(
-        "Access-Control-Allow-Headers",
-        `Content-Type, Authorization, x-exec-token, ${WEB_ACTION_HEADER}`,
-      );
-      res.writeHead(204);
-      res.end();
       return;
     }
 
@@ -168,10 +190,27 @@ export async function startWebServer(
         `http://${req.headers.host ?? "invalid"}`,
       );
     } catch {
-      jsonResponse(res, 400, { error: "invalid_url" });
+      fail(res, 400, "invalid_url", "The request URL is not valid.");
       return;
     }
     const pathname = reqUrl.pathname;
+
+    if (!pathname.startsWith("/api/")) {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        res.setHeader("Allow", "GET, HEAD");
+        res.writeHead(405);
+        res.end();
+        return;
+      }
+      try {
+        await serveStatic({ pathname, method: req.method, res, publicDir });
+      } catch (error) {
+        if (!res.headersSent) respondError(res, error);
+        else res.destroy();
+      }
+      return;
+    }
+
     const isLocal = isTrustedLoopbackRequest(req);
     const cookies = parseCookies(req.headers.cookie);
     const headerToken = Array.isArray(req.headers["x-exec-token"])
@@ -181,126 +220,71 @@ export async function startWebServer(
       ? req.headers.authorization.slice(7).trim()
       : undefined;
     const clientToken = headerToken ?? bearer;
-    const sessionValid = auth.verifyCookie(cookies[WEB_COOKIE]);
-    const authorized =
+    const credentialValid = () =>
       isLocal ||
       (clientToken === undefined
-        ? sessionValid
+        ? auth.verifyCookie(cookies[WEB_COOKIE])
         : tokenMatches(clientToken, auth.token));
-    const isUnsafe = !new Set(["GET", "HEAD", "OPTIONS"]).has(
-      req.method ?? "GET",
-    );
+    const sessionValid = auth.verifyCookie(cookies[WEB_COOKIE]);
 
-    if (pathname === "/api/auth/verify" && req.method === "POST") {
-      if (req.headers[WEB_ACTION_HEADER] !== "1") {
-        jsonResponse(res, 403, { error: "missing_action_header" });
-        return;
-      }
-      try {
-        const body = (await readJsonBody(req)) as { token?: unknown };
-        if (
-          auth.verifyCookie(cookies[WEB_COOKIE]) ||
-          (typeof body.token === "string" &&
-            tokenMatches(body.token, auth.token))
-        ) {
-          res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
-          jsonResponse(res, 200, { valid: true });
-        } else {
-          jsonResponse(res, 401, { valid: false, message: "密钥不正确" });
-        }
-      } catch (error) {
-        respondError(res, error);
-      }
-      return;
-    }
-
-    if (pathname === "/api/auth/logout" && req.method === "POST") {
-      if (req.headers[WEB_ACTION_HEADER] !== "1") {
-        jsonResponse(res, 403, { error: "missing_action_header" });
-        return;
-      }
-      res.setHeader("Set-Cookie", webCookie("", true));
-      jsonResponse(res, 200, { success: true });
-      return;
-    }
-
-    if (pathname.startsWith("/api/") && !authorized) {
-      jsonResponse(res, 401, {
-        error: "unauthorized",
-        message: "此 Web UI 请求需要有效访问密钥。",
-        needAuth: true,
-      });
-      return;
-    }
-    if (
-      pathname.startsWith("/api/") &&
-      isUnsafe &&
-      req.headers[WEB_ACTION_HEADER] !== "1"
-    ) {
-      jsonResponse(res, 403, {
-        error: "missing_action_header",
-        message: "管理操作缺少 Web UI 请求标记。",
-      });
-      return;
-    }
-
-    if (pathname.startsWith("/api/")) {
-      try {
-        // The UI already requests status on entry and while open. Renew there,
-        // without adding a refresh poll or issuing cookies on long-lived streams.
-        if (pathname === "/api/status" && req.method === "GET" && sessionValid)
-          res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
-        const current = options.controller?.current;
-        const activeRuntime = current?.server.runtime ?? runtime;
-        if (activeRuntime.activity !== observedActivity) {
-          unsubscribeActivity();
-          observedActivity = activeRuntime.activity;
-          unsubscribeActivity = observedActivity.subscribe((event) =>
-            sse.broadcast(event),
-          );
-        }
-        await handleApiRoute({
-          pathname,
-          reqUrl,
-          req,
-          res,
-          runtime: activeRuntime,
-          config: current?.config ?? config,
-          web: { ...web, port: actualPort },
-          isLocal,
-          sse,
-          configPath,
-          loopbackUrl: loopbackUrlFor(web.host, actualPort),
-          mcpUrl: current ? new URL(current.server.url) : mcpUrl,
-          ...(options.controller ? { controller: options.controller } : {}),
-          lanUrls: () => lanUrlsFor(auth.token),
-          regenerateToken: () => auth.rotate(),
-          sessionCookie: () => webCookie(auth.issueCookie()),
-          eventAuthorized: () =>
-            isLocal ||
-            (clientToken === undefined
-              ? auth.verifyCookie(cookies[WEB_COOKIE])
-              : tokenMatches(clientToken, auth.token)),
-        });
-      } catch (error) {
-        if (error instanceof ConfigEditError && !res.headersSent) {
-          jsonResponse(res, error.status, { error: error.message });
-          return;
-        }
-        if (!res.headersSent) respondError(res, error);
-        else res.destroy();
-      }
-      return;
-    }
-
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      res.setHeader("Allow", "GET, HEAD");
-      res.writeHead(405);
-      res.end();
-      return;
-    }
     try {
-      await serveStatic({ pathname, method: req.method, res, publicDir });
+      const match = matchRoute(req.method ?? "GET", pathname);
+      if (match.kind === "method") {
+        // Authentication still comes first, so the method list is not public.
+        if (!credentialValid()) throw unauthorized();
+        res.setHeader("Allow", match.allow.join(", "));
+        throw new HttpError(
+          405,
+          "method_not_allowed",
+          "This endpoint does not accept this HTTP method.",
+        );
+      }
+      if (match.kind === "none") {
+        if (!credentialValid()) throw unauthorized();
+        throw new HttpError(404, "not_found", "Unknown endpoint.");
+      }
+      const { route, params } = match;
+      if (!route.public && !credentialValid()) throw unauthorized();
+      if (route.method !== "GET" && req.headers[WEB_ACTION_HEADER] !== "1")
+        throw new HttpError(
+          403,
+          "missing_action_header",
+          "This request needs the Web UI request header.",
+        );
+      if (route.loopback && !isLocal)
+        throw new HttpError(403, "loopback_only", route.loopback);
+      // The UI already requests status on entry and while open. Renew there,
+      // without adding a refresh poll or issuing cookies on long-lived streams.
+      if (pathname === "/api/status" && sessionValid)
+        res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
+      const body = route.body
+        ? parseBody(
+            route.body,
+            await readJsonBody(req, route.maxBody ?? JSON_BODY_BYTES),
+          )
+        : undefined;
+      const current = options.controller?.current;
+      await route.handle({
+        req,
+        res,
+        query: reqUrl.searchParams,
+        params,
+        body,
+        runtime: currentRuntime(),
+        config: current?.config ?? config,
+        web: { ...web, port: actualPort },
+        isLocal,
+        sse,
+        configPath,
+        loopbackUrl: loopbackUrlFor(web.host, actualPort),
+        mcpUrl: current ? new URL(current.server.url) : mcpUrl,
+        protocol: current?.server.protocol ?? options.protocol,
+        controller: options.controller,
+        cookies,
+        auth,
+        lanUrls: () => lanUrlsFor(auth.token),
+        eventAuthorized: credentialValid,
+      });
     } catch (error) {
       if (!res.headersSent) respondError(res, error);
       else res.destroy();
@@ -310,15 +294,21 @@ export async function startWebServer(
   try {
     actualPort = await listen(server, web.port, web.host);
   } catch (error) {
-    unsubscribeActivity();
     sse.close();
     server.closeAllConnections();
     throw error;
   }
 
-  const unsubscribeNotes = runtime.notes.openWeb((event) =>
-    sse.broadcast(event),
-  );
+  bind();
+  const unsubscribeController = options.controller?.subscribe(() => {
+    bind();
+    const controller = options.controller!;
+    sse.broadcast({
+      type: "runtime",
+      state: controller.state,
+      generation: controller.generation,
+    } satisfies Api.LiveEvent);
+  });
 
   const loopbackUrl = loopbackUrlFor(web.host, actualPort);
   return {
@@ -335,8 +325,8 @@ export async function startWebServer(
     },
     async close() {
       closePromise ??= (async () => {
-        unsubscribeActivity();
-        unsubscribeNotes();
+        unsubscribeController?.();
+        unbind();
         sse.close();
         await new Promise<void>((resolve, reject) => {
           server.close((error) => (error ? reject(error) : resolve()));
@@ -346,6 +336,14 @@ export async function startWebServer(
       await closePromise;
     },
   };
+}
+
+function unauthorized(): HttpError {
+  return new HttpError(
+    401,
+    "unauthorized",
+    "This Web UI request needs a valid access token.",
+  );
 }
 
 function loopbackUrlFor(host: WebConfig["host"], port: number): string {
@@ -369,18 +367,19 @@ async function listen(
     });
   } catch (error) {
     throw new Error(
-      `无法在 ${host}:${port} 启动 Web UI；请修改 [web] 端口或监听地址。`,
+      `Cannot start the Web UI on ${host}:${port}. Change the [web] port or host.`,
       { cause: error },
     );
   }
   return (server.address() as AddressInfo).port;
 }
 
-interface RouteContext {
-  pathname: string;
-  reqUrl: URL;
+interface RouteContext<B> {
   req: IncomingMessage;
   res: ServerResponse;
+  query: URLSearchParams;
+  params: Record<string, string>;
+  body: B;
   runtime: ExecRuntime;
   config: Config;
   web: WebConfig;
@@ -388,453 +387,564 @@ interface RouteContext {
   sse: SseBroker;
   configPath: string;
   loopbackUrl: string;
-  mcpUrl?: URL | undefined;
+  mcpUrl: URL | undefined;
+  protocol: ProtocolCounter | undefined;
+  controller: ServiceController | undefined;
+  cookies: Record<string, string>;
+  auth: WebSessionAuth;
   lanUrls(): string[];
-  regenerateToken(): string;
-  sessionCookie(): string;
+  /** Checked again at each event, so expiry and key rotation end the stream. */
   eventAuthorized(): boolean;
-  controller?: ServiceController;
 }
 
-async function handleApiRoute(context: RouteContext): Promise<void> {
-  const {
-    pathname,
-    reqUrl,
-    req,
-    res,
-    runtime,
-    config,
-    web,
-    isLocal,
-    sse,
-    configPath,
-    mcpUrl,
-  } = context;
+interface Route<B = unknown> {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  /** Literal segments and :name parameters, matched against the whole path. */
+  path: string;
+  /** Validated JSON body; routes without one never read the body. */
+  body?: z.ZodType<B>;
+  maxBody?: number;
+  /** Reachable without credentials; used only for sign-in and sign-out. */
+  public?: true;
+  /** Restricted to trusted loopback requests; the value explains why. */
+  loopback?: string;
+  handle(context: RouteContext<B>): Promise<void> | void;
+}
 
-  if (pathname === "/api/status" && req.method === "GET") {
-    const lanUrls = isLocal ? context.lanUrls() : [];
-    jsonResponse(res, 200, {
-      status:
-        context.controller?.state ?? (runtime.ready ? "ready" : "stopped"),
-      generation: context.controller?.generation ?? 1,
-      version: VERSION,
-      uptime: process.uptime(),
-      isLoopback: isLocal,
-      mcp: {
-        host: mcpUrl?.hostname ?? config.host,
-        port: mcpUrl ? Number(mcpUrl.port) : config.port,
-        access: config.access,
-        public_url: config.public_url,
-      },
-      web: {
-        host: web.host,
-        port: web.port,
-        exposed: webIsExposed(web),
-        loopbackUrl: context.loopbackUrl,
-        lanUrls,
-      },
-      stats: runtime.activity.getStats(),
-      memory: await runtime.codeMode.getMemoryStatus(),
-      system: {
-        hostname: hostname(),
-        platform: process.platform,
-        arch: process.arch,
-        nodeVersion: process.version,
-      },
-    });
-    return;
-  }
+interface CompiledRoute extends Route {
+  pattern: RegExp;
+  names: string[];
+}
 
-  if (pathname === "/api/events" && req.method === "GET") {
-    if (!sse.addClient(res, context.eventAuthorized))
-      jsonResponse(res, 503, { error: "too_many_event_clients" });
-    return;
-  }
+const route = <B = undefined>(definition: Route<B>): Route =>
+  definition as unknown as Route;
 
-  if (pathname === "/api/sessions" && req.method === "GET") {
-    const page = positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000);
-    const pageSize = positiveInteger(
-      reqUrl.searchParams.get("pageSize"),
-      20,
-      100,
-    );
-    const search = reqUrl.searchParams.get("search");
-    jsonResponse(
+const MESSAGE_IDS_BODY = z.object({
+  ids: z.array(z.string().max(100)).max(200),
+});
+const RENAME_BODY = z.object({ label: z.string() });
+const NOTE_BODY = z.object({ id: z.string(), text: z.string() });
+const REVOKE_BODY = z.object({ id: z.string().min(1) });
+const VERIFY_BODY = z.object({ token: z.string().optional() });
+const TOGGLE_BODY: z.ZodType<Api.ConfigToggleRequest> = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({
+      kind: z.literal("mcp"),
+      name: z.string(),
+      enabled: z.boolean(),
+      revision: z.string(),
+    }),
+    z.object({
+      kind: z.literal("skill"),
+      path: z.string(),
+      workdir: z.string().optional(),
+      enabled: z.boolean(),
+      revision: z.string(),
+    }),
+    z.object({
+      kind: z.literal("setting"),
+      name: z.enum(["execution.login", "web.enabled"]),
+      enabled: z.boolean(),
+      revision: z.string(),
+    }),
+  ],
+) as z.ZodType<Api.ConfigToggleRequest>;
+
+const ROUTES: CompiledRoute[] = [
+  route({
+    method: "POST",
+    path: "/api/auth/verify",
+    public: true,
+    body: VERIFY_BODY,
+    handle({ res, body, cookies, auth }) {
+      if (
+        !auth.verifyCookie(cookies[WEB_COOKIE]) &&
+        !(body.token !== undefined && tokenMatches(body.token, auth.token))
+      )
+        throw new HttpError(
+          401,
+          "invalid_token",
+          "The access token is not correct.",
+        );
+      res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
+      json<Api.VerifyResponse>(res, 200, { valid: true });
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/auth/logout",
+    public: true,
+    handle({ res }) {
+      res.setHeader("Set-Cookie", webCookie("", true));
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/status",
+    async handle({
       res,
-      200,
-      runtime.notes.sessions(runtime.activity.sessionSummaries(), {
-        page,
-        pageSize,
-        pendingQuestionsOnly:
-          reqUrl.searchParams.get("pendingQuestions") === "true",
-        ...(search ? { search } : {}),
-      }),
-    );
-    return;
-  }
-
-  const questionRoute =
-    /^\/api\/sessions\/([^/]+)\/questions(?:\/([^/]+)\/answer)?$/.exec(
-      pathname,
-    );
-  if (questionRoute) {
-    let id: string;
-    let questionId: string | undefined;
-    try {
-      id = decodeURIComponent(questionRoute[1]!);
-      questionId =
-        questionRoute[2] === undefined
-          ? undefined
-          : decodeURIComponent(questionRoute[2]);
-    } catch {
-      throw new HttpError(400, "会话或问题 ID 无效。");
-    }
-    if (req.method === "GET" && questionId === undefined) {
-      jsonResponse(
+      runtime,
+      config,
+      web,
+      isLocal,
+      controller,
+      mcpUrl,
+      protocol,
+      loopbackUrl,
+      lanUrls,
+    }) {
+      json<Api.StatusResponse>(res, 200, {
+        status: controller?.state ?? (runtime.ready ? "ready" : "stopped"),
+        generation: controller?.generation ?? 1,
+        version: VERSION,
+        uptime: process.uptime(),
+        isLoopback: isLocal,
+        mcp: {
+          host: mcpUrl?.hostname ?? config.host,
+          port: mcpUrl ? Number(mcpUrl.port) : config.port,
+          access: config.access,
+          public_url: config.public_url,
+          ...(protocol ? { protocol: protocol.snapshot() } : {}),
+        },
+        web: {
+          host: web.host,
+          port: web.port,
+          exposed: webIsExposed(web),
+          loopbackUrl,
+          lanUrls: isLocal ? lanUrls() : [],
+        },
+        stats: runtime.activity.getStats(),
+        memory: await runtime.codeMode.getMemoryStatus(),
+        system: {
+          hostname: hostname(),
+          platform: process.platform,
+          arch: process.arch,
+          nodeVersion: process.version,
+        },
+      });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/events",
+    handle({ res, sse, eventAuthorized }) {
+      if (!sse.addClient(res, eventAuthorized))
+        throw new HttpError(
+          503,
+          "too_many_event_clients",
+          "Too many live event streams are open. Close other console tabs.",
+        );
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/sessions",
+    handle({ res, runtime, query }) {
+      const search = query.get("search");
+      json<Api.SessionsResponse>(
+        res,
+        200,
+        runtime.notes.sessions(runtime.activity.sessionSummaries(), {
+          page: positiveInteger(query.get("page"), 1, 1_000_000),
+          pageSize: positiveInteger(query.get("pageSize"), 20, 100),
+          pendingQuestionsOnly: query.get("pendingQuestions") === "true",
+          ...(search ? { search } : {}),
+        }),
+      );
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/sessions/:id/questions",
+    handle({ res, runtime, params, query }) {
+      json<Api.QuestionsResponse>(
         res,
         200,
         runtime.notes.questions(
-          id,
-          positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
-          reqUrl.searchParams.get("status") === "pending",
+          params.id!,
+          positiveInteger(query.get("page"), 1, 1_000_000),
+          query.get("status") === "pending",
         ),
       );
-      return;
-    }
-    if (req.method === "POST" && questionId !== undefined) {
-      const parsed = QUESTION_ANSWER_SCHEMA.safeParse(
-        await readJsonBody(req, NOTE_MAX_BYTES * 6 + 2048),
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/sessions/:id/questions/:questionId/answer",
+    body: QUESTION_ANSWER_SCHEMA,
+    maxBody: NOTE_BODY_BYTES,
+    handle({ res, runtime, params, body }) {
+      json<Api.NoteResponse>(
+        res,
+        200,
+        runtime.notes.answer(params.id!, params.questionId!, body),
       );
-      if (!parsed.success)
-        throw new HttpError(
-          400,
-          "答复需要提交 ID、有效选项索引（自定义为 null）和补充文本。",
-        );
-      jsonResponse(res, 200, runtime.notes.answer(id, questionId, parsed.data));
-      return;
-    }
-    throw new HttpError(405, "此问题操作不支持该请求方法。");
-  }
-
-  const readRoute = /^\/api\/sessions\/([^/]+)\/messages\/read$/.exec(pathname);
-  if (readRoute) {
-    if (req.method !== "POST")
-      throw new HttpError(405, "此消息操作不支持该请求方法。");
-    let id: string;
-    try {
-      id = decodeURIComponent(readRoute[1]!);
-    } catch {
-      throw new HttpError(400, "会话 ID 无效。");
-    }
-    const body = await readJsonBody(req);
-    const ids =
-      body && typeof body === "object" && "ids" in body ? body.ids : undefined;
-    if (
-      !Array.isArray(ids) ||
-      ids.length > 200 ||
-      !ids.every((value) => typeof value === "string" && value.length <= 100)
-    )
-      throw new HttpError(400, "需要提交最多 200 个消息 ID。");
-    runtime.notes.readMessages(id, ids);
-    jsonResponse(res, 200, { success: true });
-    return;
-  }
-
-  const noteRoute = /^\/api\/sessions\/([^/]+)(?:\/notes(?:\/([^/]+))?)?$/.exec(
-    pathname,
-  );
-  if (noteRoute) {
-    let id: string;
-    let noteId: string | undefined;
-    try {
-      id = decodeURIComponent(noteRoute[1]!);
-      noteId =
-        noteRoute[2] === undefined
-          ? undefined
-          : decodeURIComponent(noteRoute[2]);
-    } catch {
-      throw new HttpError(400, "会话或消息 ID 无效。");
-    }
-    const collection = pathname.endsWith("/notes");
-    if (req.method === "GET" && collection) {
-      jsonResponse(
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/sessions/:id/messages/read",
+    body: MESSAGE_IDS_BODY,
+    handle({ res, runtime, params, body }) {
+      runtime.notes.readMessages(params.id!, body.ids);
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "PATCH",
+    path: "/api/sessions/:id",
+    body: RENAME_BODY,
+    handle({ res, runtime, params, body }) {
+      runtime.notes.rename(params.id!, body.label);
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/sessions/:id/notes",
+    handle({ res, runtime, params, query }) {
+      json<Api.NotesResponse>(
         res,
         200,
         runtime.notes.page(
-          id,
-          positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000),
+          params.id!,
+          positiveInteger(query.get("page"), 1, 1_000_000),
         ),
       );
-      return;
-    }
-    if (req.method === "PATCH" && !collection && noteId === undefined) {
-      const body = await readJsonBody(req);
-      if (
-        !body ||
-        typeof body !== "object" ||
-        !("label" in body) ||
-        typeof body.label !== "string"
-      )
-        throw new HttpError(400, "备注名必须是字符串。");
-      runtime.notes.rename(id, body.label);
-      jsonResponse(res, 200, { success: true });
-      return;
-    }
-    if (req.method === "POST" && collection) {
-      // JSON escaping can make a valid 30 KB message larger than the usual management body cap.
-      const body = await readJsonBody(req, NOTE_MAX_BYTES * 6 + 2048);
-      if (
-        !body ||
-        typeof body !== "object" ||
-        !("id" in body) ||
-        !("text" in body) ||
-        typeof body.id !== "string" ||
-        typeof body.text !== "string"
-      )
-        throw new HttpError(400, "消息需要提交 ID 和文本。");
-      jsonResponse(res, 200, runtime.notes.enqueue(id, body.id, body.text));
-      return;
-    }
-    if (req.method === "DELETE" && noteId !== undefined) {
-      runtime.notes.withdraw(id, noteId);
-      jsonResponse(res, 200, { success: true });
-      return;
-    }
-    throw new HttpError(405, "此消息操作不支持该请求方法。");
-  }
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/sessions/:id/notes",
+    body: NOTE_BODY,
+    maxBody: NOTE_BODY_BYTES,
+    handle({ res, runtime, params, body }) {
+      json<Api.NoteResponse>(
+        res,
+        200,
+        runtime.notes.enqueue(params.id!, body.id, body.text),
+      );
+    },
+  }),
+  route({
+    method: "DELETE",
+    path: "/api/sessions/:id/notes/:noteId",
+    handle({ res, runtime, params }) {
+      runtime.notes.withdraw(params.id!, params.noteId!);
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/calls",
+    handle({ res, runtime, query }) {
+      const sessionId = query.get("sessionId");
+      const status = query.get("status");
+      const tool = query.get("tool");
+      const search = query.get("search");
+      const data = runtime.activity.getCalls({
+        page: positiveInteger(query.get("page"), 1, 1_000_000),
+        pageSize: positiveInteger(query.get("pageSize"), 20, 100),
+        ...(sessionId ? { sessionId } : {}),
+        ...(status ? { status } : {}),
+        ...(tool ? { tool } : {}),
+        ...(search ? { search } : {}),
+      });
+      json<Api.CallsResponse>(res, 200, {
+        ...data,
+        items: data.items.map(callListItem),
+      });
+    },
+  }),
+  route({
+    method: "DELETE",
+    path: "/api/calls",
+    handle({ res, runtime }) {
+      runtime.activity.clear();
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/calls/:id",
+    handle({ res, runtime, params }) {
+      const call = runtime.activity.getCall(params.id!);
+      if (!call)
+        throw new HttpError(
+          404,
+          "call_not_found",
+          "The call record does not exist.",
+        );
+      json<Api.CallResponse>(res, 200, call);
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/media/:hash",
+    handle({ res, runtime, params }) {
+      const item = /^[a-f0-9]{64}$/.test(params.hash!)
+        ? runtime.activity.media.get(params.hash!)
+        : undefined;
+      if (!item)
+        throw new HttpError(
+          404,
+          "media_not_found",
+          "The image is no longer in the audit records.",
+        );
+      res.writeHead(200, {
+        "Content-Type": item.mimeType,
+        "Content-Length": item.data.length,
+        "Cache-Control": "no-store",
+      });
+      res.end(item.data);
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/skills",
+    async handle({ res, runtime, controller, query }) {
+      const saved = controller ? await controller.editor.read() : undefined;
+      const workdir = query.get("workdir");
+      const catalog = await discoverSkills({
+        includeDisabled: true,
+        config: saved?.config.skills?.config ?? runtime.skillConfig,
+        ...(workdir ? { workdir: resolveUserPath(workdir) } : {}),
+      });
+      const rendered = renderSkills(
+        {
+          ...catalog,
+          skills: catalog.skills.filter((skill) => skill.enabled !== false),
+        },
+        runtime.skillMaxChars,
+      );
+      json<Api.SkillsResponse>(res, 200, {
+        skills: catalog.skills,
+        warnings: catalog.warnings,
+        maxChars: runtime.skillMaxChars,
+        totalChars: characterCount(rendered),
+        count: catalog.skills.length,
+      });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/mcp-servers",
+    async handle({ res, runtime, config, controller, isLocal }) {
+      let servers: Api.McpServerItem[] = config.mcpServers.map((server) =>
+        mcpServerView(server, isLocal),
+      );
+      if (controller) {
+        const document = await controller.editor.read();
+        const raw = (document.raw.mcp_servers ?? {}) as Record<
+          string,
+          { url?: string; enabled?: boolean }
+        >;
+        servers = Object.entries(raw).map(([name, settings]) => ({
+          ...(servers.find((server) => server.name === name) ?? {
+            name,
+            transport: settings.url ? "streamable-http" : "stdio",
+          }),
+          enabled: settings.enabled !== false,
+          active: config.mcpServers.some((server) => server.name === name),
+        }));
+      }
+      json<Api.McpServersResponse>(res, 200, {
+        servers,
+        tools: runtime.discovery.snapshot().map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        })),
+        errors: runtime.downstream.catalogErrors(),
+      });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/management",
+    async handle({ res, controller }) {
+      json<Api.ManagementResponse>(
+        res,
+        200,
+        controller ? await managementState(controller) : { available: false },
+      );
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/config/toggle",
+    body: TOGGLE_BODY,
+    async handle({ res, controller, body }) {
+      if (!controller)
+        throw new HttpError(
+          409,
+          "management_unavailable",
+          "This embedded instance has no configuration management.",
+        );
+      if (controller.state === "restarting")
+        throw new HttpError(
+          409,
+          "restart_in_progress",
+          "A restart is in progress. Change the configuration after it finishes.",
+        );
+      const { revision, ...change } = body;
+      await controller.editor.toggle(change as ConfigToggle, revision);
+      json<Api.ManagementResponse>(res, 200, await managementState(controller));
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/runtime/restart",
+    handle({ res, controller }) {
+      if (!controller)
+        throw new HttpError(
+          409,
+          "management_unavailable",
+          "This instance has no restart control.",
+        );
+      // Acknowledge before retiring any executing requests; repeated clicks coalesce.
+      json<Api.RestartResponse>(res, 202, { accepted: true });
+      void controller.restart().catch(() => undefined);
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/terminals",
+    handle({ res, runtime }) {
+      json<Api.TerminalsResponse>(res, 200, {
+        sessions: runtime.terminal.getActiveSessions(),
+      });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/native-sessions",
+    async handle({ res, runtime }) {
+      json<Api.NativeSessionsResponse>(res, 200, {
+        sessions: runtime.codeMode.getNativeSessions(),
+        memory: await runtime.codeMode.getMemoryStatus(),
+      });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/artifacts",
+    handle({ res, runtime }) {
+      json<Api.ArtifactsResponse>(res, 200, {
+        artifacts: runtime.artifacts.getActiveArtifacts(),
+      });
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/artifacts/revoke",
+    body: REVOKE_BODY,
+    async handle({ res, runtime, body }) {
+      await runtime.artifacts.revokeFromInstance(body.id);
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "GET",
+    path: "/api/config",
+    handle({ res, config, configPath, runtime, web, isLocal }) {
+      json<Api.ConfigResponse>(res, 200, {
+        ...configView({ config, configPath, runtime, web, local: isLocal }),
+        config_exists: existsSync(configPath),
+        memory: { ...MEMORY_DEFAULTS, ...config.memory },
+      });
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/config/reveal",
+    loopback: "Only this machine can open the configuration folder.",
+    async handle({ res, configPath }) {
+      await revealConfig(configPath);
+      json<Api.SuccessResponse>(res, 200, { success: true });
+    },
+  }),
+  route({
+    method: "POST",
+    path: "/api/auth/regenerate-token",
+    loopback: "Only this machine can rotate the LAN access token.",
+    handle({ res, auth, sse, lanUrls }) {
+      auth.rotate();
+      // Existing EventSource responses were authorized with the previous token.
+      // Close them now so a rotated credential actually revokes live observers.
+      sse.disconnectClients();
+      res.setHeader("Set-Cookie", webCookie(auth.issueCookie()));
+      json<Api.RegenerateTokenResponse>(res, 200, {
+        success: true,
+        lanUrls: lanUrls(),
+      });
+    },
+  }),
+].map((definition) => {
+  const names: string[] = [];
+  const source = definition.path
+    .split("/")
+    .map((segment) => {
+      if (!segment.startsWith(":")) return segment;
+      names.push(segment.slice(1));
+      return "([^/]+)";
+    })
+    .join("/");
+  return { ...definition, pattern: new RegExp(`^${source}$`), names };
+});
 
-  if (pathname === "/api/calls" && req.method === "GET") {
-    const page = positiveInteger(reqUrl.searchParams.get("page"), 1, 1_000_000);
-    const pageSize = positiveInteger(
-      reqUrl.searchParams.get("pageSize"),
-      20,
-      100,
-    );
-    const sessionId = reqUrl.searchParams.get("sessionId");
-    const status = reqUrl.searchParams.get("status");
-    const tool = reqUrl.searchParams.get("tool");
-    const search = reqUrl.searchParams.get("search");
-    const data = runtime.activity.getCalls({
-      page,
-      pageSize,
-      ...(sessionId ? { sessionId } : {}),
-      ...(status ? { status } : {}),
-      ...(tool ? { tool } : {}),
-      ...(search ? { search } : {}),
-    });
-    jsonResponse(res, 200, { ...data, items: data.items.map(callListItem) });
-    return;
-  }
+type RouteMatch =
+  | { kind: "route"; route: CompiledRoute; params: Record<string, string> }
+  | { kind: "method"; allow: string[] }
+  | { kind: "none" };
 
-  if (pathname.startsWith("/api/calls/") && req.method === "GET") {
-    let id: string;
+function matchRoute(method: string, pathname: string): RouteMatch {
+  const allow: string[] = [];
+  for (const candidate of ROUTES) {
+    const found = candidate.pattern.exec(pathname);
+    if (!found) continue;
+    if (candidate.method !== method) {
+      allow.push(candidate.method);
+      continue;
+    }
+    const params: Record<string, string> = {};
     try {
-      id = decodeURIComponent(pathname.slice("/api/calls/".length));
+      candidate.names.forEach((name, index) => {
+        params[name] = decodeURIComponent(found[index + 1]!);
+      });
     } catch {
-      throw new HttpError(400, "调用记录 ID 无效。");
-    }
-    const call = runtime.activity.getCall(id);
-    if (!call) throw new HttpError(404, "调用记录不存在。");
-    jsonResponse(res, 200, call);
-    return;
-  }
-
-  if (pathname === "/api/calls" && req.method === "DELETE") {
-    runtime.activity.clear();
-    jsonResponse(res, 200, { success: true });
-    return;
-  }
-
-  const mediaRoute = /^\/api\/media\/([a-f0-9]{64})$/.exec(pathname);
-  if (mediaRoute && req.method === "GET") {
-    const item = runtime.activity.media.get(mediaRoute[1]!);
-    if (!item) throw new HttpError(404, "图片已不在审计记录中。");
-    res.writeHead(200, {
-      "Content-Type": item.mimeType,
-      "Content-Length": item.data.length,
-      "Cache-Control": "no-store",
-    });
-    res.end(item.data);
-    return;
-  }
-
-  if (pathname === "/api/skills" && req.method === "GET") {
-    const saved = context.controller
-      ? await context.controller.editor.read()
-      : undefined;
-    const workdir = reqUrl.searchParams.get("workdir");
-    const catalog = await discoverSkills({
-      includeDisabled: true,
-      config: saved?.config.skills?.config ?? runtime.skillConfig,
-      ...(workdir ? { workdir: resolveUserPath(workdir) } : {}),
-    });
-    const rendered = renderSkills(
-      {
-        ...catalog,
-        skills: catalog.skills.filter((skill) => skill.enabled !== false),
-      },
-      runtime.skillMaxChars,
-    );
-    jsonResponse(res, 200, {
-      skills: catalog.skills,
-      warnings: catalog.warnings,
-      maxChars: runtime.skillMaxChars,
-      totalChars: characterCount(rendered),
-      count: catalog.skills.length,
-    });
-    return;
-  }
-
-  if (pathname === "/api/mcp-servers" && req.method === "GET") {
-    let servers: ReturnType<typeof mcpServerView>[] = config.mcpServers.map(
-      (server) => mcpServerView(server, isLocal),
-    );
-    if (context.controller) {
-      const document = await context.controller.editor.read();
-      const raw = (document.raw.mcp_servers ?? {}) as Record<
-        string,
-        { url?: string; enabled?: boolean }
-      >;
-      servers = Object.entries(raw).map(([name, settings]) => ({
-        ...(servers.find((server) => server.name === name) ?? {
-          name,
-          transport: settings.url ? "streamable-http" : "stdio",
-        }),
-        enabled: settings.enabled !== false,
-        active: config.mcpServers.some((server) => server.name === name),
-      })) as typeof servers;
-    }
-    const tools = runtime.discovery.snapshot().map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    }));
-    jsonResponse(res, 200, {
-      servers,
-      tools,
-      errors: runtime.downstream.catalogErrors(),
-    });
-    return;
-  }
-
-  if (pathname === "/api/management" && req.method === "GET") {
-    if (!context.controller) {
-      jsonResponse(res, 200, { available: false });
-      return;
-    }
-    jsonResponse(res, 200, await managementState(context.controller));
-    return;
-  }
-  if (pathname === "/api/config/toggle" && req.method === "POST") {
-    if (!context.controller)
-      throw new HttpError(409, "当前嵌入式实例未提供配置管理。");
-    if (context.controller.state === "restarting")
-      throw new HttpError(409, "正在重启，完成后可继续修改配置。");
-    const body = (await readJsonBody(req)) as Record<string, unknown>;
-    if (typeof body.enabled !== "boolean" || typeof body.revision !== "string")
-      throw new HttpError(400, "缺少开关值或配置版本。");
-    let change: ConfigToggle;
-    if (body.kind === "mcp" && typeof body.name === "string")
-      change = { kind: "mcp", name: body.name, enabled: body.enabled };
-    else if (
-      body.kind === "skill" &&
-      typeof body.path === "string" &&
-      (body.workdir === undefined || typeof body.workdir === "string")
-    )
-      change = {
-        kind: "skill",
-        path: body.path,
-        enabled: body.enabled,
-        ...(body.workdir ? { workdir: body.workdir as string } : {}),
-      };
-    else if (
-      body.kind === "setting" &&
-      (body.name === "execution.login" || body.name === "web.enabled")
-    )
-      change = { kind: "setting", name: body.name, enabled: body.enabled };
-    else
       throw new HttpError(
         400,
-        "仅支持已有 MCP、已发现 Skill 和指定布尔配置的开关。",
+        "invalid_request",
+        "An ID in the request path is not valid.",
       );
-    await context.controller.editor.toggle(change, body.revision);
-    jsonResponse(res, 200, await managementState(context.controller));
-    return;
+    }
+    return { kind: "route", route: candidate, params };
   }
-  if (pathname === "/api/runtime/restart" && req.method === "POST") {
-    if (!context.controller)
-      throw new HttpError(409, "当前实例未提供重启入口。");
-    // Acknowledge before retiring any executing requests; repeated clicks coalesce.
-    jsonResponse(res, 202, { accepted: true });
-    void context.controller.restart().catch(() => undefined);
-    return;
-  }
-
-  if (pathname === "/api/terminals" && req.method === "GET") {
-    jsonResponse(res, 200, { sessions: runtime.terminal.getActiveSessions() });
-    return;
-  }
-
-  if (pathname === "/api/native-sessions" && req.method === "GET") {
-    jsonResponse(res, 200, {
-      sessions: runtime.codeMode.getNativeSessions(),
-      memory: await runtime.codeMode.getMemoryStatus(),
-    });
-    return;
-  }
-
-  if (pathname === "/api/artifacts" && req.method === "GET") {
-    jsonResponse(res, 200, {
-      artifacts: runtime.artifacts.getActiveArtifacts(),
-    });
-    return;
-  }
-
-  if (pathname === "/api/artifacts/revoke" && req.method === "POST") {
-    const body = (await readJsonBody(req)) as { id?: unknown };
-    if (typeof body.id !== "string" || !body.id)
-      throw new HttpError(400, "缺少产物 ID。");
-    await runtime.artifacts.revokeFromInstance(body.id);
-    jsonResponse(res, 200, { success: true });
-    return;
-  }
-
-  if (pathname === "/api/config" && req.method === "GET") {
-    jsonResponse(res, 200, {
-      ...configView({ config, configPath, runtime, web, local: isLocal }),
-      config_exists: existsSync(configPath),
-      memory: { ...MEMORY_DEFAULTS, ...config.memory },
-    });
-    return;
-  }
-
-  if (pathname === "/api/config/reveal" && req.method === "POST") {
-    if (!isLocal) throw new HttpError(403, "仅本机回环访问可以打开配置目录。");
-    await revealConfig(configPath);
-    jsonResponse(res, 200, { success: true });
-    return;
-  }
-
-  if (pathname === "/api/auth/regenerate-token" && req.method === "POST") {
-    if (!isLocal)
-      throw new HttpError(403, "仅本机回环访问可以换新局域网密钥。");
-    context.regenerateToken();
-    // Existing EventSource responses were authorized with the previous token.
-    // Close them now so a rotated credential actually revokes live observers.
-    sse.disconnectClients();
-    res.setHeader("Set-Cookie", context.sessionCookie());
-    jsonResponse(res, 200, {
-      success: true,
-      lanUrls: context.lanUrls(),
-      message: "局域网访问密钥已重新生成。",
-    });
-    return;
-  }
-
-  throw new HttpError(404, "未知接口。");
+  return allow.length ? { kind: "method", allow } : { kind: "none" };
 }
 
-async function managementState(controller: ServiceController) {
+function parseBody<B>(schema: z.ZodType<B>, value: unknown): B {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  throw new HttpError(
+    400,
+    "invalid_request",
+    `The request body is not valid: ${parsed.error.issues
+      .slice(0, 3)
+      .map(
+        (issue) =>
+          `${issue.path.length ? issue.path.join(".") : "body"}: ${issue.message}`,
+      )
+      .join("; ")}`,
+  );
+}
+
+async function managementState(
+  controller: ServiceController,
+): Promise<Api.ManagementResponse> {
   const document = await controller.editor.read();
   const definitions = (document.raw.mcp_servers ?? {}) as Record<
     string,
@@ -901,9 +1011,10 @@ async function serveStatic(options: {
   try {
     pathname = decodeURIComponent(options.pathname);
   } catch {
-    throw new HttpError(400, "静态资源路径无效。");
+    throw new HttpError(400, "invalid_url", "The file path is not valid.");
   }
-  if (pathname.includes("\0")) throw new HttpError(400, "静态资源路径无效。");
+  if (pathname.includes("\0"))
+    throw new HttpError(400, "invalid_url", "The file path is not valid.");
   const root = path.resolve(publicDir);
   let filePath = path.resolve(
     root,
@@ -911,7 +1022,11 @@ async function serveStatic(options: {
   );
   const relative = path.relative(root, filePath);
   if (relative.startsWith("..") || path.isAbsolute(relative))
-    throw new HttpError(403, "禁止访问 Web UI 静态目录之外的文件。");
+    throw new HttpError(
+      403,
+      "not_found",
+      "Files outside the Web UI folder are not available.",
+    );
 
   try {
     let info = await stat(filePath);
@@ -922,7 +1037,8 @@ async function serveStatic(options: {
     if (!info.isFile()) throw new Error("not a file");
     await sendFile(res, filePath, options.method === "HEAD");
   } catch {
-    if (path.extname(pathname)) throw new HttpError(404, "静态资源不存在。");
+    if (path.extname(pathname))
+      throw new HttpError(404, "not_found", "The file does not exist.");
     const index = path.join(root, "index.html");
     if (existsSync(index))
       await sendFile(res, index, options.method === "HEAD");
@@ -972,7 +1088,7 @@ function sendHtml(res: ServerResponse, html: string, head: boolean): void {
 }
 
 function renderFallbackHtml(version: string): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EXEC MCP 控制台</title></head><body><main><h1>EXEC MCP v${version}</h1><p>Web UI 静态资源尚未构建；请运行 npm run build 后刷新。</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EXEC MCP console</title></head><body><main><h1>EXEC MCP v${version}</h1><p>The Web UI files are not built. Run npm run build, then reload this page.</p></main></body></html>`;
 }
 
 function positiveInteger(
@@ -987,10 +1103,11 @@ function positiveInteger(
     : fallback;
 }
 
-function jsonResponse(
+/** The explicit type argument ties each response to the shared contract. */
+function json<T = never>(
   res: ServerResponse,
   status: number,
-  data: unknown,
+  data: NoInfer<T>,
 ): void {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -999,13 +1116,38 @@ function jsonResponse(
   res.end(JSON.stringify(data));
 }
 
-function respondError(res: ServerResponse, error: unknown): void {
-  const known = error instanceof HttpError || error instanceof SessionNoteError;
-  const status = known ? error.status : 500;
-  jsonResponse(res, status, {
-    error: status === 500 ? "internal_error" : "request_error",
-    message: known ? error.message : "内部操作失败；请查看服务状态或本机日志。",
+function fail(
+  res: ServerResponse,
+  status: number,
+  code: Api.ApiErrorCode,
+  message: string,
+): void {
+  json<Api.ApiErrorBody>(res, status, {
+    error: code,
+    message,
+    ...(code === "unauthorized" ? { needAuth: true as const } : {}),
   });
+}
+
+function respondError(res: ServerResponse, error: unknown): void {
+  if (
+    error instanceof HttpError ||
+    error instanceof SessionNoteError ||
+    error instanceof ConfigEditError
+  ) {
+    fail(res, error.status, error.code, error.message);
+    return;
+  }
+  if (error instanceof z.ZodError) {
+    fail(res, 400, "invalid_request", error.issues[0]?.message ?? "invalid");
+    return;
+  }
+  fail(
+    res,
+    500,
+    "internal_error",
+    "The operation failed. Check the service status or the local logs.",
+  );
 }
 
 async function readJsonBody(
@@ -1019,7 +1161,11 @@ async function readJsonBody(
     bytes += buffer.length;
     if (bytes > maximum) {
       req.resume();
-      throw new HttpError(413, `请求正文超过 ${maximum} 字节。`);
+      throw new HttpError(
+        413,
+        "body_too_large",
+        `The request body is larger than ${maximum} bytes.`,
+      );
     }
     chunks.push(buffer);
   }
@@ -1027,6 +1173,10 @@ async function readJsonBody(
   try {
     return text ? JSON.parse(text) : {};
   } catch {
-    throw new HttpError(400, "请求正文不是有效 JSON。");
+    throw new HttpError(
+      400,
+      "invalid_json",
+      "The request body is not valid JSON.",
+    );
   }
 }

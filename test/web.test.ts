@@ -78,6 +78,7 @@ async function startWeb(
       publicDir,
       configPath,
       mcpUrl: mcp.url,
+      protocol: mcp.protocol,
     },
   );
   cleanups.push(() => web.close());
@@ -610,6 +611,108 @@ describe("Web console access boundary", () => {
       body: JSON.stringify({ token: "x".repeat(70 * 1024) }),
     });
     expect(response.status).toBe(413);
+    expect(response.json()).toMatchObject({ error: "body_too_large" });
+  });
+
+  it("answers every API failure with a stable code and no cross-origin headers", async () => {
+    const { web } = await startWeb();
+    const cases: [string, Parameters<typeof request>[2], number, string][] = [
+      ["/api/nope", {}, 404, "not_found"],
+      [
+        "/api/status",
+        { method: "PUT", headers: actionHeaders() },
+        405,
+        "method_not_allowed",
+      ],
+      ["/api/status", { method: "OPTIONS" }, 405, "method_not_allowed"],
+      ["/api/calls", { method: "DELETE" }, 403, "missing_action_header"],
+      ["/api/calls/missing", {}, 404, "call_not_found"],
+      ["/api/media/not-a-hash", {}, 404, "media_not_found"],
+      ["/api/sessions/unknown/notes", {}, 404, "conversation_not_found"],
+      [
+        "/api/sessions/unknown/notes",
+        { method: "POST", headers: actionHeaders(), body: { text: 3 } },
+        400,
+        "invalid_request",
+      ],
+      [
+        "/api/config/toggle",
+        { method: "POST", headers: actionHeaders(), body: "{" },
+        400,
+        "invalid_json",
+      ],
+      [
+        "/api/auth/verify",
+        { method: "POST", headers: actionHeaders(), body: { token: "wrong" } },
+        401,
+        "invalid_token",
+      ],
+    ];
+    for (const [pathname, options, status, code] of cases) {
+      const response = await request(web, pathname, {
+        origin: `http://127.0.0.1:${web.port}`,
+        ...options,
+      });
+      expect([pathname, response.status]).toEqual([pathname, status]);
+      const body = response.json<{ error: string; message: string }>();
+      expect(body.error).toBe(code);
+      expect(body.message).toMatch(/^[\x20-\x7e]+$/);
+      expect(
+        Object.keys(response.headers).filter((name) =>
+          name.startsWith("access-control-"),
+        ),
+      ).toEqual([]);
+      if (status === 405) expect(response.headers.allow).toBeTruthy();
+    }
+    const cross = await request(web, "/api/status", {
+      origin: "https://example.com",
+    });
+    expect(cross.status).toBe(403);
+    expect(cross.json()).toMatchObject({ error: "forbidden_origin" });
+  });
+
+  it("counts legacy and modern MCP traffic in the status response", async () => {
+    const { web, mcp } = await startWeb();
+    const before = (await request(web, "/api/status")).json<{
+      mcp: { protocol: Record<string, Record<string, number>> };
+    }>();
+    expect(before.mcp.protocol).toMatchObject({
+      legacy: { requests: 0, sessions: 0, openSessions: 0 },
+      modern: { requests: 0 },
+    });
+    for (const mode of ["legacy", "auto"] as const) {
+      const client = new Client(
+        { name: `protocol-${mode}`, version: "1" },
+        { versionNegotiation: { mode } },
+      );
+      await client.connect(new StreamableHTTPClientTransport(new URL(mcp.url)));
+      await client.listTools();
+      if (mode === "legacy") {
+        const open = (await request(web, "/api/status")).json<{
+          mcp: { protocol: { legacy: Record<string, number> } };
+        }>();
+        expect(open.mcp.protocol.legacy).toMatchObject({
+          sessions: 1,
+          openSessions: 1,
+        });
+      }
+      await client.close();
+    }
+    const after = (await request(web, "/api/status")).json<{
+      mcp: {
+        protocol: {
+          since: string;
+          legacy: { requests: number; sessions: number; lastRequestAt: string };
+          modern: { requests: number; lastRequestAt: string };
+        };
+      };
+    }>().mcp.protocol;
+    expect(after.legacy.requests).toBeGreaterThan(0);
+    expect(after.legacy.sessions).toBe(1);
+    expect(after.modern.requests).toBeGreaterThan(0);
+    expect(Date.parse(after.legacy.lastRequestAt)).toBeGreaterThanOrEqual(
+      Date.parse(after.since),
+    );
   });
 
   it("disconnects already-authorized event streams when the LAN token rotates", async () => {

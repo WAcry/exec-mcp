@@ -37,6 +37,7 @@ PowerShell 在各平台使用自己的参数，Windows 保留现有 UTF-8 控制
 login 对 PowerShell 控制 profile 加载，对其他 Shell 控制 login 模式；
 login=false 时，zshenv、BASH_ENV 等 Shell 自身的启动规则仍可能生效。PTY 只分配终端，交互模式和 profile 不自动改变。
 自定义 Shell 使用 -c/-lc 接口，当前仍不支持 CMD 或批处理入口。
+信号 N 结束 Shell 时，pipe 与 PTY 模式都按 Shell 惯例返回 exit_code 128 + N，不另加信号字段。
 
 ## 动态说明
 

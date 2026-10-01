@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { STDIN_SCHEMA } from "../src/catalog.js";
 import * as timing from "../src/util.js";
 import {
+  EMPTY_POLL_MIN_MS,
   TerminalManager,
   stdinYieldTime,
   type TerminalResult,
@@ -35,8 +36,9 @@ afterEach(async () => {
   );
 });
 
-function manager(bufferBytes = 4096) {
-  const value = new TerminalManager({ bufferBytes });
+/** Tests that do not check the empty-read minimum use a short one for speed. */
+function manager(bufferBytes = 4096, minEmptyPollMs = 50) {
+  const value = new TerminalManager({ bufferBytes, minEmptyPollMs });
   managers.push(value);
   return value;
 }
@@ -86,7 +88,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
   it.each([undefined, ""])(
     "ignores existing/new output by default until actual completion (chars=%s)",
     async (chars) => {
-      const value = manager();
+      const value = manager(4096, EMPTY_POLL_MIN_MS);
       const t = await start(value, tty);
       const initial = await value.writeStdin({
         session_id: t.id,
@@ -197,7 +199,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
   });
 
   it("cancels only the observer and preserves unread output for a subsequent call", async () => {
-    const value = manager();
+    const value = manager(4096, EMPTY_POLL_MIN_MS);
     const t = await start(value, tty);
     const controller = new AbortController();
     const before = t.session.buffer.bytes;

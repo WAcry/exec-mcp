@@ -24,7 +24,8 @@ afterEach(async () => {
   }
 });
 function manager(bufferBytes = 4096) {
-  const value = new TerminalManager({ bufferBytes });
+  // Short empty-read windows keep the suite fast; terminal-wait checks the real default.
+  const value = new TerminalManager({ bufferBytes, minEmptyPollMs: 50 });
   managers.push(value);
   return value;
 }
@@ -127,7 +128,7 @@ describe("one terminal's backlog does not suppress another terminal's progress",
 
           const result = await terminal.writeStdin({
             session_id: probe.id,
-            yield_time_ms: 1000,
+            yield_time_ms: 100,
           });
           // Startup title output is separate from the actual fixture marker on Windows PTYs.
           const ready = await observeTerminal(
@@ -145,7 +146,7 @@ describe("one terminal's backlog does not suppress another terminal's progress",
           const progress = await observeTerminal(
             await terminal.writeStdin({
               session_id: probe.id,
-              yield_time_ms: 1000,
+              yield_time_ms: 100,
             }),
             (input) => terminal.writeStdin(input),
             (part) => part.output.includes("probe-progress"),
@@ -266,7 +267,7 @@ describe("per-producer rolling output and cleanup", () => {
       omitted += part.omitted_bytes ?? 0;
     }
     expect(omitted).toBe(MiB);
-    expect(output.replace(/\n\[中间已省略[^\n]*\]\n/g, "")).toBe(
+    expect(output.replace(/\n\[\d+ bytes omitted[^\n]*\]\n/g, "")).toBe(
       "a".repeat(capacity),
     );
     expect(state(terminal, b.id).buffer.bytes).toBe(capacity);
@@ -309,7 +310,7 @@ describe("per-producer rolling output and cleanup", () => {
       expect(stopped.exit_code).toBeDefined();
       await expect(
         terminal.writeStdin({ session_id: writer.id, yield_time_ms: 0 }),
-      ).rejects.toThrow("未知或已读完");
+      ).rejects.toThrow("Unknown terminal session");
     },
   );
 

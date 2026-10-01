@@ -220,6 +220,8 @@ Normal shutdown and expiry clean up snapshots. Abnormal exits may leave system t
 code_mode_high_water_mib = 4096
 idle_retention_hours = 72
 terminal_buffer_mib = 16
+terminal_max_sessions = 64
+terminal_total_buffer_mib = 256
 ```
 
 The high-water mark triggers memory reclamation for the Code Mode execution component only. Users manage total machine memory and their child process trees.
@@ -230,6 +232,9 @@ Save important data to files; the service does not impose disk limits on user-ge
 
 Each terminal defaults to a 16 MiB unread head/tail buffer, with up to 4 MiB per read. Dropped middle logs are marked and cannot be recovered.
 A noisy terminal does not pause others, and logs are not automatically written to disk. Commands can explicitly save complete logs.
+terminal_max_sessions limits the sessions kept at one time, running or finished but unread. terminal_total_buffer_mib limits unread output across all sessions
+and is never smaller than terminal_buffer_mib. At a limit, finished unread sessions are released first; then the oldest unread output of running sessions is dropped and marked.
+Running processes are never stopped for a limit. When they alone fill it, new commands fail until the assistant reads or terminates sessions.
 
 Ordinary model responses allow at most 36,000 UTF-8 bytes, keeping the head and tail on overflow. Responses carrying user notes allow 37,000 bytes combined.
 These are conservative service byte budgets; actual ChatGPT token limits may change. Note bodies allow 30,000 bytes, including the question and choice for answers.

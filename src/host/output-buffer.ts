@@ -16,7 +16,7 @@ class ByteQueue {
       if (offset < size) return block.data[block.start + offset]!;
       offset -= size;
     }
-    throw new Error("输出缓冲索引无效。");
+    throw new Error("The output buffer index is not valid.");
   }
   push(input: Buffer): void {
     let offset = 0;
@@ -83,7 +83,9 @@ export class RollingOutputBuffer {
 
   constructor(readonly capacity: number) {
     if (!Number.isSafeInteger(capacity) || capacity < 64)
-      throw new Error("终端缓冲必须至少为 64 字节的安全整数。");
+      throw new Error(
+        "The terminal buffer must be a safe integer of at least 64 bytes.",
+      );
     this.#headLimit = Math.max(4, Math.floor(capacity / 16));
     this.#tailLimit = capacity - this.#headLimit;
     this.#head = new ByteQueue(Math.min(BLOCK_BYTES, this.#headLimit));
@@ -143,13 +145,28 @@ export class RollingOutputBuffer {
     this.#tail.push(data.subarray(offset));
   }
 
+  /**
+   * Drop up to `maximum` of the oldest unread tail bytes to honor a shared
+   * budget. The first output and the newest output stay; dropped bytes are
+   * reported like any other omission. Returns the number of dropped bytes.
+   */
+  shed(maximum: number): number {
+    let count = Math.min(Math.max(0, Math.floor(maximum)), this.#tail.bytes);
+    while (count < this.#tail.bytes && continuation(this.#tail.byteAt(count)))
+      count++;
+    if (!count) return 0;
+    this.#tail.drop(count);
+    this.#omitted = Math.min(Number.MAX_SAFE_INTEGER, this.#omitted + count);
+    return count;
+  }
+
   read(maximum: number): {
     output: string;
     truncated?: true;
     omitted_bytes?: number;
   } {
     if (!Number.isSafeInteger(maximum) || maximum < 4)
-      throw new Error("终端读取预算至少需要 4 字节。");
+      throw new Error("The terminal read budget must be at least 4 bytes.");
     const head = this.#head.read(maximum);
     let output = head.toString("utf8");
     let omitted = 0;
@@ -157,7 +174,7 @@ export class RollingOutputBuffer {
       omitted = this.#omitted;
       this.#omitted = 0;
       if (omitted)
-        output += `\n[中间已省略 ${omitted} 字节；输出已滚动截断，不能通过后续读取恢复]\n`;
+        output += `\n[${omitted} bytes omitted from the middle; the output buffer rolled over and later reads cannot recover them]\n`;
       output += this.#tail.read(maximum - head.length).toString("utf8");
     }
     if (!this.pending) this.#prefixClosed = false;

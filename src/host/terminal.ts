@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { performance } from "node:perf_hooks";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import {
@@ -71,39 +72,80 @@ interface Session {
   stderrBytes: number;
 }
 export const TERMINAL_READ_BYTES = 4 * 1024 * 1024;
+/** Codex's minimum collection window for an empty write_stdin read. */
+export const EMPTY_POLL_MIN_MS = 5000;
 /** Codex's collection windows, with an explicit zero for immediate local inspection. */
-export function stdinYieldTime(input: WriteStdinInput): number {
+export function stdinYieldTime(
+  input: WriteStdinInput,
+  minEmptyPollMs = EMPTY_POLL_MIN_MS,
+): number {
   const requested = input.yield_time_ms ?? 250;
   if (requested === 0) return 0;
   return input.chars
     ? Math.max(250, Math.min(30_000, requested))
-    : Math.max(5000, Math.min(300_000, requested));
+    : Math.max(minEmptyPollMs, Math.min(300_000, requested));
+}
+/** Shell convention: a process that signal N ended reports exit code 128 + N. */
+export function exitStatus(
+  code: number | null | undefined,
+  signal: NodeJS.Signals | number | null | undefined,
+): number {
+  const number =
+    typeof signal === "string" ? osConstants.signals[signal] : signal;
+  if (typeof number === "number" && number > 0) return 128 + number;
+  return code ?? 1;
+}
+export interface TerminalManagerOptions {
+  shell?: CommandShell;
+  /** Unread output kept for one session. */
+  bufferBytes?: number;
+  /** Retention of finished sessions whose output nobody read. */
+  idleMs?: number;
+  /** Sessions kept at one time, running or finished but unread. */
+  maxSessions?: number;
+  /** Unread output kept across all sessions; never below bufferBytes. */
+  totalBufferBytes?: number;
+  /** Minimum collection window of an empty write_stdin read. */
+  minEmptyPollMs?: number;
 }
 export class TerminalManager {
   readonly shell: CommandShell;
   private readonly bufferBytes: number;
   private readonly idleMs: number;
+  private readonly maxSessions: number;
+  private readonly totalBufferBytes: number;
+  private readonly minEmptyPollMs: number;
   private readonly timer: NodeJS.Timeout;
   private sessions = new Map<string, Session>();
   private closed = false;
-  constructor(
-    options: {
-      shell?: CommandShell;
-      bufferBytes?: number;
-      idleMs?: number;
-    } = {},
-  ) {
+  constructor(options: TerminalManagerOptions = {}) {
     this.shell = options.shell ?? resolveShell();
     this.bufferBytes =
       options.bufferBytes ?? MEMORY_DEFAULTS.terminal_buffer_mib * MiB;
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
+    this.maxSessions =
+      options.maxSessions ?? MEMORY_DEFAULTS.terminal_max_sessions;
+    this.minEmptyPollMs = options.minEmptyPollMs ?? EMPTY_POLL_MIN_MS;
+    const total =
+      options.totalBufferBytes ??
+      MEMORY_DEFAULTS.terminal_total_buffer_mib * MiB;
     if (
       !Number.isSafeInteger(this.bufferBytes) ||
       this.bufferBytes < 64 ||
       !Number.isFinite(this.idleMs) ||
-      this.idleMs <= 0
+      this.idleMs <= 0 ||
+      !Number.isSafeInteger(this.maxSessions) ||
+      this.maxSessions < 1 ||
+      !Number.isSafeInteger(total) ||
+      total < 1 ||
+      !Number.isSafeInteger(this.minEmptyPollMs) ||
+      this.minEmptyPollMs < 0 ||
+      this.minEmptyPollMs > 300_000
     )
-      throw new Error("终端缓冲大小或空闲保留时间无效。");
+      throw new Error(
+        "The terminal buffer size, session limit, total buffer budget, empty read window, or idle retention time is not valid.",
+      );
+    this.totalBufferBytes = Math.max(total, this.bufferBytes);
     this.timer = setInterval(() => this.sweep(), Math.min(this.idleMs, 60_000));
     this.timer.unref();
   }
@@ -147,11 +189,15 @@ export class TerminalManager {
     this.requireOpen();
     throwIfAborted(signal);
     const cwd = await realpath(resolveUserPath(input.workdir ?? base, base));
-    if (!(await stat(cwd)).isDirectory()) throw new Error("命令目录不存在。");
+    if (!(await stat(cwd)).isDirectory())
+      throw new Error(
+        "workdir must be an existing directory. Change workdir and run the command again.",
+      );
     this.requireOpen();
     throwIfAborted(signal);
     const selected = resolveCommandShell(this.shell, input, cwd);
     const shell = shellInvocation(input.cmd, selected);
+    this.admit();
     const backend: Backend = input.tty
       ? {
           kind: "pty",
@@ -215,12 +261,14 @@ export class TerminalManager {
         /* Write callbacks report EPIPE; never crash on a closed pipe. */
       });
       child.on("error", (error) => {
-        this.append(session, `进程启动失败：${error.message}\n`);
+        this.append(session, `The process failed to start: ${error.message}\n`);
       });
-      child.on("close", (code) => ended(code ?? 1));
+      child.on("close", (code, signal) => ended(exitStatus(code, signal)));
     } else {
       backend.process.onData((text) => this.append(session, text));
-      backend.process.onExit((event) => ended(event.exitCode));
+      backend.process.onExit((event) =>
+        ended(exitStatus(event.exitCode, event.signal)),
+      );
     }
     const started = performance.now();
     try {
@@ -230,7 +278,7 @@ export class TerminalManager {
       await this.terminate(session);
       this.remove(session);
       throw new Error(
-        "命令启动后等待被取消；进程已请求终止，已发生的副作用不会回滚。",
+        "The wait was cancelled after the command started. The process was asked to stop; effects that already happened are not undone.",
         { cause: error },
       );
     } finally {
@@ -246,9 +294,11 @@ export class TerminalManager {
     throwIfAborted(signal);
     const session = this.sessions.get(input.session_id);
     if (!session)
-      throw new Error(`未知或已读完的终端会话：${input.session_id}`);
+      throw new Error(
+        `Unknown terminal session: ${input.session_id}. Its output was already read to the end, or the session was released after idle retention or under the terminal memory limits. Use exec_command to run the command again only if repeating it is safe.`,
+      );
     const started = performance.now();
-    const timeoutMs = stdinYieldTime(input);
+    const timeoutMs = stdinYieldTime(input, this.minEmptyPollMs);
     session.touched = Date.now();
     session.observers++;
     try {
@@ -256,20 +306,26 @@ export class TerminalManager {
       return await session.mutex.run(async () => {
         throwIfAborted(signal);
         if (!this.sessions.has(session.id))
-          throw new Error("终端输出已经由另一次调用读完。");
+          throw new Error(
+            "Another call already read the final output of this terminal session.",
+          );
         const { backend } = session;
         if (input.cols !== undefined && input.rows !== undefined) {
           if (backend.kind !== "pty")
-            throw new Error("只有 PTY 会话可以调整尺寸。");
+            throw new Error(
+              "Only PTY sessions (started with tty=true) can be resized. Omit cols and rows for this session.",
+            );
           backend.process.resize(input.cols, input.rows);
         }
         if (input.close_stdin && backend.kind === "pty")
           throw new Error(
-            "PTY 不支持关闭单独的 stdin；按程序约定发送 EOF 字符。",
+            "close_stdin is not supported for PTY sessions. Send the end-of-input character that the program expects in chars instead, for example \\u0004 (Ctrl-D).",
           );
         if (input.chars || input.close_stdin) {
           if (session.exitCode !== undefined)
-            throw new Error("进程已退出，不能继续写入。");
+            throw new Error(
+              "The process already exited and cannot receive input. Omit chars and close_stdin to read the remaining output.",
+            );
           if (backend.kind === "pty") backend.process.write(input.chars ?? "");
           else {
             await new Promise<void>((resolve, reject) => {
@@ -316,7 +372,10 @@ export class TerminalManager {
     for (const session of sessions) this.remove(session);
     const failures = results.filter((result) => result.status === "rejected");
     if (failures.length)
-      throw new AggregateError(failures, "未能清理全部自有终端进程。");
+      throw new AggregateError(
+        failures,
+        "Could not stop all owned terminal processes.",
+      );
   }
   private environment(): Record<string, string> {
     return inheritedEnvironment();
@@ -324,6 +383,60 @@ export class TerminalManager {
   private append(session: Session, text: string): void {
     if (!this.sessions.has(session.id)) return;
     session.buffer.append(text);
+    this.enforceBudget(session);
+  }
+  private retainedBytes(): number {
+    let total = 0;
+    for (const session of this.sessions.values()) total += session.buffer.bytes;
+    return total;
+  }
+  /** Finished sessions that no call is reading, oldest first. */
+  private releasable(): Session[] {
+    return [...this.sessions.values()]
+      .filter((session) => session.exitCode !== undefined && !session.observers)
+      .sort((left, right) => left.touched - right.touched);
+  }
+  /** Make room for one more session, releasing finished unread sessions first. */
+  private admit(): void {
+    const full = () =>
+      this.sessions.size >= this.maxSessions ||
+      this.retainedBytes() >= this.totalBufferBytes;
+    for (const session of full() ? this.releasable() : []) {
+      if (!full()) break;
+      this.remove(session);
+    }
+    if (this.sessions.size >= this.maxSessions)
+      throw new Error(
+        `${this.sessions.size} terminal sessions are open, which is the limit (memory.terminal_max_sessions). Read the output of finished sessions with write_stdin, stop sessions you no longer need with write_stdin and terminate=true, then run the command again.`,
+      );
+    if (this.retainedBytes() >= this.totalBufferBytes)
+      throw new Error(
+        `Running terminal sessions hold ${Math.ceil(this.totalBufferBytes / MiB)} MiB of unread output, which is the limit (memory.terminal_total_buffer_mib). Read their output with write_stdin, or stop sessions you no longer need with write_stdin and terminate=true, then run the command again.`,
+      );
+  }
+  /**
+   * Keep all unread output within the shared budget: release finished unread
+   * sessions first, then drop the oldest unread output of running sessions,
+   * starting with the session that produced the new output.
+   */
+  private enforceBudget(source: Session): void {
+    let excess = this.retainedBytes() - this.totalBufferBytes;
+    if (excess <= 0) return;
+    for (const session of this.releasable()) {
+      if (excess <= 0) return;
+      if (session === source) continue;
+      excess -= session.buffer.bytes;
+      this.remove(session);
+    }
+    if (excess <= 0) return;
+    excess -= source.buffer.shed(excess);
+    const others = [...this.sessions.values()]
+      .filter((session) => session !== source)
+      .sort((left, right) => left.touched - right.touched);
+    for (const session of others) {
+      if (excess <= 0) return;
+      excess -= session.buffer.shed(excess);
+    }
   }
   private collect(session: Session, started: number): TerminalResult {
     session.touched = Date.now();
@@ -359,7 +472,8 @@ export class TerminalManager {
         pid !== undefined
           ? await terminateProcessTree(pid, session.done)
           : (await waitUntil(session.done, 3000)) !== undefined;
-      if (!stopped) throw new Error("进程树终止未确认。");
+      if (!stopped)
+        throw new Error("Could not confirm that the process tree stopped.");
     })();
     return session.terminating;
   }
@@ -368,6 +482,6 @@ export class TerminalManager {
     session.buffer.clear();
   }
   private requireOpen(): void {
-    if (this.closed) throw new Error("终端管理器已关闭。");
+    if (this.closed) throw new Error("The terminal manager is closed.");
   }
 }

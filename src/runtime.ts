@@ -133,6 +133,8 @@ export class ExecRuntime {
     this.terminal = new TerminalManager({
       shell,
       bufferBytes: memory.terminal_buffer_mib * MiB,
+      maxSessions: memory.terminal_max_sessions,
+      totalBufferBytes: memory.terminal_total_buffer_mib * MiB,
       idleMs,
     });
     this.native = nativeContracts(shell);

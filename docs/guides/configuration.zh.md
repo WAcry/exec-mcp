@@ -218,6 +218,8 @@ port = 8892
 code_mode_high_water_mib = 4096
 idle_retention_hours = 72
 terminal_buffer_mib = 16
+terminal_max_sessions = 64
+terminal_total_buffer_mib = 256
 ```
 
 高水位只用于触发 Code Mode 执行组件的内存回收，机器总内存和用户子进程树由用户管理。
@@ -228,6 +230,9 @@ terminal_buffer_mib = 16
 
 终端每进程默认保留 16 MiB 未读首尾，每次最多收取 4 MiB；中间被丢弃的日志会标注且不能补回。
 不会因一个终端刷日志暂停其他终端，也不自动把全部日志落盘。需要完整日志时由命令明确写文件。
+terminal_max_sessions 限制同时保留的会话数，包括运行中和已结束但未读完的会话；terminal_total_buffer_mib 限制全部会话的未读输出总量，
+且不会小于 terminal_buffer_mib。达到上限时先释放已结束的未读会话，再丢弃运行中会话最早的未读输出并标注。
+上限不会停止运行中的进程；只剩它们占满上限时，新命令会失败，直到助手读取或终止会话。
 
 普通模型响应最多 36,000 UTF-8 字节，超限保留首尾；有用户补充时合计最多 37,000 字节。
 这些是本服务的保守字节预算，ChatGPT 的实际 token 限制可能变化。补充正文上限 30,000 字节，问题答复连同题目和选择计费；

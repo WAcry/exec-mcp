@@ -186,7 +186,7 @@ port = 8893
 
 enabled=false disables the UI and audit collection. Web startup failure also stops collection, while MCP remains usable.
 Web configuration toggles edit only existing MCP services, discovered Skills, login, and Web enabled. Save, then restart execution to apply them.
-Restart failure leaves the management page available for repair. Temporary execution, terminals, export links, and old audit records are not restored.
+Restart failure leaves the management page available for repair. Restart keeps call history and conversation messages; temporary execution, terminals, and export links are not restored.
 
 For LAN access, set host explicitly to `0.0.0.0` or `::` and visit the machine's actual IP or hostname.
 Use the Web access key printed at startup or a link containing #token=… for the first sign-in. The browser then removes the key from the address bar.
@@ -260,5 +260,7 @@ Ordinary model responses allow at most 36,000 UTF-8 bytes, keeping the head and 
 These are conservative service byte budgets; actual ChatGPT token limits may change. Note bodies allow 30,000 bytes, including the question and choice for answers.
 If the first queued note does not fit, it waits without further clipping normal output. Messages and questions use bounded memory for 72 hours; insufficient capacity rejects new submissions.
 
-Conversation communication is stored independently. Clearing audit history or restarting execution in Web preserves notes, questions, and labels; exiting the whole process loses them.
+Conversation communication is stored independently. Clearing audit history, restarting execution in Web, and restarting the whole process preserve notes, questions, messages, and labels.
+serve saves them to .exec-mcp/<configuration file name>.notes.json beside the configuration file, next to the Web access key; the private file (0600) is replaced atomically shortly after each change.
+To start without saved messages, stop the service and delete the file. At startup an unreadable file is renamed with an .unreadable-<time> suffix, the log reports it, and the service starts empty.
 Without host conversation identity, ordinary execution still works, but cross-call store/load and conversation communication are unavailable.

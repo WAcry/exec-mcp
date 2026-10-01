@@ -2,7 +2,7 @@
 
 English | [简体中文](010-session-notes.zh.md)
 
-Active, updated 2026-09-28.
+Active, updated 2026-10-01.
 
 ## Conversation ownership and delivery
 
@@ -35,7 +35,7 @@ both invite asking through a channel that has no answer path. The description in
 It keeps the upstream split between messages that need immediate attention and commentary for routine progress, because every message interrupts the operator.
 
 Agent messages are stored separately from user input so they never echo back as user-authored instructions or create pending-question counts.
-They share the existing 72-hour retention and bounded memory pool, survive audit clearing and execution-service restart, and are lost on full process exit.
+They share the existing 72-hour retention and bounded store, and survive audit clearing, execution-service restart, and a full process restart.
 Messages are limited to 30,000 UTF-8 bytes. A missing Web listener or conversation identity fails explicitly. Acceptance confirms storage, not that the operator has read it.
 
 A message can arrive while the operator watches another conversation or is away, and a timeline entry alone scrolls out of sight as calls continue.
@@ -61,7 +61,7 @@ and an operator's label always wins, as a saved name does in Codex; clearing a m
 A missing Web listener, conversation identity, or capacity also returns set: false instead of failing, because an exception would stop the rest of the first script for a cosmetic result.
 The result carries no label, which stays Web-only.
 
-Labels are lost when the whole process exits or a record expires, and a model may skip the call. When a response delivers notes to a conversation that can still be titled,
+Labels are lost when a record expires, and a model may skip the call. When a response delivers notes to a conversation that can still be titled,
 a text block after the notes suggests setting one in the next exec. It is not a user note, uses only space left in the notes budget, and never appears without notes, so ordinary responses stay unchanged.
 exec/wait results are textual; a structured envelope keeps only its result and notes.
 
@@ -148,15 +148,22 @@ There is no acknowledgment protocol for these low-frequency notes.
 
 ## Retention and Web permissions
 
-Questions, notes, and labels use separate bounded instance memory and survive audit eviction, clearing history, and native-host reclamation.
-Restarting the execution service reuses them; stopping the whole process loses them. Records older than 72 hours are cleaned up on access, within an approximately 16 MiB accounting budget.
+Questions, notes, agent messages, and labels use a separate bounded store and survive audit eviction, clearing history, and native-host reclamation.
+Restarting the execution service reuses the store. serve also saves it to one versioned JSON file beside the Web access key, so a full process restart keeps it.
+Records older than 72 hours are cleaned up on access and at load, within an approximately 16 MiB accounting budget.
 Insufficient capacity rejects new submissions without overwriting pending messages. Bodies allow at most 30,000 UTF-8 bytes.
 Changed content creates a new message, and only pending messages may be withdrawn.
+
+Saves replace the file atomically with mode 0600, about one second after a content change or 30 seconds after an activity-only change.
+Delivering a note saves at once, and a normal stop writes pending changes last. Execution state, terminals, store data, and audit records stay in memory only.
+An unreadable or invalid file is moved aside with one log line and the store starts empty; if the move fails, that run saves nothing.
+A crash between delivering a note and saving that fact can deliver the note again after the restart. This rare duplicate is accepted to keep writes simple, without a delivery log.
 
 Recipients are observed while Web is listening. After Web closes, existing messages may still accompany later calls from their original conversations.
 APIs retain same-origin authentication and the write-request marker. SSE sends only change notifications and conversation summaries.
 Drafts are isolated by recipient and cleared only after successful submission. Labels and bodies render as plain text.
-This channel trusts one operator. Same-account processes may also access the Web API, so answer records cannot prove human authorization.
+This channel trusts one operator. Any local process can reach the loopback Web API without signing in, whatever its OS account; a single-operator machine needs no extra authentication for it.
+Answer records therefore cannot prove human authorization.
 
 See [OpenAI conversation metadata and visible tool results](https://developers.openai.com/plugins/reference)
 and [MCP content blocks](https://modelcontextprotocol.io/specification/2025-11-25/server/tools).

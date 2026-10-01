@@ -110,13 +110,13 @@ See [file delivery configuration](docs/guides/configuration.md#file-delivery).
 Skills are workflow documents stored in user or project directories; symbolic links are supported.
 Enable or disable Skills, or require explicit user invocation, through [Skill configuration](docs/guides/configuration.md#skills).
 
-Execution state, conversation messages, and audit records live in the current process. Cleanup has the following effects.
+Execution state and audit records live in the current process; conversation messages are also saved to a file beside the configuration. Cleanup has the following effects.
 
 | Action | Effect |
 | --- | --- |
 | Clear call history | Removes audit records without undoing execution; keeps conversation notes and questions. |
-| Restart the execution service in the Web console | Rebuilds tool connections and clears temporary execution, terminals, store, and export links; keeps notes, questions, and labels. |
-| Stop the entire exec-mcp program | In-memory execution, messages, questions, labels, and audit records are not restored. Files already written and external operations are not rolled back. |
+| Restart the execution service in the Web console | Rebuilds tool connections and clears temporary execution, terminals, store, and export links; keeps call history, notes, questions, and labels. |
+| Stop the entire exec-mcp program | Execution state and audit records are not restored; notes, questions, messages, and labels return at the next start. Files already written and external operations are not rolled back. |
 
 The execution component has a loose memory-reclamation target of about 4 GiB and normally retains idle sessions for 72 hours.
 Terminal buffers and model output are bounded; oversized results show truncation markers. Save important data to files.

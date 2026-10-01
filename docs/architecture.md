@@ -25,7 +25,7 @@ The execution core uses a common connection interface. Users manage projects and
 Working directories determine path resolution, and execution handles are valid only during the current run.
 
 The Web console observes and manages bounded temporary state in the same runtime. Model reasoning, ingress authentication, and execution retain their own responsibilities.
-User notes and asynchronous questions live in separate instance memory, grouped by conversation hash. Web answers enter the same note queue
+User notes and asynchronous questions live in a separate bounded store, grouped by conversation hash; serve saves it to a file, so a process restart keeps it. Web answers enter the same note queue
 and return with top-level tool responses; nested tool values stay unchanged. Clearing audit history or reclaiming a native session preserves messages.
 See [ADR-010](adr/010-session-notes.md) for lifecycle and output choices, and [ADR-009](adr/009-web-console.md) for loopback defaults, LAN authentication, and auditing.
 

@@ -105,7 +105,7 @@ The current LAN UI uses HTTP. Remote or untrusted networks need separately prote
 
 ## Bounded audit records
 
-Audit records live in the current process and disappear on restart. Conversations show a digest of host identity; the raw openai/session value never reaches the browser.
+Audit records live in the current process. An in-app restart keeps them; stopping the process loses them. Conversations show a digest of host identity; the raw openai/session value never reaches the browser.
 Lists return summaries and details are read on demand. A call summary adds the first input line of up to eight nested calls, the first five and last three,
 with their status, returned terminal or question handle, and exit code, plus a yielded cell ID and the first failure line. It never includes nested outputs.
 Conversation summaries carry the latest nested call's first line. Terminal listings report the first command line, directory, and owning conversation digest,
@@ -114,7 +114,7 @@ SSE broadcasts change types and IDs instead of complete arguments and results.
 Response details record the prepared MCP result, then apply audit bounds, so some content can be omitted.
 Details show truncation notices. Attachment metadata includes name, type, and size only, without signed URLs or opaque credentials.
 
-Record count, text, and nested calls are bounded. Large text keeps its head and tail; nested calls retain the earliest and rolling latest records.
+Record count, text, nested calls, and total size are bounded; retained records share an estimated 128 MiB, and the oldest calls leave first. Large text keeps its head and tail; nested calls retain the earliest and rolling latest records.
 These rules affect only the Web copy. MCP results, terminal output, and file operations keep their semantics.
 
 Base64 cut down to an audit preview cannot be displayed and crowds out the rest of a result, so images in recorded results are kept separately.
@@ -132,11 +132,17 @@ There is no arbitrary command prompt, store editor, or session kill button. New 
 The Tools and Settings pages can toggle existing MCP servers, discovered Skills, default login, and Web enabled.
 It edits only the relevant TOML booleans, preserving comments and other fields. Full validation, revision checks, and atomic replacement protect concurrent edits.
 Saving and applying are separate. Restart reads valid configuration before closing the old runtime, then rebuilds connections, native memory, and terminals without backing up temporary execution state.
+Call history, conversation messages, and protocol counts carry over. The Web server switches to the new runtime at once and sends a runtime event so open pages reload.
 On failure, the Web management entry point stays available for repair and retry. Repeated clicks share one restart; shutdown never reopens a listener.
 Questions and answers use the same Web authentication. Answers are communication, not execution approval.
 
 Conversations show their current execution state without permanent alarms from historical failures.
 Audit truncation is marked in details, without a separate dashboard counter. Script completion and nested-command results are shown separately.
 A restart banner appears only while a saved configuration waits to be applied, a restart runs, or one failed.
+
+Server and UI share one typed response contract. Failures return a stable error code with an English diagnostic message, and the UI shows catalog text for the code.
+While the event stream is connected, lists reload on change events instead of polling. Processes and Code Mode sessions have no events and refresh every 36 seconds;
+status requests keep renewing the browser session. Settings and /api/status show legacy and modern MCP request counts since start,
+so a later decision on the legacy session router can rest on observed use.
 Conversation labels, notes, and answers follow [ADR-010](010-session-notes.md).
 Questions and notes are independent of audit retention and survive rolling or clearing audit history.

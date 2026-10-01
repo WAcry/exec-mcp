@@ -42,6 +42,10 @@ function manager(bufferBytes = 4096, minEmptyPollMs = 50) {
   managers.push(value);
   return value;
 }
+/** An empty read with a long window. It returns as soon as the process exits. */
+function readToExit(value: TerminalManager, session_id: string) {
+  return value.writeStdin({ session_id, yield_time_ms: 30_000 });
+}
 function plain(value: string) {
   return stripVTControlCharacters(value).replaceAll("\r\n", "\n");
 }
@@ -145,9 +149,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
       expect(result.output.length).toBeGreaterThan(0);
       expect(t.session.exitReady).toBeUndefined();
       await t.release();
-      const final = await value.writeStdin({
-        session_id: t.id,
-      });
+      const final = await readToExit(value, t.id);
       expect(final.exit_code).toBe(0);
       expect(final.output).not.toContain("READY");
     },
@@ -235,9 +237,7 @@ describe.each([false, true])("terminal deadline waiting (PTY=%s)", (tty) => {
       t.root,
     );
     const final = other.session_id
-      ? await value.writeStdin({
-          session_id: other.session_id,
-        })
+      ? await readToExit(value, other.session_id)
       : other;
     expect(final.exit_code).toBe(0);
     expect(plain(other.output + final.output)).toContain("OTHER_READY");
@@ -288,7 +288,7 @@ it("returns after a short input window and lets a later read collect EOF-trigger
 });
 
 it("leaves the rolling buffer bounded during a default wait and drains an already-ended process immediately", async () => {
-  const value = manager(4096);
+  const value = manager(4096, EMPTY_POLL_MIN_MS);
   const first = await value.execCommand(
     {
       cmd: nodeCommand(`
@@ -433,11 +433,11 @@ it("gives each queued input its collection window after acquiring the session, a
   expect(t.session.exitReady).toBeUndefined();
   expect(t.session.observers).toBe(0);
   await t.release();
-  expect((await value.writeStdin({ session_id: t.id })).exit_code).toBe(0);
+  expect((await readToExit(value, t.id)).exit_code).toBe(0);
 });
 
 it("continues draining an ended process with the same handle when one response cannot fit all output", async () => {
-  const value = manager(6 * 1024 * 1024);
+  const value = manager(6 * 1024 * 1024, EMPTY_POLL_MIN_MS);
   const first = await value.execCommand(
     {
       cmd: nodeCommand(

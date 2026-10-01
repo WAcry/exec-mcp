@@ -54,8 +54,11 @@ describe("saved session notes", () => {
     await first.store.close();
 
     expect(file).toBe(path.join(root, ".exec-mcp", "config.toml.notes.json"));
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    // Windows does not report POSIX permission bits.
+    if (process.platform !== "win32") {
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    }
     const saved = JSON.parse(await readFile(file, "utf8"));
     expect(saved.version).toBe(NOTES_FILE_VERSION);
     expect(await readdir(path.dirname(file))).toEqual([

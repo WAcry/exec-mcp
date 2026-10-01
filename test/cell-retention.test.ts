@@ -78,8 +78,11 @@ describe("host failures are visible to the operator", () => {
       Date.now() < deadline
     )
       await pause(20);
-    expect(lines.join("")).toMatch(
-      /codex-code-mode-host stopped unexpectedly \(signal SIGKILL\)/,
+    // Windows terminates the process with exit code 1 and reports no signal.
+    const reason =
+      process.platform === "win32" ? "exit code 1" : "signal SIGKILL";
+    expect(lines.join("")).toContain(
+      `codex-code-mode-host stopped unexpectedly (${reason})`,
     );
   });
 });

@@ -230,7 +230,7 @@ const TERMINAL_OUTPUT = {
     exit_code: {
       type: "integer",
       description:
-        "Shell exit code, present once the process has exited and all output has been collected.",
+        "Shell exit code, present once the process has exited and all output has been collected. A process stopped by signal N reports 128+N.",
     },
     truncated: {
       type: "boolean",

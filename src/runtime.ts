@@ -1,5 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import {
   McpServer,
   ResourceTemplate,
@@ -7,44 +8,41 @@ import {
   type ServerContext,
   type ResourceLink,
 } from "@modelcontextprotocol/server";
+import type { z } from "zod/v4";
 import { CodeModeService, sessionScopeKey } from "./code-mode/service.js";
+import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import {
   nativeContracts,
-  bindNative,
+  nativeContractsByName,
+  nativeDefinition,
+  parseNativeInput,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
   execDescription,
   WAIT_DESCRIPTION,
+  type NativeContract,
 } from "./catalog.js";
 import type { Config } from "./config.js";
 import { DownstreamMcpRegistry } from "./downstream/registry.js";
 import { ToolDiscovery } from "./downstream/discovery.js";
-import {
-  TerminalManager,
-  type ExecCommandInput,
-  type WriteStdinInput,
-} from "./host/terminal.js";
+import { TerminalManager } from "./host/terminal.js";
 import { PatchRunner } from "./host/patch.js";
 import { viewImage } from "./host/image.js";
 import { toolError } from "./results.js";
-import { resolveUserPath, throwIfAborted } from "./util.js";
+import { errorMessage, resolveUserPath, throwIfAborted } from "./util.js";
 import { VERSION } from "./version.js";
 import { brandIcons } from "./brand-icon.js";
 import { ArtifactStore, ARTIFACT_URI_PREFIX } from "./files/artifacts.js";
 import type { HostFile } from "./files/contracts.js";
 import { listSkills } from "./skills/index.js";
 import { DEFAULT_SKILL_MAX_CHARS, type SkillSetting } from "./skills/types.js";
-import { resolveShell } from "./host/shell.js";
+import { resolveShell, type CommandShell } from "./host/shell.js";
 import { MEMORY_SCHEMA, MiB } from "./memory.js";
 import { boundModelOutput } from "./code-mode/model-output.js";
-import { ActivityStore } from "./web/activity.js";
-import type { CallRecord } from "./web/types.js";
+import { ActivityStore, type ActiveCallController } from "./web/activity.js";
+import type { CallRecord, CallStatus } from "./web/types.js";
 import { SessionNotes } from "./session-notes.js";
-import type { RequestUserInput } from "./user-questions.js";
-import type {
-  ResourceListInput,
-  ResourceReadInput,
-} from "./downstream/resources.js";
+import type { NativeToolName } from "./tool-names.js";
 
 function sessionScope(context: ServerContext): string | undefined {
   const meta = context.mcpReq._meta as Record<string, unknown> | undefined;
@@ -71,6 +69,60 @@ function subcallFailed(result: unknown): boolean {
   );
 }
 
+/** Records one nested call in the Web activity log. */
+async function audited<T>(
+  call: ActiveCallController,
+  name: string,
+  input: unknown,
+  run: () => Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  const audit = call.startSubcall(name, input);
+  try {
+    const output = await run();
+    audit.finish({
+      durationMs: Date.now() - started,
+      output,
+      status: subcallFailed(output) ? "error" : "success",
+    });
+    return output;
+  } catch (error) {
+    audit.finish({
+      durationMs: Date.now() - started,
+      error: errorMessage(error),
+      status: "error",
+    });
+    throw error;
+  }
+}
+
+type CodeModeState = "yielded" | "completed" | "terminated";
+
+type DefinedFields<T> = { [K in keyof T]: Exclude<T[K], undefined> };
+/** Drops keys whose parsed value is undefined, matching exact optional types. */
+function definedFields<T extends object>(value: T): DefinedFields<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, field]) => field !== undefined),
+  ) as DefinedFields<T>;
+}
+
+function callStatus(
+  result: CallToolResult,
+  state: CodeModeState | undefined,
+): CallStatus {
+  if (result.isError) return "error";
+  if (state === "yielded") return "yielding";
+  if (state === "terminated") return "terminated";
+  return "completed";
+}
+
+/** Copies the defined arguments for the activity log. */
+function recordedArgs(args: Record<string, unknown>): CallRecord["args"] {
+  return Object.fromEntries(
+    Object.entries(args).filter(([, value]) => value !== undefined),
+  ) as CallRecord["args"];
+}
+
 const IDENTITY = { name: "exec-mcp", title: "Exec MCP", version: VERSION };
 
 /** 2026-era results repeat serverInfo, icons included, unless the result already names its server. */
@@ -94,6 +146,32 @@ interface NativeContext {
     bytes: number;
   };
 }
+
+/** A local tool: its contract, its cached Code Mode definition and its handler. */
+interface NativeTool {
+  readonly name: NativeToolName;
+  readonly definition: Omit<CodeModeToolDefinition, "call">;
+  /** Validates raw input before any side effect. */
+  parse(raw: unknown): unknown;
+  /** Runs the handler with input returned by parse. */
+  run(input: unknown, ctx: NativeContext): Promise<unknown>;
+}
+
+function defineNative<S extends z.ZodType>(
+  contract: NativeContract<S>,
+  handler: (input: z.output<S>, ctx: NativeContext) => unknown,
+): NativeTool {
+  return {
+    name: contract.name,
+    definition: nativeDefinition(contract),
+    parse: (raw) => parseNativeInput(contract, raw),
+    run: async (input, ctx) => {
+      throwIfAborted(ctx.signal);
+      return handler(input as z.output<S>, ctx);
+    },
+  };
+}
+
 export class ExecRuntime {
   readonly codeMode: CodeModeService;
   readonly terminal: TerminalManager;
@@ -109,7 +187,8 @@ export class ExecRuntime {
   readonly skillMaxChars: number;
   readonly idleHours: number;
   readonly skillConfig: readonly SkillSetting[];
-  private readonly native: ReturnType<typeof nativeContracts>;
+  private readonly contracts: readonly NativeContract[];
+  private readonly nativeTools: readonly NativeTool[];
   private readonly securitySchemes:
     | { type: string; scopes?: string[] }[]
     | undefined;
@@ -135,7 +214,8 @@ export class ExecRuntime {
       bufferBytes: memory.terminal_buffer_mib * MiB,
       idleMs,
     });
-    this.native = nativeContracts(shell);
+    this.contracts = nativeContracts(shell);
+    this.nativeTools = this.defineNativeTools(shell);
     this.codeMode = new CodeModeService({
       sessionIdleMs: idleMs,
       memoryHighWaterBytes: memory.code_mode_high_water_mib * MiB,
@@ -160,64 +240,49 @@ export class ExecRuntime {
     });
     return this.initialization;
   }
-  /** Native capabilities share one Code Mode binding and validation path. */
-  private async callNative(
-    name: string,
-    input: unknown,
-    ctx: NativeContext,
-  ): Promise<unknown> {
-    throwIfAborted(ctx.signal);
-    switch (name) {
-      case "list_skills": {
-        const requested = (input as { workdir?: string }).workdir;
+  /** Each local tool's handler, typed by its contract's schema. */
+  private defineNativeTools(shell: CommandShell): readonly NativeTool[] {
+    const c = nativeContractsByName(shell);
+    const tools = {
+      list_skills: defineNative(c.list_skills, (input, ctx) => {
         const workdir =
-          requested === undefined
+          input.workdir === undefined
             ? ctx.explicitWorkdir
               ? ctx.cwd
               : undefined
-            : resolveUserPath(requested, ctx.cwd);
+            : resolveUserPath(input.workdir, ctx.cwd);
         return listSkills({
           ...(workdir === undefined ? {} : { workdir }),
           maxChars: this.skillMaxChars,
           config: this.skillConfig,
           ...(ctx.signal ? { signal: ctx.signal } : {}),
         });
-      }
-      case "import_file": {
-        const value = input as {
-          index: number;
-          destination: string;
-          overwrite?: boolean;
-        };
-        const file = ctx.files?.[value.index];
+      }),
+      import_file: defineNative(c.import_file, (input, ctx) => {
+        const file = ctx.files?.[input.index];
         if (!file)
           throw new Error(
             "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
           );
         return this.artifacts.importFile(
           file,
-          value.destination,
+          input.destination,
           ctx.cwd,
-          value.overwrite,
+          input.overwrite,
           ctx.signal,
         );
-      }
-      case "export_file": {
+      }),
+      export_file: defineNative(c.export_file, async (input, ctx) => {
         if (ctx.attachments.bytes + 4096 > 1024 * 1024)
           throw new Error(
             "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
           );
-        const file = input as {
-          path: string;
-          name?: string;
-          delivery?: "resource" | "url";
-        };
         const exported = await this.artifacts.exportFile(
-          file.path,
+          input.path,
           ctx.cwd,
           ctx.scope,
-          file.delivery,
-          file.name,
+          input.delivery,
+          input.name,
           ctx.signal,
         );
         const bytes = Buffer.byteLength(JSON.stringify(exported.content));
@@ -231,64 +296,97 @@ export class ExecRuntime {
         });
         ctx.attachments.bytes += bytes;
         return exported.info;
-      }
-      case "exec_command":
-        return this.terminal.execCommand(
-          input as ExecCommandInput,
+      }),
+      exec_command: defineNative(c.exec_command, (input, ctx) =>
+        this.terminal.execCommand(
+          definedFields(input),
           ctx.cwd,
           ctx.signal,
           sessionScopeKey(ctx.scope),
-        );
-      case "write_stdin":
-        return this.terminal.writeStdin(input as WriteStdinInput, ctx.signal);
-      case "apply_patch":
-        return this.patch.apply(input as string, ctx.cwd, ctx.signal);
-      case "view_image": {
-        const value = input as { path: string; detail?: string };
-        return viewImage(resolveUserPath(value.path, ctx.cwd), value.detail);
-      }
-      case "request_user_input_async":
-        throwIfAborted(ctx.signal);
-        return this.notes.ask(
-          sessionScopeKey(ctx.scope),
-          input as RequestUserInput,
-        );
-      case "send_message_to_user_async":
-        throwIfAborted(ctx.signal);
-        return this.notes.sendMessage(
-          sessionScopeKey(ctx.scope),
-          input as { message: string },
-          ctx.callId,
-        );
-      case "set_conversation_title":
-        return this.notes.setTitle(
-          sessionScopeKey(ctx.scope),
-          (input as { title: string }).title,
-        );
-      case "list_mcp_resources":
-        return this.downstream.listResources(
-          input as ResourceListInput,
-          ctx.signal,
-        );
-      case "list_mcp_resource_templates":
-        return this.downstream.listResourceTemplates(
-          input as ResourceListInput,
-          ctx.signal,
-        );
-      case "read_mcp_resource":
-        return this.downstream.readResource(
-          input as ResourceReadInput,
-          ctx.signal,
-        );
-      default:
-        throw new Error("未知本机工具。");
-    }
+        ),
+      ),
+      write_stdin: defineNative(c.write_stdin, (input, ctx) =>
+        this.terminal.writeStdin(definedFields(input), ctx.signal),
+      ),
+      apply_patch: defineNative(c.apply_patch, (input, ctx) =>
+        this.patch.apply(input, ctx.cwd, ctx.signal),
+      ),
+      view_image: defineNative(c.view_image, (input, ctx) =>
+        viewImage(resolveUserPath(input.path, ctx.cwd), input.detail),
+      ),
+      request_user_input_async: defineNative(
+        c.request_user_input_async,
+        (input, ctx) => this.notes.ask(sessionScopeKey(ctx.scope), input),
+      ),
+      send_message_to_user_async: defineNative(
+        c.send_message_to_user_async,
+        (input, ctx) =>
+          this.notes.sendMessage(sessionScopeKey(ctx.scope), input, ctx.callId),
+      ),
+      set_conversation_title: defineNative(
+        c.set_conversation_title,
+        (input, ctx) =>
+          this.notes.setTitle(sessionScopeKey(ctx.scope), input.title),
+      ),
+      list_mcp_resources: defineNative(c.list_mcp_resources, (input, ctx) =>
+        this.downstream.listResources(input, ctx.signal),
+      ),
+      list_mcp_resource_templates: defineNative(
+        c.list_mcp_resource_templates,
+        (input, ctx) =>
+          this.downstream.listResourceTemplates(input, ctx.signal),
+      ),
+      read_mcp_resource: defineNative(c.read_mcp_resource, (input, ctx) =>
+        this.downstream.readResource(input, ctx.signal),
+      ),
+    } satisfies Record<NativeToolName, NativeTool>;
+    return (Object.keys(c) as NativeToolName[]).map((name) => tools[name]);
   }
   private async workdir(value?: string): Promise<string> {
     const cwd = await realpath(resolveUserPath(value ?? homedir()));
     if (!(await stat(cwd)).isDirectory())
       throw new Error("workdir 必须是目录。");
     return cwd;
+  }
+  /**
+   * Shared exec/wait boundary: activity record, user notes, server identity.
+   * Errors become a bounded tool error result; onError may add content to it.
+   */
+  private async trackedCall(
+    tool: "exec" | "wait",
+    context: ServerContext,
+    args: Record<string, unknown>,
+    run: (
+      call: ActiveCallController,
+    ) => Promise<{ result: CallToolResult; state: CodeModeState | undefined }>,
+    onError?: (result: CallToolResult) => void,
+  ): Promise<CallToolResult> {
+    const scopeKey = sessionScopeKey(sessionScope(context));
+    this.notes.observe(scopeKey);
+    const call = this.activity.startCall({
+      tool,
+      sessionId: scopeKey ?? "unscoped",
+      args: recordedArgs(args),
+    });
+    const attachNotes = (result: CallToolResult) =>
+      this.notes.attach(result, scopeKey, call.id, context.mcpReq.signal);
+    try {
+      // The Code Mode service already bounded this result.
+      const { result: raw, state } = await run(call);
+      const result = attachNotes(raw);
+      call.finish({ status: callStatus(raw, state), output: result });
+      return identify(result);
+    } catch (error) {
+      const failed = toolError(error);
+      onError?.(failed);
+      const result = attachNotes(boundModelOutput(failed));
+      call.finish({
+        status: "error",
+        error: errorMessage(error),
+        output: result,
+      });
+      return identify(result);
+    }
   }
   server(): McpServer {
     const server = new McpServer(
@@ -308,7 +406,7 @@ export class ExecRuntime {
       "exec",
       {
         title: "Execute code",
-        description: execDescription(this.native, this.idleHours),
+        description: execDescription(this.contracts, this.idleHours),
         inputSchema: EXEC_SCHEMA,
         annotations,
         _meta: {
@@ -320,27 +418,6 @@ export class ExecRuntime {
       },
       async (args, context) => {
         const scope = sessionScope(context);
-        this.notes.observe(sessionScopeKey(scope));
-        const callArgs: CallRecord["args"] = {
-          ...(args.source !== undefined ? { source: args.source } : {}),
-          ...(args.workdir !== undefined ? { workdir: args.workdir } : {}),
-          ...(args.yield_time_ms !== undefined
-            ? { yield_time_ms: args.yield_time_ms }
-            : {}),
-          ...(args.max_output_tokens !== undefined
-            ? { max_output_tokens: args.max_output_tokens }
-            : {}),
-          ...(args.files !== undefined
-            ? {
-                files: args.files.map(fileAuditMetadata),
-              }
-            : {}),
-        };
-        const callTracker = this.activity.startCall({
-          tool: "exec",
-          sessionId: sessionScopeKey(scope) ?? "unscoped",
-          args: callArgs,
-        });
         const attachments: NativeContext["attachments"] = {
           items: [],
           bytes: 0,
@@ -353,130 +430,67 @@ export class ExecRuntime {
           attachments.bytes = 0;
           return items;
         };
-        try {
-          if (!this.ready) throw new Error("服务正在关闭。");
-          const signal = context.mcpReq.signal;
-          throwIfAborted(signal);
-          const cwd = await this.workdir(args.workdir);
-          const tools = this.native.map((contract) =>
-            bindNative(contract, async (input, nested) => {
-              const subcallStart = Date.now();
-              const audit = callTracker.startSubcall(contract.name, input);
-              try {
-                const subcallResult = await this.callNative(
-                  contract.name,
-                  input,
-                  {
+        return this.trackedCall(
+          "exec",
+          context,
+          {
+            source: args.source,
+            workdir: args.workdir,
+            yield_time_ms: args.yield_time_ms,
+            max_output_tokens: args.max_output_tokens,
+            files: args.files?.map(fileAuditMetadata),
+          },
+          async (call) => {
+            if (!this.ready) throw new Error("服务正在关闭。");
+            const signal = context.mcpReq.signal;
+            throwIfAborted(signal);
+            const cwd = await this.workdir(args.workdir);
+            const native = this.nativeTools.map((tool) => ({
+              ...tool.definition,
+              call: async (raw: unknown, nested: { signal: AbortSignal }) => {
+                const input = tool.parse(raw);
+                return audited(call, tool.name, input, () =>
+                  tool.run(input, {
                     cwd,
                     explicitWorkdir: args.workdir !== undefined,
-                    callId: callTracker.id,
+                    callId: call.id,
                     scope,
                     files: args.files,
                     signal: nested.signal,
                     attachments,
-                  },
+                  }),
                 );
-                audit.finish({
-                  durationMs: Date.now() - subcallStart,
-                  output: subcallResult,
-                  status: subcallFailed(subcallResult) ? "error" : "success",
-                });
-                return subcallResult;
-              } catch (subErr) {
-                audit.finish({
-                  durationMs: Date.now() - subcallStart,
-                  error:
-                    subErr instanceof Error ? subErr.message : String(subErr),
-                  status: "error",
-                });
-                throw subErr;
-              }
-            }),
-          );
-          const downstream = this.discovery.snapshot();
-          let codeModeState: "yielded" | "completed" | "terminated" | undefined;
-          const execResult = await this.codeMode.exec({
-            source: args.source,
-            ...(callTracker.id === "audit-disabled"
-              ? {}
-              : { requestId: callTracker.id }),
-            takeAttachments,
-            ...(args.max_output_tokens === undefined
-              ? {}
-              : { maxOutputTokens: args.max_output_tokens }),
-            tools: [
-              ...tools,
-              ...downstream.map((tool) => ({
-                ...tool,
-                call: async (...parameters: Parameters<typeof tool.call>) => {
-                  const started = Date.now();
-                  const audit = callTracker.startSubcall(
-                    tool.name,
-                    parameters[0],
-                  );
-                  try {
-                    const result = await tool.call(...parameters);
-                    audit.finish({
-                      output: result,
-                      durationMs: Date.now() - started,
-                      status: subcallFailed(result) ? "error" : "success",
-                    });
-                    return result;
-                  } catch (error) {
-                    audit.finish({
-                      error:
-                        error instanceof Error ? error.message : String(error),
-                      durationMs: Date.now() - started,
-                      status: "error",
-                    });
-                    throw error;
-                  }
-                },
-              })),
-            ],
-            ...(args.yield_time_ms === undefined
-              ? {}
-              : { yieldTimeMs: args.yield_time_ms }),
-            ...(scope === undefined ? {} : { sessionScope: scope }),
-            signal,
-            onState: (state) => {
-              codeModeState = state;
-            },
-          });
-          // The Code Mode service already bounded this result.
-          const result = this.notes.attach(
-            execResult,
-            sessionScopeKey(scope),
-            callTracker.id,
-            context.mcpReq.signal,
-          );
-          callTracker.finish({
-            status: execResult.isError
-              ? "error"
-              : codeModeState === "yielded"
-                ? "yielding"
-                : codeModeState === "terminated"
-                  ? "terminated"
-                  : "completed",
-            output: result,
-          });
-          return identify(result);
-        } catch (error) {
-          const result = toolError(error);
-          result.content.push(...takeAttachments());
-          const response = this.notes.attach(
-            boundModelOutput(result),
-            sessionScopeKey(scope),
-            callTracker.id,
-            context.mcpReq.signal,
-          );
-          callTracker.finish({
-            status: "error",
-            error: error instanceof Error ? error.message : String(error),
-            output: response,
-          });
-          return identify(response);
-        }
+              },
+            }));
+            const downstream = this.discovery.snapshot().map((tool) => ({
+              ...tool,
+              call: (...parameters: Parameters<typeof tool.call>) =>
+                audited(call, tool.name, parameters[0], () =>
+                  tool.call(...parameters),
+                ),
+            }));
+            let state: CodeModeState | undefined;
+            const result = await this.codeMode.exec({
+              source: args.source,
+              ...(call.id === "audit-disabled" ? {} : { requestId: call.id }),
+              takeAttachments,
+              ...(args.max_output_tokens === undefined
+                ? {}
+                : { maxOutputTokens: args.max_output_tokens }),
+              tools: [...native, ...downstream],
+              ...(args.yield_time_ms === undefined
+                ? {}
+                : { yieldTimeMs: args.yield_time_ms }),
+              ...(scope === undefined ? {} : { sessionScope: scope }),
+              signal,
+              onState: (next) => {
+                state = next;
+              },
+            });
+            return { result, state };
+          },
+          (failed) => failed.content.push(...takeAttachments()),
+        );
       },
     );
     server.registerTool(
@@ -492,74 +506,37 @@ export class ExecRuntime {
       },
       async (args, context) => {
         const scope = sessionScope(context);
-        this.notes.observe(sessionScopeKey(scope));
-        const waitArgs: CallRecord["args"] = {
-          cell_id: args.cell_id,
-          ...(args.yield_time_ms !== undefined
-            ? { yield_time_ms: args.yield_time_ms }
-            : {}),
-          ...(args.max_tokens !== undefined
-            ? { max_tokens: args.max_tokens }
-            : {}),
-          ...(args.terminate !== undefined
-            ? { terminate: args.terminate }
-            : {}),
-        };
-        const callTracker = this.activity.startCall({
-          tool: "wait",
-          sessionId: sessionScopeKey(scope) ?? "unscoped",
-          args: waitArgs,
-        });
-        try {
-          let codeModeState: "yielded" | "completed" | "terminated" | undefined;
-          const waitResult = await this.codeMode.wait({
-            cellId: args.cell_id,
-            ...(args.max_tokens === undefined
-              ? {}
-              : { maxTokens: args.max_tokens }),
-            ...(args.yield_time_ms === undefined
-              ? {}
-              : { yieldTimeMs: args.yield_time_ms }),
-            ...(args.terminate === undefined
-              ? {}
-              : { terminate: args.terminate }),
-            ...(scope === undefined ? {} : { sessionScope: scope }),
-            signal: context.mcpReq.signal,
-            onState: (state) => {
-              codeModeState = state;
-            },
-          });
-          const result = this.notes.attach(
-            waitResult,
-            sessionScopeKey(scope),
-            callTracker.id,
-            context.mcpReq.signal,
-          );
-          callTracker.finish({
-            status: waitResult.isError
-              ? "error"
-              : codeModeState === "yielded"
-                ? "yielding"
-                : codeModeState === "terminated"
-                  ? "terminated"
-                  : "completed",
-            output: result,
-          });
-          return identify(result);
-        } catch (error) {
-          const result = this.notes.attach(
-            boundModelOutput(toolError(error)),
-            sessionScopeKey(scope),
-            callTracker.id,
-            context.mcpReq.signal,
-          );
-          callTracker.finish({
-            status: "error",
-            error: error instanceof Error ? error.message : String(error),
-            output: result,
-          });
-          return identify(result);
-        }
+        return this.trackedCall(
+          "wait",
+          context,
+          {
+            cell_id: args.cell_id,
+            yield_time_ms: args.yield_time_ms,
+            max_tokens: args.max_tokens,
+            terminate: args.terminate,
+          },
+          async () => {
+            let state: CodeModeState | undefined;
+            const result = await this.codeMode.wait({
+              cellId: args.cell_id,
+              ...(args.max_tokens === undefined
+                ? {}
+                : { maxTokens: args.max_tokens }),
+              ...(args.yield_time_ms === undefined
+                ? {}
+                : { yieldTimeMs: args.yield_time_ms }),
+              ...(args.terminate === undefined
+                ? {}
+                : { terminate: args.terminate }),
+              ...(scope === undefined ? {} : { sessionScope: scope }),
+              signal: context.mcpReq.signal,
+              onState: (next) => {
+                state = next;
+              },
+            });
+            return { result, state };
+          },
+        );
       },
     );
     server.registerResource(

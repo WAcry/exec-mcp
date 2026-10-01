@@ -253,47 +253,53 @@ change_line: ("+" | "-" | " ") /(.*)/ LF
 eof_line: "*** End of File" LF
 
 %import common.LF`;
-export interface NativeContract {
+export interface NativeContract<S extends z.ZodType = z.ZodType> {
   name: NativeToolName;
   description: string;
-  schema: z.ZodType;
+  schema: S;
   output?: Record<string, unknown>;
   freeform?: boolean;
 }
-const NATIVE_CONTRACTS: readonly NativeContract[] = [
-  {
+/** Keeps each contract's schema type, so handlers receive typed input. */
+function contract<N extends NativeToolName, S extends z.ZodType>(
+  value: NativeContract<S> & { name: N },
+): NativeContract<S> & { name: N } {
+  return value;
+}
+const NATIVE_CONTRACTS = {
+  list_skills: contract({
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
     description: `Lists available skill names, descriptions and resolved SKILL.md paths. Includes user-level skills and applicable project skills when a workdir is supplied. The full SKILL.md contains the workflow instructions. ${SKILL_INVOCATION_RULE}`,
-  },
-  {
+  }),
+  import_file: contract({
     name: "import_file",
     schema: IMPORT_FILE_SCHEMA,
     description:
       "Saves exec.files[index] to a local destination. Returns {path,size,sha256}; path is the local file for subsequent operations. Existing destinations are preserved unless overwrite=true; replacement follows a successful download and validation.",
-  },
-  {
+  }),
+  export_file: contract({
     name: "export_file",
     schema: EXPORT_FILE_SCHEMA,
     description:
       "Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to 32 MiB via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.",
-  },
-  {
+  }),
+  exec_command: contract({
     name: "exec_command",
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
       "Runs a shell command, returning output or a session ID for ongoing interaction. write_stdin continues the same terminal. A shell exit code does not describe the success of every command in a script.",
-  },
-  {
+  }),
+  write_stdin: contract({
     name: "write_stdin",
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
       "Writes characters to an existing exec_command session and returns recent output. Can also resize a PTY, close pipe stdin or terminate the process. A collection timeout leaves the process running; the returned session_id remains usable.",
-  },
-  {
+  }),
+  apply_patch: contract({
     name: "apply_patch",
     schema: PATCH_SCHEMA,
     freeform: true,
@@ -308,14 +314,14 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       additionalProperties: false,
     },
     description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
-  },
-  {
+  }),
+  view_image: contract({
     name: "view_image",
     schema: IMAGE_SCHEMA,
     description:
       "View a local image file from the filesystem when visual inspection is needed. Returns a CallToolResult containing an ImageContent block; image(result.content[0]) displays it.",
-  },
-  {
+  }),
+  request_user_input_async: contract({
     name: "request_user_input_async",
     schema: REQUEST_USER_INPUT_SCHEMA,
     output: {
@@ -329,8 +335,8 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Ask the user one or more questions during ongoing work. Submits questions to this conversation's Web UI and immediately returns accepted, without waiting for answers. Answers include the question, choice and optional note, delivered as user notes with subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
-  },
-  {
+  }),
+  send_message_to_user_async: contract({
     name: "send_message_to_user_async",
     schema: SEND_MESSAGE_TO_USER_SCHEMA,
     output: {
@@ -341,8 +347,8 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Send a concise message that needs the user's attention during ongoing work. The message appears in this conversation's Web UI, and the tool returns immediately without ending the turn or waiting for a reply. Use this tool to report a critical blocker or a finding that may change the task's direction, or to answer a user question or status request received while work is still in progress. Use this tool when a message needs the user's immediate attention; use commentary for routine progress and intermediate context. It informs rather than asks: do not expect a reply, and use request_user_input_async when you need an answer. Requires a running Web server and a host-provided conversation ID.",
-  },
-  {
+  }),
+  set_conversation_title: contract({
     name: "set_conversation_title",
     schema: TITLE_SCHEMA,
     output: {
@@ -353,73 +359,104 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Sets a title for this conversation so the user can easily find and manage it. Call once in your first exec with 3 to 8 words summarizing the user's task, in the user's language. Only the first title is kept.",
-  },
-  {
+  }),
+  list_mcp_resources: contract({
     name: "list_mcp_resources",
     schema: RESOURCE_LIST_SCHEMA,
     description:
       "Lists resources provided by MCP servers, such as files, database schemas or application-specific information. Returns {resources:[{server,uri,name,...}],server?,nextCursor?,errors?}. A specified server returns one page; omitting server aggregates enabled servers with failures in errors. Servers without resource support contribute an empty list. Resources are separate from the ALL_TOOLS method catalog.",
-  },
-  {
+  }),
+  list_mcp_resource_templates: contract({
     name: "list_mcp_resource_templates",
     schema: RESOURCE_LIST_SCHEMA,
     description:
       "Lists resource templates provided by MCP servers. Returns {resourceTemplates:[{server,uriTemplate,name,...}],server?,nextCursor?,errors?}. Expanding a uriTemplate produces a concrete URI for read_mcp_resource. Pagination, aggregation and errors follow list_mcp_resources.",
-  },
-  {
+  }),
+  read_mcp_resource: contract({
     name: "read_mcp_resource",
     schema: RESOURCE_READ_SCHEMA,
     description:
       "Read a specific resource from an MCP server given the server name and resource URI. Known URIs can be read directly. Returns {server,uri,contents:[{uri,mimeType?,text?,blob?}]}: text is plain text; blob is Base64. The URI is resolved by that server, not as a local path or a generic download URL. Failures throw an error.",
-  },
-];
+  }),
+} satisfies { [K in NativeToolName]: NativeContract & { name: K } };
+export type NativeContracts = typeof NATIVE_CONTRACTS;
+
+const jsonSchemas = new WeakMap<z.ZodType, Record<string, unknown>>();
+const descriptions = new WeakMap<NativeContract, string>();
+const definitions = new WeakMap<
+  NativeContract,
+  Omit<CodeModeToolDefinition, "call">
+>();
+
+/** JSON Schema for a zod schema, computed once per schema object. */
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
-  const { $schema: _dialect, ...value } = z.toJSONSchema(schema, {
-    unrepresentable: "throw",
-  });
+  let value = jsonSchemas.get(schema);
+  if (value === undefined) {
+    const { $schema: _dialect, ...converted } = z.toJSONSchema(schema, {
+      unrepresentable: "throw",
+    });
+    value = converted;
+    jsonSchemas.set(schema, value);
+  }
   return value;
 }
 export function describeContract(contract: NativeContract): string {
-  return `${contract.description}\nCall: await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\nInput JSON Schema: ${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\nOutput JSON Schema: ${JSON.stringify(contract.output)}` : ""}`;
+  let value = descriptions.get(contract);
+  if (value === undefined) {
+    value = `${contract.description}\nCall: await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\nInput JSON Schema: ${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\nOutput JSON Schema: ${JSON.stringify(contract.output)}` : ""}`;
+    descriptions.set(contract, value);
+  }
+  return value;
 }
+/** The Code Mode definition of a contract, computed once per contract object. */
 export function nativeDefinition(
   contract: NativeContract,
 ): Omit<CodeModeToolDefinition, "call"> {
-  return {
-    name: contract.name,
-    description: describeContract(contract),
-    kind: contract.freeform ? "freeform" : "function",
-    ...(!contract.freeform ? { inputSchema: jsonSchema(contract.schema) } : {}),
-    ...(contract.output ? { outputSchema: contract.output } : {}),
-  };
+  let value = definitions.get(contract);
+  if (value === undefined) {
+    value = {
+      name: contract.name,
+      description: describeContract(contract),
+      kind: contract.freeform ? "freeform" : "function",
+      ...(!contract.freeform
+        ? { inputSchema: jsonSchema(contract.schema) }
+        : {}),
+      ...(contract.output ? { outputSchema: contract.output } : {}),
+    };
+    definitions.set(contract, value);
+  }
+  return value;
 }
-export function bindNative(
-  contract: NativeContract,
-  call: CodeModeToolDefinition["call"],
-): CodeModeToolDefinition {
+/** Validates nested tool input against its contract before any side effect. */
+export function parseNativeInput<S extends z.ZodType>(
+  contract: NativeContract<S>,
+  raw: unknown,
+): z.output<S> {
+  const parsed = contract.schema.safeParse(raw);
+  if (!parsed.success)
+    throw new Error(
+      `工具 ${contract.name} 参数无效：${parsed.error.issues.map((issue) => `${issue.path.join(".") || "/"} ${issue.code}`).join(", ")}；尚未执行。`,
+    );
+  return parsed.data;
+}
+/** Contracts by name for one instance; exec_command describes the resolved shell. */
+export function nativeContractsByName(shell: CommandShell): NativeContracts {
   return {
-    ...nativeDefinition(contract),
-    call: async (raw, context) => {
-      const parsed = contract.schema.safeParse(raw);
-      if (!parsed.success)
-        throw new Error(
-          `工具 ${contract.name} 参数无效：${parsed.error.issues.map((issue) => `${issue.path.join(".") || "/"} ${issue.code}`).join(", ")}；尚未执行。`,
-        );
-      return call(parsed.data, context);
+    ...NATIVE_CONTRACTS,
+    exec_command: {
+      ...NATIVE_CONTRACTS.exec_command,
+      description:
+        NATIVE_CONTRACTS.exec_command.description +
+        "\n" +
+        shellDescription(shell),
     },
   };
 }
+/** Contracts in catalog order. */
 export function nativeContracts(
   shell: CommandShell,
 ): readonly NativeContract[] {
-  return NATIVE_CONTRACTS.map((contract) =>
-    contract.name === "exec_command"
-      ? {
-          ...contract,
-          description: contract.description + "\n" + shellDescription(shell),
-        }
-      : contract,
-  );
+  return Object.values(nativeContractsByName(shell));
 }
 
 export function execDescription(

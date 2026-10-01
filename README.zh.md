@@ -149,7 +149,8 @@ npm run check
 npm run test:package
 ```
 
-检查包括测试、类型检查与构建；独立安装验证只在临时目录打包安装，不发布 npm 包。
+检查包括测试、类型检查与构建；独立安装验证从源码的临时副本打包，并在临时目录安装，
+不改动检出目录中的 dist，也不发布 npm 包。
 开发者阅读[架构边界](docs/architecture.zh.md)，编码 Agent 从 [AGENTS.md](AGENTS.zh.md) 开始，
 具体调用示例见 [Code Mode 示例](docs/guides/code-mode-examples.zh.md)。
 

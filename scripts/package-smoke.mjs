@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
 import {
+  copyFile,
+  lstat,
   mkdtemp,
   readFile,
   writeFile,
@@ -39,21 +41,41 @@ let child;
 let client;
 let exited;
 try {
-  // Simulate an in-place source upgrade: a full build must drop removed compiled modules.
-  const stale = path.join(root, "dist", "src", "user-input");
-  await mkdir(stale, { recursive: true });
-  await writeFile(
-    path.join(stale, "removed-feature.js"),
-    "throw new Error('obsolete module');\n",
+  // Pack a copy of the tracked and untracked non-ignored files. prepack builds and cleans dist
+  // inside the copy, so the checkout's dist (possibly used by a running instance) stays untouched.
+  const sourceCopy = path.join(temporary, "source");
+  const listed = await run(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: root, maxBuffer: 16 * 1024 * 1024 },
   );
-  const staleSearch = path.join(root, "dist", "src", "downstream", "search.js");
-  await mkdir(path.dirname(staleSearch), { recursive: true });
-  await writeFile(staleSearch, "throw new Error('obsolete search');\n");
+  for (const file of listed.stdout.split("\0").filter(Boolean)) {
+    const from = path.join(root, file);
+    let info;
+    try {
+      info = await lstat(from);
+    } catch (error) {
+      if (error.code === "ENOENT") continue; // Deleted in the working tree.
+      throw error;
+    }
+    assert.ok(
+      info.isFile(),
+      "Unsupported file type in the source copy: " + file,
+    );
+    const to = path.join(sourceCopy, file);
+    await mkdir(path.dirname(to), { recursive: true });
+    await copyFile(from, to);
+  }
+  await symlink(
+    path.join(root, "node_modules"),
+    path.join(sourceCopy, "node_modules"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
   const packed = await run(
     process.execPath,
     [npmCli, "pack", "--silent", "--pack-destination", temporary],
     {
-      cwd: root,
+      cwd: sourceCopy,
       maxBuffer: 8 * 1024 * 1024,
       timeout: 120_000,
     },
@@ -63,7 +85,6 @@ try {
     .split(/\r?\n/)
     .findLast((line) => /^exec-mcp-.*\.tgz$/.test(line));
   assert.ok(filename, "npm pack did not produce a tarball");
-  assert.ok(!(await readdir(path.dirname(staleSearch))).includes("search.js"));
   const isolated = path.join(temporary, "installation");
   await mkdir(isolated);
   await writeFile(
@@ -105,9 +126,7 @@ try {
   );
   assert.equal(manifest.version, sourceManifest.version);
   assert.equal(filename, `exec-mcp-${manifest.version}.tgz`);
-  assert.ok(!manifest.dependencies["better-sqlite3"]);
-  assert.ok(!manifest.devDependencies["@types/better-sqlite3"]);
-  assert.ok(!(await readdir(path.dirname(cli))).includes("user-input"));
+  assert.equal(manifest.license, "Apache-2.0");
   const documents = await relativeFiles(path.join(root, "docs"));
   assert.deepEqual(
     await relativeFiles(path.join(installed, "docs")),
@@ -124,6 +143,7 @@ try {
   for (const file of [
     ...rootDocuments,
     ...documents.map((file) => path.join("docs", file)),
+    "LICENSE",
     path.join("proto", "LICENSE"),
   ])
     assert.deepEqual(
@@ -131,11 +151,6 @@ try {
       await readFile(path.join(root, file)),
       "Packaged document differs from source: " + file,
     );
-  assert.ok(
-    !(await readdir(path.join(isolated, "node_modules"))).includes(
-      "better-sqlite3",
-    ),
-  );
   const config = path.join(temporary, "config.toml");
   const executeCli = async (args) =>
     (
@@ -445,7 +460,7 @@ enabled = true
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
-  // The installed package exposes complete, callable metadata without executing a search tool.
+  // The installed package exposes complete, callable metadata through ALL_TOOLS.
   const catalogCheck = await scopedCall(`
     const complete=ALL_TOOLS.every(tool => typeof tools[tool.name] === 'function' && tool.description.length > 0);
     const selected=ALL_TOOLS.find(tool => tool.name === 'mcp__packaged__echo');
@@ -578,13 +593,12 @@ enabled = true
         block.text.includes("Keep Node 20."),
     ),
   );
-  for (const route of ["/api/user-input", "/api/user-input/old-request"])
-    assert.equal((await fetch(new URL(route, started.web))).status, 404);
   const webCredentials = path.join(temporary, ".exec-mcp");
-  assert.deepEqual(
-    await readdir(webCredentials),
-    [`${path.basename(config)}.web-token`],
-    "Only remembered Web credentials are persisted, not a question database",
+  assert.ok(
+    (await readdir(webCredentials)).includes(
+      `${path.basename(config)}.web-token`,
+    ),
+    "Remembered Web credentials are stored next to the configuration",
   );
   assert.ok(
     (

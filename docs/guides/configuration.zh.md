@@ -18,6 +18,7 @@
 `init / doctor / serve / tunnel` 可用 `--config 路径`，也可设置 `EXEC_MCP_CONFIG`。
 主目录指运行服务的系统账户；exec-mcp 不读取其他 Codex/MCP 产品的配置。
 配置可能包含凭据，请保存在自己的私人目录。
+配置错误会逐项列出无效字段及原因，不显示配置的值。
 
 默认配置使用私有入口。
 
@@ -45,11 +46,24 @@ args = ["/absolute/path/to/mcp-server.js"]
 
 [mcp_servers.remote]
 url = "https://example.com/mcp"
-headers = { Authorization = "Bearer REPLACE_ME" }
+bearer_token_env_var = "REMOTE_MCP_TOKEN"
+# env_http_headers = { X-Api-Key = "REMOTE_MCP_API_KEY" }
+# headers = { X-Static = "value" }
 ```
 
-每个服务选择 `command` 或 `url` 之一；stdio 可设置 `args / cwd / env`，HTTP 可设置 `headers`。
+每个服务选择 `command` 或 `url` 之一；stdio 可设置 `args / cwd / env`，HTTP 可设置 `headers / env_http_headers / bearer_token_env_var`。
 stdio 的相对 `cwd` 基于配置文件目录；可执行文件名从服务环境的 PATH 查找。
+exec-mcp 关闭 stdio 服务时，也会停止该服务启动的进程，例如 npx 背后的服务端。
+
+HTTP 凭据可以不写进 config.toml。这些名称与 Codex 的 `mcp_servers` 一致；Codex 的 `http_headers` 在这里叫 `headers`。
+
+| 选项 | 用途 |
+| --- | --- |
+| `headers` | header 名称与固定值。 |
+| `env_http_headers` | header 名称与保存其值的环境变量名；变量未设置或为空白时不发送该 header。 |
+| `bearer_token_env_var` | 保存令牌的环境变量名，以 `Authorization: Bearer <token>` 发送；变量未设置或为空时启动失败。不要在另外两项中再设置 Authorization。 |
+
+exec-mcp 从自身服务进程的环境读取这些变量；修改后需重启服务。
 
 以下选项写在对应服务段中，两种连接方式都支持。
 
@@ -60,6 +74,8 @@ stdio 的相对 `cwd` 基于配置文件目录；可执行文件名从服务环�
 | `startup_timeout_sec` | 默认 30 秒，覆盖连接、协商与全部工具目录页；慢启动可调整为 120 或 300。 |
 | `tool_timeout_sec` | 默认 120 秒，约束下游工具及资源请求，与外层 wait 分别计时。 |
 
+两个超时都接受 0.001 至 2147483.647 秒（Node.js 定时器的范围），并四舍五入到整毫秒。
+
 **全部启用服务就绪后才开放 MCP 入口。** 地址、鉴权、工具目录或契约失败都会使本次启动失败；
 不使用的服务可在配置中关闭。启动检查不实际调用工具，也不预读所有资源正文。
 
@@ -68,7 +84,11 @@ stdio 的诊断保留在终端；当前不代办通用下游 OAuth 登录/刷新
 ChatGPT 的入口 Auth0 认证和访问下游的凭据分别配置。
 
 资源专用服务也能接入。工具目录按需通过 ALL_TOOLS 查看；资源的列举、模板和读取示例见
-[Code Mode 示例](code-mode-examples.zh.md#mcp-资源)。连接后来失效时，可在本机修复；已发送的操作不会自动重放。
+[Code Mode 示例](code-mode-examples.zh.md#mcp-资源)。
+
+连接失效后，下一次调用或资源请求会重新连接。可证明未到达服务端的请求会在重连后再发送一次：
+即连接未打开，或服务端因会话过期返回 HTTP 404。可能已到达服务端的请求不会再次发送。
+错误会说明是服务端拒绝了请求（附服务端的错误码与消息），还是结果未知。持续失败的连接请在本机修复。
 
 ## 命令 Shell
 

@@ -28,6 +28,18 @@ import {
 } from "./web/config.js";
 
 const strings = z.record(z.string(), z.string());
+// RFC 9110 token: what fetch accepts as a header name.
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+const ENVIRONMENT_NAME = /^[^=\0]+$/u;
+const environmentName = z
+  .string()
+  .regex(
+    ENVIRONMENT_NAME,
+    "must be an environment variable name without = or NUL",
+  );
+/** The longest Node.js timer, about 24.8 days. */
+const MAX_TIMEOUT_SEC = 2_147_483.647;
+const timeoutSeconds = z.number().min(0.001).max(MAX_TIMEOUT_SEC);
 const serverSchema = z
   .object({
     access: z.enum(["openai-tunnel", "public"]),
@@ -40,38 +52,77 @@ const downstreamSchema = z
   .object({
     enabled: z.boolean().default(true),
     enabled_tools: z.array(z.string()).optional(),
-    // Startup is not a connector call. Bound only by Node's timer range.
-    startup_timeout_sec: z.number().min(0.001).max(2_147_483.647).optional(),
-    tool_timeout_sec: z.number().positive().optional(),
+    // Startup is not a connector call. Both are bound only by Node's timer range.
+    startup_timeout_sec: timeoutSeconds.optional(),
+    tool_timeout_sec: timeoutSeconds.optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
     env: strings.optional(),
     cwd: z.string().optional(),
     url: z.url().optional(),
+    // Codex calls this http_headers.
     headers: strings.optional(),
+    env_http_headers: strings.optional(),
+    bearer_token_env_var: environmentName.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
+    const issue = (message: string, path: string[] = []) =>
+      ctx.addIssue({ code: "custom", message, path });
+    for (const field of ["headers", "env_http_headers"] as const)
+      for (const [name, variable] of Object.entries(value[field] ?? {})) {
+        if (!HEADER_NAME.test(name))
+          issue(
+            "the key must be an HTTP header name with only letters, digits, and !#$%&'*+-.^_`|~",
+            [field, name],
+          );
+        if (field === "env_http_headers" && !ENVIRONMENT_NAME.test(variable))
+          issue(
+            "the value must be the name of an environment variable without = or NUL",
+            [field, name],
+          );
+      }
     if ((value.command === undefined) === (value.url === undefined))
-      ctx.addIssue({ code: "custom", message: "command/url 必须二选一" });
+      issue("set exactly one of command (stdio) or url (Streamable HTTP)");
     if (value.url && (value.command || value.args || value.cwd || value.env))
-      ctx.addIssue({ code: "custom", message: "HTTP 配置不能含 stdio 字段" });
-    if (value.command && value.headers)
-      ctx.addIssue({
-        code: "custom",
-        message: "stdio 配置不能含 HTTP headers",
-      });
+      issue(
+        "a server with url cannot have the stdio fields command, args, cwd, or env",
+      );
+    if (
+      value.command &&
+      (value.headers || value.env_http_headers || value.bearer_token_env_var)
+    )
+      issue(
+        "a server with command cannot have the HTTP fields headers, env_http_headers, or bearer_token_env_var; pass credentials to a stdio server with env",
+      );
+    if (value.bearer_token_env_var !== undefined) {
+      const names = [
+        ...Object.keys(value.headers ?? {}),
+        ...Object.keys(value.env_http_headers ?? {}),
+      ];
+      if (names.some((name) => name.toLowerCase() === "authorization"))
+        issue(
+          "bearer_token_env_var sets the Authorization header; remove Authorization from headers and env_http_headers",
+          ["bearer_token_env_var"],
+        );
+    }
     if (value.url) {
-      const url = new URL(value.url);
+      let url: URL | undefined;
+      try {
+        url = new URL(value.url);
+      } catch {
+        // z.url() already reported it.
+      }
       if (
-        !["http:", "https:"].includes(url.protocol) ||
-        url.username ||
-        url.password
+        url &&
+        (!["http:", "https:"].includes(url.protocol) ||
+          url.username ||
+          url.password)
       )
-        ctx.addIssue({
-          code: "custom",
-          message: "url 必须是无内嵌凭据的 HTTP(S) 地址",
-        });
+        issue(
+          "url must be an http or https URL without a user name or password; send credentials with headers, env_http_headers, or bearer_token_env_var",
+          ["url"],
+        );
     }
   });
 const configSchema = z
@@ -110,7 +161,12 @@ export interface Config {
   memory?: MemoryConfig;
   web?: WebConfig;
 }
-export const CONFIG_TEMPLATE = `[server]\n# 仅供受信任的 OpenAI Secure MCP Tunnel；禁止将此无认证入口发布到公网。\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [web]\n# enabled = ${WEB_DEFAULTS.enabled}\n# host = "${WEB_DEFAULTS.host}" # 默认仅本机；明确改为 0.0.0.0 或 :: 才开放局域网。\n# port = ${WEB_DEFAULTS.port}\n\n# [execution]\n# shell = "pwsh" # 可执行文件名或路径；省略则按系统自动选择。\n# login = false\n\n# [memory]\n# code_mode_high_water_mib = ${MEMORY_DEFAULTS.code_mode_high_water_mib}\n# idle_retention_hours = ${MEMORY_DEFAULTS.idle_retention_hours}\n# terminal_buffer_mib = ${MEMORY_DEFAULTS.terminal_buffer_mib}\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Skill 目录字符目标，约 10000 tokens；不是精确 tokenizer 计量。\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# headers = { Authorization = "Bearer REPLACE_ME" }\n`;
+/**
+ * A configuration error whose message names fields and reasons but never
+ * configured values, so callers can show it as it is.
+ */
+export class ConfigError extends Error {}
+export const CONFIG_TEMPLATE = `[server]\n# Only for a trusted OpenAI Secure MCP Tunnel. Never publish this endpoint without authentication to the internet.\naccess = "openai-tunnel"\nhost = "127.0.0.1"\nport = 8891\n\n# [web]\n# enabled = ${WEB_DEFAULTS.enabled}\n# host = "${WEB_DEFAULTS.host}" # This machine only by default. Set 0.0.0.0 or :: to open it to the LAN.\n# port = ${WEB_DEFAULTS.port}\n\n# [execution]\n# shell = "pwsh" # An executable name or path. Omit it to select one for this system.\n# login = false\n\n# [memory]\n# code_mode_high_water_mib = ${MEMORY_DEFAULTS.code_mode_high_water_mib}\n# idle_retention_hours = ${MEMORY_DEFAULTS.idle_retention_hours}\n# terminal_buffer_mib = ${MEMORY_DEFAULTS.terminal_buffer_mib}\n# terminal_max_sessions = ${MEMORY_DEFAULTS.terminal_max_sessions}\n# terminal_total_buffer_mib = ${MEMORY_DEFAULTS.terminal_total_buffer_mib}\n\n# [skills]\n# max_chars = ${DEFAULT_SKILL_MAX_CHARS} # Target size of the Skill catalog in characters, about 10000 tokens. It is not an exact token count.\n\n# [mcp_servers.example]\n# command = "node"\n# args = ["/absolute/path/to/mcp-server.js"]\n# enabled_tools = ["lookup"]\n\n# [mcp_servers.remote]\n# url = "https://example.com/mcp"\n# bearer_token_env_var = "EXAMPLE_MCP_TOKEN" # Or headers = { Authorization = "Bearer REPLACE_ME" }\n`;
 export function defaultConfigPath(): string {
   return (
     process.env.EXEC_MCP_CONFIG ?? path.join(configDirectory(), "config.toml")
@@ -120,13 +176,27 @@ export function parseConfig(text: string, filename: string): Config {
   let raw: unknown;
   try {
     raw = parseToml(text);
-  } catch {
-    throw new Error("配置不是有效的 TOML；为避免泄漏凭据，不回显内容。");
+  } catch (error) {
+    // The parser message quotes the source line, which can hold a credential.
+    const { line, col } = error as { line?: unknown; col?: unknown };
+    const where =
+      typeof line === "number" && typeof col === "number"
+        ? ` near line ${line + 1}, column ${col + 1}`
+        : "";
+    throw new ConfigError(
+      `The configuration is not valid TOML${where}. Fix the syntax there. The content is not shown, because it can hold credentials.`,
+    );
   }
   const parsed = configSchema.safeParse(raw);
   if (!parsed.success)
-    throw new Error(
-      `配置字段无效：${parsed.error.issues.map((issue) => issue.path.join(".") || "root").join(", ")}`,
+    throw new ConfigError(
+      [
+        "The configuration has fields that are not valid. Fix them, then start exec-mcp again:",
+        ...parsed.error.issues.map(
+          (issue) =>
+            `- ${issue.path.map(String).join(".") || "(top level)"}: ${issue.message}`,
+        ),
+      ].join("\n"),
     );
   const {
     server,
@@ -183,10 +253,10 @@ export function parseConfig(text: string, filename: string): Config {
         ...(item.enabled_tools ? { enabledTools: item.enabled_tools } : {}),
         ...(item.startup_timeout_sec === undefined
           ? {}
-          : { startupTimeoutMs: item.startup_timeout_sec * 1000 }),
+          : { startupTimeoutMs: Math.round(item.startup_timeout_sec * 1000) }),
         ...(item.tool_timeout_sec === undefined
           ? {}
-          : { toolTimeoutMs: item.tool_timeout_sec * 1000 }),
+          : { toolTimeoutMs: Math.round(item.tool_timeout_sec * 1000) }),
       };
       if (item.command)
         return {
@@ -205,6 +275,12 @@ export function parseConfig(text: string, filename: string): Config {
         transport: "streamable-http" as const,
         url: item.url!,
         headers: item.headers ?? {},
+        ...(item.env_http_headers === undefined
+          ? {}
+          : { envHeaders: item.env_http_headers }),
+        ...(item.bearer_token_env_var === undefined
+          ? {}
+          : { bearerTokenEnvVar: item.bearer_token_env_var }),
         ...policy,
       };
     });
@@ -236,7 +312,9 @@ export async function loadConfig(
   try {
     text = await readFile(filename, "utf8");
   } catch {
-    throw new Error(`无法读取配置 ${filename}；先运行 exec-mcp init。`);
+    throw new ConfigError(
+      `Cannot read the configuration file ${filename}. Run exec-mcp init to create it, or set EXEC_MCP_CONFIG to the path of an existing file.`,
+    );
   }
   return parseConfig(text, filename);
 }

@@ -18,6 +18,7 @@ init creates configuration and prints its location, preserving existing files. D
 init, doctor, serve, and tunnel accept `--config PATH` or the EXEC_MCP_CONFIG environment variable.
 Home means the account running the service. exec-mcp does not read another Codex/MCP product's configuration.
 Configuration may contain credentials; keep it in a private directory.
+A configuration error lists each invalid field with the reason, and does not show the configured values.
 
 The default configuration uses private ingress.
 
@@ -46,11 +47,24 @@ args = ["/absolute/path/to/mcp-server.js"]
 
 [mcp_servers.remote]
 url = "https://example.com/mcp"
-headers = { Authorization = "Bearer REPLACE_ME" }
+bearer_token_env_var = "REMOTE_MCP_TOKEN"
+# env_http_headers = { X-Api-Key = "REMOTE_MCP_API_KEY" }
+# headers = { X-Static = "value" }
 ```
 
-Each service chooses command or url. stdio supports args, cwd, and env; HTTP supports headers.
+Each service chooses command or url. stdio supports args, cwd, and env; HTTP supports headers, env_http_headers, and bearer_token_env_var.
 A relative stdio cwd resolves from the configuration directory. Executable names are found on the service environment's PATH.
+When exec-mcp closes a stdio service, it also stops the processes that the service started, such as the server behind npx.
+
+HTTP credentials can stay out of config.toml. These names match Codex `mcp_servers`; Codex's `http_headers` is `headers` here.
+
+| Option | Purpose |
+| --- | --- |
+| headers | Header names and fixed values. |
+| env_http_headers | Header names and the names of environment variables that hold their values. A header whose variable is unset or blank is not sent. |
+| bearer_token_env_var | The name of an environment variable that holds a token, sent as `Authorization: Bearer <token>`. Startup fails when the variable is unset or empty. Do not also set Authorization in the other two fields. |
+
+exec-mcp reads these variables from its own service environment. Restart the service after you change them.
 
 Both transports support these options in their service section.
 
@@ -61,6 +75,8 @@ Both transports support these options in their service section.
 | startup_timeout_sec | Defaults to 30 seconds for connection, negotiation, and all tool-catalog pages. Slow startup can use 120 or 300. |
 | tool_timeout_sec | Defaults to 120 seconds for downstream tools and resources, timed independently of outer wait. |
 
+Both timeouts accept 0.001 to 2147483.647 seconds, the range of a Node.js timer, and round to whole milliseconds.
+
 **MCP becomes available only after every enabled service is ready.** Address, authentication, catalog, or contract errors fail startup.
 Disable unused services in configuration. Startup checks do not invoke tools or prefetch all resource contents.
 
@@ -69,7 +85,11 @@ stdio diagnostics stay in the terminal. Generic downstream OAuth sign-in/refresh
 ChatGPT's Auth0 ingress and downstream credentials are configured separately.
 
 Resource-only services are supported. Inspect tool contracts through ALL_TOOLS as needed, and see [Code Mode examples](code-mode-examples.md#mcp-resources)
-for resource lists, templates, and reads. Repair failed connections locally; already-sent operations are not replayed automatically.
+for resource lists, templates, and reads.
+
+After a connection fails, the next call or resource request reconnects. A request that provably did not reach the server is sent once more after reconnecting:
+the connection was not open, or the server answered HTTP 404 for an expired session. A request that may have reached the server is never sent again.
+Its error tells whether the server rejected it, with the server's code and message, or whether the result is unknown. Repair connections that keep failing on this machine.
 
 ## Command shell
 

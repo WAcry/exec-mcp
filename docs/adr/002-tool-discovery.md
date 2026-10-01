@@ -39,13 +39,16 @@ This adds startup time and lets one failed service block readiness, while making
 Startup only reads catalogs; it does not invoke tools that might have side effects.
 
 The startup deadline covers negotiation and all catalog pages. Cancellation cleans up SDK resources and their owned child processes.
-stdio inherits the full environment, uses stderr for local diagnostics, and reserves stdout for the protocol. HTTP uses configured credentials.
+stdio inherits the full environment, uses stderr for local diagnostics, and reserves stdout for the protocol. Closing a stdio server also stops the processes it started.
+HTTP uses configured headers, or credentials from environment variables with the Codex names env_http_headers and bearer_token_env_var.
 Users complete downstream authentication on the machine. Widgets, sampling, elicitation, and generic downstream OAuth sign-in or refresh are outside the proxy's scope;
 ChatGPT calls do not wait for those interactions. ChatGPT's ingress OAuth to exec-mcp is configured separately.
 
 Tools and ALL_TOOLS share a snapshot for each exec. Catalog updates affect later calls only.
 After disconnection, the last validated contract allows a known method to reconnect; the live contract is checked again before sending.
 Removed tools, changed contracts, or an unverifiable contract prevent sending. Failed calls that have already been sent are never retried automatically.
+A request that provably did not reach the server (the connection was not open, or HTTP 404 for an expired session) is sent once more after reconnecting, with no notice to the model.
+Errors keep the downstream protocol code and message, and tell a rejected request apart from a sent request with an unknown result.
 Name-normalization collisions, duplicate tools, and nonexistent enabled_tools entries are explicit errors.
 
 ChatGPT may cache connection metadata. After an upgrade, the operator needs to restart and refresh the connection; a new conversation alone may retain an old description.

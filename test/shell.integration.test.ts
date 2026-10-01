@@ -425,7 +425,9 @@ describe.each([false, true])(
           },
         });
         expect(result.isError).toBe(true);
-        expect(texts(result).join("\n")).toMatch(/指定的 Shell|不支持 CMD/);
+        expect(texts(result).join("\n")).toMatch(
+          /selected shell was not found|CMD and batch files/,
+        );
       }
       await expect(readFile(path.join(root, "marker"))).rejects.toMatchObject({
         code: "ENOENT",
@@ -497,7 +499,7 @@ describe("fixed executable identity and native startup rules", () => {
       connect({
         execution: { shell: path.join(await directory(), "missing-shell") },
       }),
-    ).rejects.toThrow("指定的 Shell");
+    ).rejects.toThrow("selected shell was not found");
   });
   it.skipIf(process.platform === "win32")(
     "keeps the selected executable after PATH changes and does not fall back when it disappears",
@@ -538,7 +540,7 @@ describe("fixed executable identity and native startup rules", () => {
         (input) => terminal.writeStdin(input),
       );
       expect(failed.exit_code).not.toBe(0);
-      expect(failed.output).toContain("进程启动失败");
+      expect(failed.output).toContain("The process failed to start");
       expect(failed.output).not.toContain("second\n");
     },
   );

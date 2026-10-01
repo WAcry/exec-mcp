@@ -26,7 +26,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const temporary = await mkdtemp(path.join(tmpdir(), "exec-mcp-package-"));
 const run = promisify(execFile);
 const npmCli = process.env.npm_execpath;
-if (!npmCli) throw new Error("请通过 npm run test:package 执行。");
+if (!npmCli) throw new Error("Run this script through npm run test:package.");
 async function relativeFiles(directory) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -419,7 +419,10 @@ enabled = true
     .map((block) => block.text)
     .join("\n");
   assert.match(skillsText, /packaged-skill/);
-  assert.match(skillsText, /仅用户明确要求使用/);
+  assert.match(
+    skillsText,
+    /Read only when the user explicitly asks to use the skill/,
+  );
   assert.doesNotMatch(
     skillsText,
     /PRIVATE_PACKAGED_TRIGGER|PRIVATE_PACKAGED_BODY/,
@@ -834,7 +837,7 @@ enabled = true
   assert.match(publicCheck.stdout, /PUBLIC_AUTH_OK/);
   await assert.rejects(executeCli(["tunnel", "--config", config])); // The private mode must never publish a tunnel.
   console.log(
-    "PASS: 独立安装、CLI、管道/PTY、滚动日志、原生会话压力重建、文件/Skill，以及认证和私有 Tunnel 拒绝。",
+    "PASS: isolated install, CLI, pipe and PTY terminals, rolling logs, native session rebuild under memory pressure, files and Skills, and authentication and private tunnel rejection.",
   );
 } finally {
   await client?.close();

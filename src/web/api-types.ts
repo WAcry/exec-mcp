@@ -161,6 +161,8 @@ export interface McpServerItem {
   argsCount?: number;
   envKeys?: string[];
   headerNames?: string[];
+  /** The name of the environment variable with the bearer token, never its value. */
+  bearerTokenEnvVar?: string;
   cwd?: string;
   url?: string;
   enabledTools?: readonly string[] | undefined;

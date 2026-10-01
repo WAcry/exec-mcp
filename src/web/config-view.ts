@@ -27,11 +27,36 @@ export function mcpServerView(
           ? { cwd: local ? server.cwd : path.basename(server.cwd) }
           : {}),
       }
-    : {
-        ...policy,
-        url: safeHttpUrl(server.url),
-        headerNames: Object.keys(server.headers).sort(),
-      };
+    : httpServerView(server, policy);
+}
+
+type HttpServer = Extract<
+  DownstreamMcpServerConfig,
+  { transport: "streamable-http" }
+> & {
+  /** Header name to the environment variable that holds its value. */
+  envHeaders?: Readonly<Record<string, string>>;
+  bearerTokenEnvVar?: string;
+};
+
+/** Names only: header values and variable values are credentials. */
+function httpServerView<Policy extends object>(
+  server: HttpServer,
+  policy: Policy,
+) {
+  return {
+    ...policy,
+    url: safeHttpUrl(server.url),
+    headerNames: [
+      ...new Set([
+        ...Object.keys(server.headers),
+        ...Object.keys(server.envHeaders ?? {}),
+      ]),
+    ].sort(),
+    ...(server.bearerTokenEnvVar
+      ? { bearerTokenEnvVar: server.bearerTokenEnvVar }
+      : {}),
+  };
 }
 
 function safeHttpUrl(value: string): string {

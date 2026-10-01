@@ -33,6 +33,17 @@ export class ConfigEditError extends Error {
     super(message);
   }
 }
+
+/**
+ * Configuration validation errors (ConfigError in config.ts) never quote file
+ * content, so the console can show them. Other errors can carry paths or
+ * values and stay hidden.
+ */
+function safeConfigMessage(error: unknown): string | undefined {
+  return error instanceof Error && error.constructor.name === "ConfigError"
+    ? error.message
+    : undefined;
+}
 export interface ConfigDocument {
   filename: string;
   source: string;
@@ -187,11 +198,12 @@ export class ConfigEditor {
         config: parseConfig(source, this.filename),
         raw: TOML.parse(source) as Record<string, unknown>,
       };
-    } catch {
+    } catch (error) {
       throw new ConfigEditError(
         422,
         "config_unreadable",
-        "Cannot read or parse config.toml. Check the configuration in a terminal.",
+        safeConfigMessage(error) ??
+          "Cannot read or parse the configuration file. Check it in a terminal.",
       );
     }
   }

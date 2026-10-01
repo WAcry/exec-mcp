@@ -2,7 +2,7 @@
 
 English | [简体中文](002-tool-discovery.zh.md)
 
-Active, updated 2026-09-28.
+Active, updated 2026-10-01.
 
 ## Entry points and contract sources
 
@@ -72,6 +72,7 @@ Exporting this instance's files to the host is a separate direction under [ADR-0
 
 Generated MCP instructions, tool and resource descriptions, schema descriptions, and ALL_TOOLS wrappers use English,
 which allows reuse of equivalent Codex wording. Token cost depends on the model and text.
+Errors, notices, and logs that exec-mcp writes itself use Simple English. Output and diagnostics from commands and downstream servers keep their original text.
 Project documents use English in the default .md and Chinese in a sibling .zh.md. Keep both versions synchronized and cross-linked under [AGENTS](../../AGENTS.md).
 The Web UI supports English and Simplified Chinese. User notes, Skills, third-party contracts, and runtime diagnostics retain their original language.
 
@@ -82,6 +83,11 @@ Skill explicit-only behavior comes from user metadata. A compressed catalog expl
 
 Generate complete grammar and schemas from code. [Code Mode examples](../guides/code-mode-examples.md) and the [configuration guide](../guides/configuration.md)
 provide operational detail; tool descriptions need not repeat those tutorials.
+Numbers in descriptions, such as yield windows and byte limits, come from the constants that the code enforces, so a limit change also changes its description.
+
+A local tool validates its input before it runs. An invalid call does not run, and its error names each field with the problem and the expected type or values.
+An unknown key lists the allowed fields, and apply_patch shows the string call shape. The error repeats field names but not input values.
+A fresh model can correct its next call from this error alone.
 
 ## Codex references and adaptation
 

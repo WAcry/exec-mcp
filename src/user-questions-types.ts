@@ -43,5 +43,5 @@ export function formatUserAnswer(
   optionIndex: number | null,
   note: string,
 ): string {
-  return `问题：${question.title}\n选择：${optionIndex === null ? "以上都不是" : question.options[optionIndex]}${note ? `\n补充：${note}` : ""}`;
+  return `Question: ${question.title}\nSelected: ${optionIndex === null ? "None of the above" : question.options[optionIndex]}${note ? `\nNote: ${note}` : ""}`;
 }

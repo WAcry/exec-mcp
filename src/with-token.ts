@@ -5,7 +5,7 @@ import { runForeground } from "./host/foreground.js";
 import { resolveUserPath } from "./util.js";
 
 export const WITH_TOKEN_USAGE =
-  "用法：exec-mcp with-token 环境变量名 token文件 -- 可执行文件 [参数...]";
+  "Usage: exec-mcp with-token ENV_NAME TOKEN_FILE -- EXECUTABLE [ARGS...]";
 
 /** Adapt a token file for external clients without changing their profiles or leaving plaintext on disk. */
 export async function runWithToken(
@@ -27,11 +27,11 @@ export async function runWithToken(
   );
   if (!file || /\.(cmd|bat)$/i.test(file))
     throw new Error(
-      "with-token 需要可用的原生可执行文件；请检查程序名或路径。",
+      "with-token needs a native executable file that it can run. Check the program name or path.",
     );
   const token = readTokenFile(
     resolveUserPath(filename, process.cwd()),
-    "with-token 文件",
+    "with-token file",
   );
   const env = inheritedEnvironment(process.env, { [name]: token });
   const result = await runForeground(file, args, env, signal ? { signal } : {});

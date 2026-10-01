@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { callPreview } from "../tool-names.js";
 import type {
+  ActivityEvent,
   CallRecord,
   CallStatus,
   CallFilterOptions,
@@ -13,11 +14,26 @@ import { snapshotAuditValue, truncateAuditText } from "./snapshot.js";
 import { nestedPreview } from "./call-summary.js";
 import { AuditMedia } from "./audit-media.js";
 
-export type ActivityEvent =
-  | { type: "call:start"; callId: string; sessionId: string }
-  | { type: "call:subcall"; callId: string; subcallId: string }
-  | { type: "call:finish"; callId: string; status: CallStatus }
-  | { type: "call:clear" };
+export type { ActivityEvent } from "./types.js";
+
+/** Estimated memory for retained records, apart from the separate image budget. */
+export const AUDIT_RECORD_BUDGET = 128 * 1024 * 1024;
+
+/** UTF-16 estimate of a bounded snapshot; exact accounting is not needed for a budget. */
+function estimate(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value === "string") return 2 * value.length;
+  try {
+    return 2 * (JSON.stringify(value)?.length ?? 0);
+  } catch {
+    return 0;
+  }
+}
+const subcallBytes = (subcall: SubCallRecord) =>
+  256 +
+  estimate(subcall.input) +
+  estimate(subcall.output) +
+  estimate(subcall.error);
 
 export interface ActiveCallController {
   id: string;
@@ -49,11 +65,18 @@ export interface SubcallTracker {
 export class ActivityStore {
   private readonly maxCalls: number;
   private readonly maxSubcalls: number;
+  private readonly maxBytes: number;
   private enabled: boolean;
   private calls: CallRecord[] = [];
   private callsById = new Map<string, CallRecord>();
   private sessions = new Map<string, SessionSummary>();
   private listeners = new Set<(event: ActivityEvent) => void>();
+  /** Estimated bytes per retained call, and their sum. */
+  private sizes = new Map<string, number>();
+  private bytes = 0;
+  private subcallSizes = new WeakMap<SubCallRecord, number>();
+  /** Lower-case search text, built on first search and dropped on change. */
+  private searchText = new WeakMap<CallRecord, string>();
   /** Images from recorded results, bounded separately from the records. */
   readonly media: AuditMedia;
 
@@ -61,18 +84,26 @@ export class ActivityStore {
     options: {
       maxCalls?: number;
       maxSubcalls?: number;
+      maxBytes?: number;
       enabled?: boolean;
       media?: AuditMedia;
     } = {},
   ) {
     this.maxCalls = options.maxCalls ?? 10_000;
     this.maxSubcalls = options.maxSubcalls ?? 50;
+    this.maxBytes = options.maxBytes ?? AUDIT_RECORD_BUDGET;
     this.enabled = options.enabled ?? true;
     this.media = options.media ?? new AuditMedia();
     if (!Number.isSafeInteger(this.maxCalls) || this.maxCalls < 1)
-      throw new Error("活动审计 maxCalls 必须是正安全整数。");
+      throw new Error(
+        "Activity audit maxCalls must be a positive safe integer.",
+      );
     if (!Number.isSafeInteger(this.maxSubcalls) || this.maxSubcalls < 2)
-      throw new Error("活动审计 maxSubcalls 必须至少为 2。");
+      throw new Error("Activity audit maxSubcalls must be at least 2.");
+    if (!Number.isSafeInteger(this.maxBytes) || this.maxBytes < 1)
+      throw new Error(
+        "Activity audit maxBytes must be a positive safe integer.",
+      );
   }
 
   subscribe(listener: (event: ActivityEvent) => void): () => void {
@@ -90,6 +121,26 @@ export class ActivityStore {
         /* Ignore listener errors */
       }
     }
+  }
+
+  /** Records a size change of a retained call, then evicts the oldest calls over budget. */
+  private resize(call: CallRecord, delta: number): void {
+    this.searchText.delete(call);
+    if (!this.callsById.has(call.id) || !delta) return;
+    this.sizes.set(call.id, (this.sizes.get(call.id) ?? 0) + delta);
+    this.bytes += delta;
+    while (this.bytes > this.maxBytes && this.calls.length > 1)
+      this.evictOldest();
+  }
+
+  private evictOldest(): void {
+    const removed = this.calls.pop();
+    if (!removed) return;
+    this.callsById.delete(removed.id);
+    this.bytes -= this.sizes.get(removed.id) ?? 0;
+    this.sizes.delete(removed.id);
+    this.media.release(removed.id);
+    this.rebuildSession(removed.sessionId);
   }
 
   startCall(params: {
@@ -142,17 +193,11 @@ export class ActivityStore {
       preview: this.extractPreview(params.tool, args),
     };
 
-    if (this.calls.length > this.maxCalls) {
-      const removed = this.calls.pop();
-      if (removed) {
-        this.callsById.delete(removed.id);
-        this.media.release(removed.id);
-        // Rebuild after counting the new call. When both calls belong to the
-        // same session, rebuilding first and incrementing afterward counts the
-        // new call twice.
-        this.rebuildSession(removed.sessionId);
-      }
-    }
+    // Rebuild after counting the new call. When both calls belong to the
+    // same session, rebuilding first and incrementing afterward counts the
+    // new call twice.
+    if (this.calls.length > this.maxCalls) this.evictOldest();
+    this.resize(call, 512 + estimate(args));
 
     this.emit({ type: "call:start", callId: id, sessionId });
 
@@ -236,6 +281,12 @@ export class ActivityStore {
               this.callsById.has(id)
             )
               call.truncatedFields = (call.truncatedFields ?? 0) + 1;
+            const before = this.subcallSizes.get(subcall);
+            if (before !== undefined) {
+              const after = subcallBytes(subcall);
+              this.subcallSizes.set(subcall, after);
+              this.resize(call, after - before);
+            } else this.searchText.delete(call);
             this.emit({
               type: "call:subcall",
               callId: id,
@@ -251,15 +302,18 @@ export class ActivityStore {
         call.status = status;
         call.endedAt = new Date(endTime).toISOString();
         call.durationMs = endTime - startTime;
+        let added = 0;
         if (output !== undefined && this.callsById.has(id)) {
           const snapshot = snapshotAuditValue(withMedia(output), 16 * 1024);
           call.output = snapshot.value;
+          added += estimate(call.output);
           if (snapshot.truncated)
             call.truncatedFields = (call.truncatedFields ?? 0) + 1;
         }
         if (error !== undefined && this.callsById.has(id)) {
           const snapshot = truncateAuditText(error, 4096);
           call.error = snapshot.value;
+          added += estimate(call.error);
           if (snapshot.truncated)
             call.truncatedFields = (call.truncatedFields ?? 0) + 1;
         }
@@ -275,6 +329,7 @@ export class ActivityStore {
             currentSession.lastCall.durationMs = call.durationMs;
           }
         }
+        this.resize(call, added);
 
         this.emit({ type: "call:finish", callId: id, status });
         return call;
@@ -306,33 +361,7 @@ export class ActivityStore {
 
     if (options.search && options.search.trim()) {
       const q = options.search.trim().toLowerCase();
-      filtered = filtered.filter((c) => {
-        if (c.id.toLowerCase().includes(q)) return true;
-        if (c.sessionId.toLowerCase().includes(q)) return true;
-        if (c.tool.toLowerCase().includes(q)) return true;
-        if (
-          Object.values(c.args).some(
-            (value) =>
-              typeof value === "string" && value.toLowerCase().includes(q),
-          )
-        )
-          return true;
-        if (c.error && c.error.toLowerCase().includes(q)) return true;
-        if (
-          c.subcalls.some(
-            (s) =>
-              s.name.toLowerCase().includes(q) ||
-              JSON.stringify(s.input).toLowerCase().includes(q) ||
-              (s.output && JSON.stringify(s.output).toLowerCase().includes(q)),
-          )
-        ) {
-          return true;
-        }
-        if (c.output && JSON.stringify(c.output).toLowerCase().includes(q)) {
-          return true;
-        }
-        return false;
-      });
+      filtered = filtered.filter((c) => this.searchable(c).includes(q));
     }
 
     const total = filtered.length;
@@ -431,6 +460,8 @@ export class ActivityStore {
     this.calls = [];
     this.callsById.clear();
     this.sessions.clear();
+    this.sizes.clear();
+    this.bytes = 0;
     this.media.clear();
     this.emit({ type: "call:clear" });
   }
@@ -439,6 +470,29 @@ export class ActivityStore {
     if (!this.enabled) return;
     this.enabled = false;
     this.clear();
+  }
+
+  /** Resumes collection when a restarted service listens on Web again. */
+  enable(): void {
+    this.enabled = true;
+  }
+
+  /** Search text matches ids, tool, string arguments, nested calls, output, and error. */
+  private searchable(call: CallRecord): string {
+    let value = this.searchText.get(call);
+    if (value !== undefined) return value;
+    const parts = [call.id, call.sessionId, call.tool];
+    for (const arg of Object.values(call.args))
+      if (typeof arg === "string") parts.push(arg);
+    if (call.error) parts.push(call.error);
+    for (const subcall of call.subcalls) {
+      parts.push(subcall.name, JSON.stringify(subcall.input) ?? "");
+      if (subcall.output) parts.push(JSON.stringify(subcall.output) ?? "");
+    }
+    if (call.output) parts.push(JSON.stringify(call.output) ?? "");
+    value = parts.join("\u0000").toLowerCase();
+    this.searchText.set(call, value);
+    return value;
   }
 
   private extractPreview(tool: string, args: CallRecord["args"]): string {
@@ -470,14 +524,21 @@ export class ActivityStore {
   }
 
   private pushSubcall(call: CallRecord, subcall: SubCallRecord): void {
-    if (call.subcalls.length < this.maxSubcalls) {
+    const size = subcallBytes(subcall);
+    this.subcallSizes.set(subcall, size);
+    let delta = size;
+    if (call.subcalls.length < this.maxSubcalls) call.subcalls.push(subcall);
+    else {
+      const head = Math.max(1, Math.floor(this.maxSubcalls / 5));
+      const [removed] = call.subcalls.splice(head, 1);
+      if (removed) {
+        delta -= this.subcallSizes.get(removed) ?? 0;
+        this.subcallSizes.delete(removed);
+      }
       call.subcalls.push(subcall);
-      return;
+      call.omittedSubcalls = (call.omittedSubcalls ?? 0) + 1;
     }
-    const head = Math.max(1, Math.floor(this.maxSubcalls / 5));
-    call.subcalls.splice(head, 1);
-    call.subcalls.push(subcall);
-    call.omittedSubcalls = (call.omittedSubcalls ?? 0) + 1;
+    this.resize(call, delta);
   }
 
   private rebuildSession(sessionId: string): void {
@@ -541,9 +602,9 @@ function disabledCall(params: {
         timestamp: subcall.timestamp ?? "",
         name: subcall.name,
         durationMs: subcall.durationMs,
-        input: "[审计已关闭]",
+        input: "[audit is off]",
         status: subcall.status,
-        ...(subcall.error === undefined ? {} : { error: "[审计已关闭]" }),
+        ...(subcall.error === undefined ? {} : { error: "[audit is off]" }),
       };
     },
     startSubcall() {

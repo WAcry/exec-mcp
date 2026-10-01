@@ -15,13 +15,20 @@ import type {
   CodeModeMemoryStatus,
   LiveEvent,
   NativeSessionItem,
-  SessionPage,
+  NativeSessionsResponse,
+  SessionsResponse,
   SessionSummary,
   TerminalItem,
+  TerminalsResponse,
 } from "../types";
 import { useAuth } from "./AuthContext";
 
 export type Connection = "connecting" | "live" | "offline";
+
+/** List refresh while the event stream is down. */
+const OFFLINE_POLL_MS = 12_000;
+/** Processes and Code Mode sessions change without events, so they refresh slowly even when live. */
+const UNEVENTED_POLL_MS = 36_000;
 
 interface LiveValue {
   connection: Connection;
@@ -73,22 +80,21 @@ export function LiveProvider({
       return;
     }
     const sessionsLoader = coalesced(async () => {
-      const page = await apiFetch<SessionPage>("/api/sessions?pageSize=100");
+      const page = await apiFetch<SessionsResponse>(
+        "/api/sessions?pageSize=100",
+      );
       setSessions(page.items);
       setPending(page.pendingQuestionsTotal);
     }, 250);
     const nativeLoader = coalesced(async () => {
-      const value = await apiFetch<{
-        sessions: NativeSessionItem[];
-        memory: CodeModeMemoryStatus;
-      }>("/api/native-sessions");
+      const value = await apiFetch<NativeSessionsResponse>(
+        "/api/native-sessions",
+      );
       setNativeList(value.sessions);
       setMemory(value.memory);
     }, 400);
     const terminalLoader = coalesced(async () => {
-      const value = await apiFetch<{ sessions: TerminalItem[] }>(
-        "/api/terminals",
-      );
+      const value = await apiFetch<TerminalsResponse>("/api/terminals");
       setTerminals(value.sessions);
     }, 400);
     const all = () => {
@@ -102,17 +108,21 @@ export function LiveProvider({
     let retry: number | undefined;
     let attempts = 0;
     let disposed = false;
+    let live = false;
     const connect = () => {
       if (disposed) return;
       source = new EventSource("/api/events");
       source.onopen = () => {
         attempts = 0;
+        live = true;
         setConnection("live");
+        // Events sent while the stream was down are lost; reload once.
         all();
       };
       source.onerror = () => {
         source?.close();
         source = null;
+        live = false;
         if (disposed) return;
         setConnection("offline");
         retry = window.setTimeout(
@@ -129,7 +139,8 @@ export function LiveProvider({
         }
         if (event.type === "connected") return;
         for (const listener of listeners.current) listener(event);
-        if (event.type.startsWith("call:")) all();
+        // A new runtime starts with no processes or Code Mode sessions.
+        if (event.type.startsWith("call:") || event.type === "runtime") all();
         if (event.type === "session:notes") {
           sessionsLoader.schedule();
           receive(event);
@@ -140,13 +151,21 @@ export function LiveProvider({
     sessionsLoader.now();
     nativeLoader.now();
     terminalLoader.now();
-    const poll = window.setInterval(all, 12_000);
+    const poll = window.setInterval(() => {
+      if (!live) all();
+    }, OFFLINE_POLL_MS);
+    const slowPoll = window.setInterval(() => {
+      if (!live) return;
+      nativeLoader.schedule();
+      terminalLoader.schedule();
+    }, UNEVENTED_POLL_MS);
     return () => {
       disposed = true;
       refreshers.current = null;
       source?.close();
       if (retry !== undefined) window.clearTimeout(retry);
       window.clearInterval(poll);
+      window.clearInterval(slowPoll);
       sessionsLoader.dispose();
       nativeLoader.dispose();
       terminalLoader.dispose();
@@ -208,4 +227,28 @@ export function useLiveEvents(handler: (event: LiveEvent) => void): void {
   const latest = useRef(handler);
   latest.current = handler;
   useEffect(() => subscribe((event) => latest.current(event)), [subscribe]);
+}
+
+/**
+ * Polls only while the event stream is down, and reloads once when it comes
+ * back, because events sent during the gap are lost.
+ */
+export function usePollWhileOffline(
+  reload: () => void,
+  intervalMs: number,
+): void {
+  const { connection } = useLive();
+  const latest = useRef(reload);
+  latest.current = reload;
+  const previous = useRef(connection);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = connection;
+    if (connection === "live") {
+      if (before !== "live") latest.current();
+      return;
+    }
+    const timer = window.setInterval(() => latest.current(), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [connection, intervalMs]);
 }

@@ -37,7 +37,7 @@ describe("asynchronous questions are human-produced session notes", () => {
     const store = new SessionNotes();
     expect(() => store.ask("a", input)).toThrow("Web");
     const close = store.openWeb(() => {});
-    expect(() => store.ask(undefined, input)).toThrow("对话标识");
+    expect(() => store.ask(undefined, input)).toThrow("conversation ID");
     const response = store.ask("a", input);
     expect(response).toEqual({
       accepted: true,
@@ -59,7 +59,7 @@ describe("asynchronous questions are human-produced session notes", () => {
         request_key: "storage",
         questions: [{ title: "Changed?", options: ["A", "B"] }],
       }),
-    ).toThrow("已改变");
+    ).toThrow("already belongs to different questions");
     const other = store.ask("b", { ...input, request_key: "storage" });
     expect(other.request_id).not.toBe(first.request_id);
     const copy = store.questions("a");
@@ -115,7 +115,7 @@ describe("asynchronous questions are human-produced session notes", () => {
     });
     expect(events).toEqual([1]);
     expect(reply.text).toBe(
-      "问题：When to migrate?\n选择：Later\n补充：  先不要迁移。\n保留旧文件。  ",
+      "Question: When to migrate?\nSelected: Later\nNote:   先不要迁移。\n保留旧文件。  ",
     );
     store.enqueue("a", "middle", "其他工作继续");
     store.answer("a", first!.id, {
@@ -131,7 +131,7 @@ describe("asynchronous questions are human-produced session notes", () => {
         "先保留兼容性",
         reply.text,
         "其他工作继续",
-        "问题：Which storage?\n选择：以上都不是\n补充：选择 PostgreSQL。",
+        "Question: Which storage?\nSelected: None of the above\nNote: 选择 PostgreSQL。",
       ],
     });
     expect(store.questions("a").pendingCount).toBe(0);
@@ -149,11 +149,13 @@ describe("asynchronous questions are human-produced session notes", () => {
     expect(store.answer("a", question.id, input)).toEqual(first);
     expect(() =>
       store.answer("a", question.id, { ...input, note: "Change files" }),
-    ).toThrow("改变");
+    ).toThrow("different answer");
     expect(() =>
       store.answer("a", question.id, { ...input, id: "competitor" }),
-    ).toThrow("另一处");
-    expect(() => store.answer("b", question.id, input)).toThrow("不存在");
+    ).toThrow("another page");
+    expect(() => store.answer("b", question.id, input)).toThrow(
+      "does not exist",
+    );
     store.withdraw("a", first.id);
     expect(store.questions("a").items[0]!.pending).toBe(true);
     expect(store.answer("a", question.id, input).status).toBe("withdrawn");
@@ -168,7 +170,7 @@ describe("asynchronous questions are human-produced session notes", () => {
         ?.noteId,
     ).toBe(second.id);
     store.attach(ordinary(), "a", "sent");
-    expect(() => store.withdraw("a", second.id)).toThrow("无法撤回");
+    expect(() => store.withdraw("a", second.id)).toThrow("cannot be withdrawn");
   });
 
   it("rejects invalid/custom-empty/oversize answers without closing the question or creating a note", () => {
@@ -185,7 +187,7 @@ describe("asynchronous questions are human-produced session notes", () => {
     expect(store.page("a").items).toEqual([]);
     store.answer("a", q.id, { id: "valid", option_index: 0, note: "" });
     expect(store.page("a").items[0]!.text).toBe(
-      "问题：Which storage?\n选择：SQLite",
+      "Question: Which storage?\nSelected: SQLite",
     );
   });
 
@@ -223,7 +225,7 @@ describe("asynchronous questions are human-produced session notes", () => {
         option_index: 0,
         note: "x".repeat(2000),
       }),
-    ).toThrow("空间已满");
+    ).toThrow("is full");
     expect(store.questions("a").pendingCount).toBe(2);
     expect(store.page("a").pendingCount).toBe(0);
     advance(NOTE_RETENTION_MS - 1);

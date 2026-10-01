@@ -109,14 +109,3 @@ export function applyWebSecurityHeaders(
     "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; worker-src 'none'; manifest-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'",
   );
 }
-
-export function applyCorsForAllowedOrigin(
-  request: IncomingMessage,
-  response: ServerResponse,
-): void {
-  const origin = request.headers.origin;
-  if (!origin) return;
-  response.setHeader("Access-Control-Allow-Origin", origin);
-  response.setHeader("Access-Control-Allow-Credentials", "true");
-  response.setHeader("Vary", "Origin");
-}

@@ -27,7 +27,7 @@ export class PublicAccess {
     if (config.type === "bearer") {
       const field =
         config.token_file === undefined
-          ? `认证环境变量 ${config.token_env ?? "EXEC_MCP_ACCESS_TOKEN"}`
+          ? `Auth environment variable ${config.token_env ?? "EXEC_MCP_ACCESS_TOKEN"}`
           : "auth.token_file";
       const token =
         config.token_file === undefined
@@ -35,7 +35,7 @@ export class PublicAccess {
           : readTokenFile(config.token_file, "auth.token_file");
       if (!token || !/^[A-Za-z0-9._~-]{32,}$/.test(token))
         throw new Error(
-          `${field} 必须是至少 32 个字符的随机令牌；未启动公网入口。`,
+          `${field} must be a random token with at least 32 characters. The public endpoint did not start.`,
         );
       this.expected = createHash("sha256").update(token).digest();
       this.challenge = 'Bearer realm="exec-mcp"';
@@ -52,7 +52,7 @@ export class PublicAccess {
             return new Response(null, { status: response.status });
           }
           const reader = response.body?.getReader();
-          if (!reader) throw new Error("JWKS 响应为空。");
+          if (!reader) throw new Error("The JWKS response is empty.");
           const chunks: Uint8Array[] = [];
           let size = 0;
           try {
@@ -60,7 +60,8 @@ export class PublicAccess {
               const next = await reader.read();
               if (next.done) break;
               size += next.value.byteLength;
-              if (size > 1024 * 1024) throw new Error("JWKS 响应过大。");
+              if (size > 1024 * 1024)
+                throw new Error("The JWKS response is too large.");
               chunks.push(next.value);
             }
           } finally {

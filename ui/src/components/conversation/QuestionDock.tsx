@@ -18,6 +18,7 @@ import { useDrafts, type AnswerDraft } from "../../context/DraftsContext";
 import { useLive } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorFeedback } from "../../lib/errors";
 import { draftId } from "../../lib/draft-id";
 import { formatAgo, utf8Bytes } from "../../lib/format";
 import { feedback, message, type Feedback } from "../../lib/locale";
@@ -125,7 +126,7 @@ export function QuestionDock({
           : message("question.saved"),
       );
     } catch (caught) {
-      setError(message("question.submitFailed", String(caught)));
+      setError(message("question.submitFailed", errorFeedback(caught)));
       onSubmitted("");
     } finally {
       inFlight.current = false;

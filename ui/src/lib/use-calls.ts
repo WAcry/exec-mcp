@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLiveEvents } from "../context/LiveContext";
-import type { CallListItem, PaginatedResult } from "../types";
+import { useLiveEvents, usePollWhileOffline } from "../context/LiveContext";
+import type { CallListItem, CallsResponse } from "../types";
 import { apiFetch } from "./api";
 import { coalesced } from "./coalesce";
+import { errorFeedback } from "./errors";
+import type { Feedback } from "./locale";
 
 const PAGE_SIZE = 50;
 const MAX_ITEMS = 1500;
@@ -17,7 +19,7 @@ interface CallsState {
   items: Map<string, CallListItem>;
   total: number;
   loaded: boolean;
-  error: string;
+  error: Feedback;
 }
 
 const empty = (): CallsState => ({
@@ -68,9 +70,7 @@ export function useCalls(filter: CallFilter) {
     const filterAtStart = JSON.parse(key) as CallFilter;
     const load = coalesced(async () => {
       try {
-        const page = await apiFetch<PaginatedResult<CallListItem>>(
-          query(filterAtStart, 1),
-        );
+        const page = await apiFetch<CallsResponse>(query(filterAtStart, 1));
         if (disposed) return;
         setState((previous) => ({
           items: merged(previous.items, page.items),
@@ -83,20 +83,20 @@ export function useCalls(filter: CallFilter) {
           setState((previous) => ({
             ...previous,
             loaded: true,
-            error: String(error),
+            error: errorFeedback(error),
           }));
       }
     }, 180);
     loader.current = load;
     load.now();
-    const poll = window.setInterval(load.schedule, 20_000);
     return () => {
       disposed = true;
       loader.current = null;
       load.dispose();
-      window.clearInterval(poll);
     };
   }, [key]);
+
+  usePollWhileOffline(() => loader.current?.schedule(), 20_000);
 
   useLiveEvents((event) => {
     const filter = current.current;
@@ -124,7 +124,7 @@ export function useCalls(filter: CallFilter) {
     const page = Math.floor(known.current.size / PAGE_SIZE) + 1;
     setLoadingEarlier(true);
     try {
-      const result = await apiFetch<PaginatedResult<CallListItem>>(
+      const result = await apiFetch<CallsResponse>(
         query(current.current, page),
       );
       setState((previous) => ({

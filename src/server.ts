@@ -16,6 +16,7 @@ import {
 import type { Config } from "./config.js";
 import { ExecRuntime } from "./runtime.js";
 import { LegacySessionRouter } from "./http/legacy.js";
+import { ProtocolCounter } from "./http/protocol-stats.js";
 import { MAX_PAYLOAD_BYTES } from "./limits.js";
 import { startDownloadGateway } from "./files/gateway.js";
 import type { ArtifactStore } from "./files/artifacts.js";
@@ -37,6 +38,8 @@ export async function startServer(
     authFetch?: typeof fetch;
     activity?: ActivityStore;
     notes?: SessionNotes;
+    /** Shared across execution-service restarts, so counts cover the whole process. */
+    protocol?: ProtocolCounter;
     signal?: AbortSignal;
     onDownstreamProgress?: (event: DownstreamStartupEvent) => void;
   } = {},
@@ -44,10 +47,12 @@ export async function startServer(
   url: string;
   downloadAddress?: string;
   runtime: ExecRuntime;
+  protocol: ProtocolCounter;
   close(): Promise<void>;
 }> {
   validatePublicAccess(config);
   options.signal?.throwIfAborted();
+  const protocol = options.protocol ?? new ProtocolCounter();
   const access =
     config.access === "public"
       ? new PublicAccess(
@@ -81,7 +86,9 @@ export async function startServer(
   }
   const onerror = (): void => {
     // Never print SDK error payloads: they may include credentials or user input.
-    console.error("MCP 传输出现异常；检查客户端连接与本机就绪状态。");
+    console.error(
+      "An MCP transport error occurred. Check the client connection and make sure that the local server is ready.",
+    );
   };
   const modern = createMcpHandler(() => runtime.server(), {
     legacy: "reject",
@@ -91,13 +98,22 @@ export async function startServer(
   const legacy = new LegacySessionRouter(() => runtime.server(), onerror, {
     idleMs: 24 * 60 * 60 * 1000,
     sweepMs: 60 * 60 * 1000,
+    events: {
+      opened: () => protocol.sessionOpened(),
+      closed: () => protocol.sessionClosed(),
+    },
   });
   const handler = toNodeHandler(
     {
-      fetch: async (request, options) =>
-        (await isLegacyRequest(request, options?.parsedBody))
+      fetch: async (request, options) => {
+        const era = (await isLegacyRequest(request, options?.parsedBody))
+          ? "legacy"
+          : "modern";
+        protocol.request(era);
+        return era === "legacy"
           ? legacy.fetch(request, options)
-          : modern.fetch(request, options),
+          : modern.fetch(request, options);
+      },
     },
     { onerror },
   );
@@ -199,6 +215,7 @@ export async function startServer(
   return {
     url: `http://${config.host === "::1" ? "[::1]" : config.host}:${address.port}/mcp`,
     runtime,
+    protocol,
     ...(downloads === undefined ? {} : { downloadAddress: downloads.address }),
     close() {
       closing ??= (async () => {
@@ -215,7 +232,7 @@ export async function startServer(
         server.closeAllConnections();
         await stopped;
         if (results.some((result) => result.status === "rejected"))
-          throw new Error("部分服务清理失败。");
+          throw new Error("Some service cleanup steps failed.");
       })();
       return closing;
     },

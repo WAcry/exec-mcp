@@ -64,7 +64,7 @@ describe("agent messages in the conversation timeline", () => {
     expect(() => notes.sendMessage("a", { message: "x" })).toThrow("Web");
     notes.openWeb(() => {});
     expect(() => notes.sendMessage(undefined, { message: "x" })).toThrow(
-      "对话标识",
+      "conversation ID",
     );
     for (const value of [
       { message: "   " },
@@ -87,7 +87,7 @@ describe("agent messages in the conversation timeline", () => {
     notes.openWeb(() => {});
     notes.sendMessage("a", { message: "x".repeat(400) });
     expect(() => notes.sendMessage("a", { message: "x".repeat(400) })).toThrow(
-      "空间已满",
+      "is full",
     );
     expect(notes.page("a").agentMessages).toHaveLength(1);
     now += NOTE_RETENTION_MS + 1;

@@ -81,7 +81,7 @@ describe("terminal-side startup failure and cancellation", () => {
       (error: { stdout: string; stderr: string; code: number }) => error,
     );
     expect(result.code).not.toBe(0);
-    expect(result.stdout).not.toContain("已就绪");
+    expect(result.stdout).not.toContain("is ready");
     expect(result.stderr).toContain("FIXTURE_LOGIN_HINT");
     expect(result.stderr).toContain("needs_login");
     expect(result.stderr).toContain("startup_timeout_sec");
@@ -117,14 +117,14 @@ describe("terminal-side startup failure and cancellation", () => {
         stderr += chunk.toString();
       });
       const deadline = Date.now() + 10_000;
-      while (!stderr.includes('"good"：已加载')) {
+      while (!stderr.includes('"good": loaded')) {
         if (child.exitCode !== null || Date.now() >= deadline)
           throw new Error("CLI never initialized sibling");
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       child.kill("SIGINT");
       await exited;
-      expect(stdout).not.toContain("已就绪");
+      expect(stdout).not.toContain("is ready");
       expect(alive(Number(await readFile(pidFile, "utf8")))).toBe(false);
     },
   );

@@ -8,6 +8,7 @@ import {
 import { useDrafts } from "../../context/DraftsContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { clockTime, fullTime } from "../../lib/format";
 import { Button } from "../ui/Controls";
 import { CopyButton } from "../ui/CopyButton";
@@ -48,7 +49,7 @@ export function QuestionEntry({
         { method: "DELETE" },
       );
     } catch (caught) {
-      setError(String(caught));
+      setError(errorText(caught, t));
     } finally {
       setBusy(false);
       onChanged();

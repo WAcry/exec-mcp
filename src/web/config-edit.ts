@@ -1,3 +1,4 @@
+import type { ApiErrorCode } from "./api-types.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   readFile,
@@ -26,10 +27,22 @@ export type ConfigToggle =
 export class ConfigEditError extends Error {
   constructor(
     readonly status: number,
+    readonly code: ApiErrorCode,
     message: string,
   ) {
     super(message);
   }
+}
+
+/**
+ * Configuration validation errors (ConfigError in config.ts) never quote file
+ * content, so the console can show them. Other errors can carry paths or
+ * values and stay hidden.
+ */
+function safeConfigMessage(error: unknown): string | undefined {
+  return error instanceof Error && error.constructor.name === "ConfigError"
+    ? error.message
+    : undefined;
 }
 export interface ConfigDocument {
   filename: string;
@@ -115,7 +128,11 @@ export function setTomlBoolean(
     );
   }
   if (parent.some((part) => typeof part === "number"))
-    throw new ConfigEditError(422, "无法定位配置条目，请在配置文件中修改。");
+    throw new ConfigEditError(
+      422,
+      "config_entry_missing",
+      "Cannot find this configuration entry. Edit the configuration file directly.",
+    );
   return (
     source +
     `${newline}[${parent.map((part) => JSON.stringify(part)).join(".")}]${newline}${JSON.stringify(leaf)} = ${value}${newline}`
@@ -181,10 +198,12 @@ export class ConfigEditor {
         config: parseConfig(source, this.filename),
         raw: TOML.parse(source) as Record<string, unknown>,
       };
-    } catch {
+    } catch (error) {
       throw new ConfigEditError(
         422,
-        "无法读取或解析 config.toml；请在终端检查配置。",
+        "config_unreadable",
+        safeConfigMessage(error) ??
+          "Cannot read or parse the configuration file. Check it in a terminal.",
       );
     }
   }
@@ -195,7 +214,11 @@ export class ConfigEditor {
     return this.mutex.run(async () => {
       const current = await this.read();
       if (current.revision !== revision)
-        throw new ConfigEditError(409, "配置已被其他操作修改，请刷新后重试。");
+        throw new ConfigEditError(
+          409,
+          "config_conflict",
+          "Another change updated the configuration. Refresh and try again.",
+        );
       let source = current.source;
       if (change.kind === "mcp") {
         const servers = current.raw.mcp_servers as
@@ -204,7 +227,8 @@ export class ConfigEditor {
         if (!servers || !Object.hasOwn(servers, change.name))
           throw new ConfigEditError(
             404,
-            "MCP 配置项不存在；此入口仅切换已有服务。",
+            "config_entry_missing",
+            "This MCP server is not in the configuration. This control only turns existing servers on or off.",
           );
         source = setTomlBoolean(
           source,
@@ -226,7 +250,8 @@ export class ConfigEditor {
         if (!skill)
           throw new ConfigEditError(
             404,
-            "该目录中未发现此 Skill，请刷新 Skill 列表。",
+            "config_entry_missing",
+            "This Skill is not in the folder. Refresh the Skill list.",
           );
         const rules = current.config.skills?.config ?? [];
         let matchingPath: number | undefined;
@@ -256,7 +281,8 @@ export class ConfigEditor {
       } catch {
         throw new ConfigEditError(
           422,
-          "此配置写法无法安全地只切换该字段，请在终端编辑。",
+          "config_unsafe_edit",
+          "The way this configuration is written does not let the console change only this field safely. Edit it in a terminal.",
         );
       }
       const temporary = path.join(
@@ -272,7 +298,8 @@ export class ConfigEditor {
         if ((await this.read()).revision !== revision)
           throw new ConfigEditError(
             409,
-            "配置已被其他操作修改，请刷新后重试。",
+            "config_conflict",
+            "Another change updated the configuration. Refresh and try again.",
           );
         await rename(temporary, current.filename);
       } finally {

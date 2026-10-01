@@ -6,13 +6,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { SystemStatus } from "../types";
+import type { StatusResponse } from "../types";
 import { AUTH_REQUIRED_EVENT } from "../lib/api";
 
 interface AuthContextType {
   isAuthenticated: boolean;
   isVerifying: boolean;
-  systemStatus: SystemStatus | null;
+  systemStatus: StatusResponse | null;
   verifyToken(testToken: string): Promise<boolean>;
   logout(): Promise<void>;
   refreshStatus(): Promise<void>;
@@ -43,7 +43,7 @@ let initialFragmentToken = takeFragmentToken();
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
-  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<StatusResponse | null>(null);
   const statusRequest = useRef<AbortController | null>(null);
   const loggingOut = useRef(false);
 
@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const status = (await response.json()) as SystemStatus;
+      const status = (await response.json()) as StatusResponse;
       if (controller.signal.aborted) return;
       setSystemStatus(status);
       setIsAuthenticated(true);

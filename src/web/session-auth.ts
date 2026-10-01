@@ -51,7 +51,7 @@ function saveToken(filename: string, token: string, replace: boolean): void {
     }
   } catch {
     throw new Error(
-      "无法保存 Web 登录凭据；请确认配置目录可写。已有凭据未被替换。",
+      "Cannot save the Web access key. Make sure that you can write to the configuration folder. The existing key did not change.",
     );
   } finally {
     if (fd !== undefined) closeSync(fd);
@@ -70,7 +70,7 @@ export class WebSessionAuth {
     if (this.filename !== undefined) {
       if (!existsSync(this.filename))
         saveToken(this.filename, randomBytes(32).toString("base64url"), false);
-      this.value = readTokenFile(this.filename, "Web 登录凭据");
+      this.value = readTokenFile(this.filename, "Web access key");
     } else this.value = token!;
   }
 

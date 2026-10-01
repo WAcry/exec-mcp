@@ -36,9 +36,7 @@ describe("ephemeral session notes", () => {
   it("requires an observed conversation, never creates a global inbox and captures only with Web listening", () => {
     const store = new SessionNotes();
     store.observe("hidden");
-    expect(() => store.enqueue("hidden", "id", "message")).toThrow(
-      "会话不存在",
-    );
+    expect(() => store.enqueue("hidden", "id", "message")).toThrow("not known");
     const close = store.openWeb(() => {});
     store.observe(undefined);
     expect(() => store.enqueue("unscoped", "id", "message")).toThrow();
@@ -62,7 +60,7 @@ describe("ephemeral session notes", () => {
     );
     expect(store.enqueue("a", "retry-key", first.text)).toEqual(first);
     expect(() => store.enqueue("a", "retry-key", "different")).toThrow(
-      "内容已改变",
+      "different content",
     );
     store.enqueue("b", "retry-key", "other conversation");
     const response = store.attach(result(), "b", "b-call");
@@ -71,15 +69,17 @@ describe("ephemeral session notes", () => {
     expect(store.page("a").label).toBe("manual label");
     store.rename("a", "");
     expect(store.page("a").label).toBe("");
-    expect(() => store.rename("a", "汉".repeat(86))).toThrow("备注名最多");
+    expect(() => store.rename("a", "汉".repeat(86))).toThrow("longer than 256");
   });
 
   it("uses UTF-8 byte limits without clipping text or spending ordinary tool output", () => {
     const { store } = fixture();
     const body = "😀".repeat(NOTE_MAX_BYTES / 4);
     store.enqueue("a", "max", body);
-    expect(() => store.enqueue("a", "large", body + "x")).toThrow("最多");
-    expect(() => store.enqueue("a", "blank", "\n  \t")).toThrow("填写");
+    expect(() => store.enqueue("a", "large", body + "x")).toThrow(
+      "longer than",
+    );
+    expect(() => store.enqueue("a", "blank", "\n  \t")).toThrow("empty");
     const ordinary = result("ORIGINAL");
     const response = store.attach(ordinary, "a", "call");
     expect(response.content[0]).toBe(ordinary.content[0]);
@@ -442,7 +442,7 @@ describe("ephemeral session notes", () => {
     const response = JSON.stringify(store.attach(result(), "a", "call"));
     expect(response).not.toContain("withdraw me");
     expect(response).toContain("send me");
-    expect(() => store.withdraw("a", "two")).toThrow("无法撤回");
+    expect(() => store.withdraw("a", "two")).toThrow("cannot be withdrawn");
   });
 
   it("retains independent session metadata when audit is cleared, supports name search and history pagination", () => {
@@ -486,14 +486,12 @@ describe("ephemeral session notes", () => {
   it("bounds temporary storage, refuses new content rather than silently dropping pending notes and expires after 72 hours", () => {
     const { store, advance } = fixture(4096);
     store.enqueue("a", "one", "x".repeat(200));
-    expect(() => store.enqueue("a", "two", "x".repeat(200))).toThrow(
-      "空间已满",
-    );
+    expect(() => store.enqueue("a", "two", "x".repeat(200))).toThrow("is full");
     expect(store.page("a").pendingCount).toBe(1);
     advance(NOTE_RETENTION_MS - 1);
     expect(store.page("a").pendingCount).toBe(1);
     advance(2);
-    expect(() => store.page("a")).toThrow("已过期");
+    expect(() => store.page("a")).toThrow("expired");
     store.observe("a");
     expect(store.page("a").items).toHaveLength(0);
     store.enqueue("a", "new", "after expiry");

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocale } from "../../context/LocaleContext";
 import { useManagement } from "../../context/ManagementContext";
 import { apiFetch } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { plural } from "../../lib/locale";
 import { routeHref, type Navigate, type ToolsTab } from "../../lib/router";
 import { downstreamTool } from "../../lib/steps";
@@ -100,6 +101,7 @@ function ServerRow({
         </p>
         {(server.envKeys?.length ||
           server.headerNames?.length ||
+          server.bearerTokenEnvVar ||
           server.cwd) && (
           <p className="truncate">
             {server.cwd && (
@@ -114,11 +116,17 @@ function ServerRow({
               </span>
             )}
             {!!server.headerNames?.length && (
-              <span>
+              <span className="mr-3">
                 {t("tools.headers")}{" "}
                 <span className="font-mono">
                   {server.headerNames.join(", ")}
                 </span>
+              </span>
+            )}
+            {server.bearerTokenEnvVar && (
+              <span>
+                {t("tools.tokenEnv")}{" "}
+                <span className="font-mono">{server.bearerTokenEnvVar}</span>
               </span>
             )}
           </p>
@@ -204,7 +212,7 @@ function McpTab() {
         setError("");
       })
       .catch((caught) => {
-        if (!controller.signal.aborted) setError(String(caught));
+        if (!controller.signal.aborted) setError(errorText(caught, t));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -353,7 +361,7 @@ function SkillsTab() {
         setError("");
       })
       .catch((caught) => {
-        if (!controller.signal.aborted) setError(String(caught));
+        if (!controller.signal.aborted) setError(errorText(caught, t));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);

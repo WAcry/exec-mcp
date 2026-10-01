@@ -14,6 +14,9 @@ import { ActivityStore } from "./web/activity.js";
 import { ConfigEditor } from "./web/config-edit.js";
 import { ServiceController } from "./service-controller.js";
 import { runWithToken, WITH_TOKEN_USAGE } from "./with-token.js";
+import { SessionNotes } from "./session-notes.js";
+import { sessionNotesPath } from "./session-notes-file.js";
+import { ProtocolCounter } from "./http/protocol-stats.js";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (argv[0] === "with-token") {
@@ -50,15 +53,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const command = positionals[0];
   if (values.help || command === undefined) {
     console.log(
-      `exec-mcp：通过 exec 组合本机与 MCP 工具\n\n用法：exec-mcp init|serve|doctor|tunnel [--config 文件]\ninit   新建配置，不覆盖已有文件\nserve  在回环地址启动 MCP，按配置验证公网请求\ndoctor 检查配置、固定 Codex 组件并实际运行 V8 探针\ntunnel 为已启动的受保护服务运行 Cloudflare/Tailscale 前台客户端\nwith-token 将受保护 token 文件注入子进程环境后启动程序\n${WITH_TOKEN_USAGE}\n`,
+      `exec-mcp: Use exec to combine local tools and MCP tools.\n\nUsage: exec-mcp init|serve|doctor|tunnel [--config FILE]\ninit        Create a configuration file. It does not replace an existing file.\nserve       Start MCP on the loopback address. Check public requests as the configuration specifies.\ndoctor      Check the configuration and the pinned Codex parts, then run a real V8 probe.\ntunnel      Run the Cloudflare or Tailscale client in the foreground for a running protected server.\nwith-token  Put a protected token file into the environment of a program, then start the program.\n${WITH_TOKEN_USAGE}\n`,
     );
     return;
   }
-  if (positionals.length !== 1) throw new Error("只接受一个子命令。");
+  if (positionals.length !== 1) throw new Error("Give only one subcommand.");
   const filename = values.config ?? defaultConfigPath();
   if (command === "init") {
     await initializeConfig(filename);
-    console.log(`已创建配置：${filename}\n确认权限设置后运行 exec-mcp serve。`);
+    console.log(
+      `Created the configuration: ${filename}\nCheck the permission settings, then run exec-mcp serve.`,
+    );
     return;
   }
   if (command === "doctor") {
@@ -75,9 +80,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         result.isError ||
         !JSON.stringify(result.content).includes("exec-mcp probe ok")
       )
-        throw new Error("Code Mode 探针失败。");
+        throw new Error("The Code Mode probe failed.");
       console.log(
-        `配置有效；${process.platform}/${process.arch}；Codex ${PINNED_CODEX_VERSION} V8 探针通过；配置了 ${config.mcpServers.length} 个下游（未连接）。`,
+        `The configuration is valid. Platform: ${process.platform}/${process.arch}. The Codex ${PINNED_CODEX_VERSION} V8 probe passed. Configured downstream MCP servers: ${config.mcpServers.length} (not connected).`,
       );
     } finally {
       await code.close();
@@ -94,7 +99,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         signal: stop.signal,
         onStarted: (plan) =>
           console.log(
-            `${plan.provider} 客户端已启动，MCP 地址：${plan.publicUrl}\n公网连通性以客户端状态和实际访问为准；Ctrl+C 仅停止本次 Tunnel。`,
+            `The ${plan.provider} client started. MCP address: ${plan.publicUrl}\nTo know if public access works, check the client status and make a real request. Ctrl+C stops only this tunnel.`,
           ),
       });
     } finally {
@@ -103,27 +108,34 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }
     return;
   }
-  if (command !== "serve") throw new Error(`未知子命令：${command}`);
+  if (command !== "serve")
+    throw new Error(`Unknown subcommand: ${command}. Run exec-mcp --help.`);
   const editor = new ConfigEditor(filename);
   const initial = await editor.read();
   const config = initial.config;
   const web = effectiveWebConfig(config.web);
   const activity = new ActivityStore({ enabled: web.enabled });
+  // Conversation messages outlive the process; audit records stay in memory.
+  const notes = new SessionNotes(undefined, undefined, {
+    file: sessionNotesPath(filename),
+  });
   const startup = new AbortController();
-  const cancelStartup = () => startup.abort(new Error("启动已取消。"));
+  const cancelStartup = () => startup.abort(new Error("Startup was canceled."));
   process.once("SIGINT", cancelStartup);
   process.once("SIGTERM", cancelStartup);
   let server: Awaited<ReturnType<typeof startServer>>;
   try {
     server = await startServer(config, {
       activity,
+      notes,
+      protocol: new ProtocolCounter(),
       signal: startup.signal,
       onDownstreamProgress: (event) =>
         console.error(
           event.status === "connecting"
-            ? `下游 MCP ${JSON.stringify(event.server)}：正在连接并读取全部工具…`
+            ? `Downstream MCP ${JSON.stringify(event.server)}: connecting and reading all tools…`
             : event.status === "ready"
-              ? `下游 MCP ${JSON.stringify(event.server)}：已加载 ${event.tools} 个工具。`
+              ? `Downstream MCP ${JSON.stringify(event.server)}: loaded ${event.tools} tools.`
               : event.message,
         ),
     });
@@ -165,13 +177,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
             } catch {
               next.server.runtime.activity.disable();
               console.error(
-                "执行服务已重启；Web 监听失败，请检查 [web] 配置。",
+                "The exec service restarted, but the Web UI cannot listen. Check the [web] settings.",
               );
             }
           }
         }
         console.log(
-          `执行服务已重启：${next.server.url}${webServer ? `\nWeb UI：${webServer.loopbackUrl}` : ""}`,
+          `The exec service restarted: ${next.server.url}${webServer ? `\nWeb UI: ${webServer.loopbackUrl}` : ""}`,
         );
       },
       onProgress: (event) => {
@@ -187,9 +199,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       controller.close(),
       ...(webServer ? [webServer.close()] : []),
     ];
-    void Promise.allSettled(tasks).then((results) => {
+    void Promise.allSettled(tasks).then(async (results) => {
+      // Last, so changes from calls that ended during shutdown are saved too.
+      await notes.close();
       if (results.some((result) => result.status === "rejected")) {
-        console.error("服务关闭时发生清理错误。");
+        console.error("A cleanup error occurred while the service stopped.");
         process.exitCode = 1;
       }
     });
@@ -208,7 +222,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     } catch (error) {
       server.runtime.activity.disable();
       console.warn(
-        `Web UI 服务启动失败，MCP 仍可使用：${error instanceof Error ? error.message : String(error)}`,
+        `The Web UI did not start. MCP is still available: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -218,18 +232,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   const webMsg = webServer
-    ? `\nWeb UI 控制台：\n  - 本机访问：${webServer.loopbackUrl}${
+    ? `\nWeb UI console:\n  - Local access: ${webServer.loopbackUrl}${
         webServer.lanUrls.length
-          ? `\n  - 局域网访问（链接片段含访问密钥）：\n${webServer.lanUrls.map((url) => `    ${url}`).join("\n")}`
+          ? `\n  - LAN access (the link fragment contains the Web access key):\n${webServer.lanUrls.map((url) => `    ${url}`).join("\n")}`
           : ""
       }`
     : "";
 
   console.log(
-    `exec-mcp ${VERSION} 已就绪：${server.url}${webMsg}\n${
+    `exec-mcp ${VERSION} is ready: ${server.url}${webMsg}\n${
       config.access === "public"
-        ? `公网认证已启用，外部地址：${config.public_url}/mcp；在另一个终端运行 exec-mcp tunnel。`
-        : "仅允许受信任的 OpenAI 私有 Tunnel；不要公开此无认证端口。"
+        ? `Public authentication is on. External address: ${config.public_url}/mcp. Run exec-mcp tunnel in another terminal.`
+        : "Use only a trusted OpenAI private tunnel. This port has no authentication. Do not make it public."
     }`,
   );
 }
@@ -248,7 +262,7 @@ try {
 if (entrypoint) {
   void main().catch((error) => {
     console.error(
-      `exec-mcp：${error instanceof Error ? error.message : String(error)}`,
+      `exec-mcp: ${error instanceof Error ? error.message : String(error)}`,
     );
     process.exitCode = 1;
   });

@@ -32,7 +32,7 @@ describe("bounded Web activity audit", () => {
     const call = activity.getCall(tracker.id)!;
     expect(call.args.source).toContain("START");
     expect(call.args.source).toContain("END");
-    expect(call.args.source).toContain("审计记录省略");
+    expect(call.args.source).toContain("audit omitted");
     expect(call.args.source).not.toContain(secretMiddle);
     expect(call.subcalls).toHaveLength(5);
     expect(call.subcalls.slice(0, 1).map((item) => item.input)).toMatchObject([
@@ -214,6 +214,70 @@ describe("bounded Web activity audit", () => {
       totalPages: 2,
       total: 3,
     });
+  });
+
+  it("evicts the oldest calls first when retained data exceeds the byte budget", () => {
+    const activity = new ActivityStore({ maxBytes: 200_000 });
+    const ids: string[] = [];
+    for (let index = 0; index < 10; index++) {
+      const tracker = activity.startCall({
+        tool: "exec",
+        sessionId: `session-${index}`,
+        args: { source: `${index}:${"s".repeat(10_000)}` },
+      });
+      tracker.recordSubcall({
+        name: "exec_command",
+        durationMs: 1,
+        input: { cmd: "ls" },
+        output: { output: "o".repeat(6_000) },
+        status: "success",
+      });
+      tracker.finish({ status: "completed", output: "done" });
+      ids.push(tracker.id);
+    }
+    const kept = activity.getCalls({ pageSize: 100 }).items.map((c) => c.id);
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept.length).toBeLessThan(10);
+    // Newest first, and only a contiguous run of the newest calls stays.
+    expect(kept).toEqual(ids.slice(-kept.length).reverse());
+    expect(activity.getCall(ids[0]!)).toBeUndefined();
+    expect(activity.getSessions().total).toBe(kept.length);
+
+    // A single call larger than the budget stays, so the newest call is always visible.
+    const huge = activity.startCall({
+      tool: "exec",
+      sessionId: "huge",
+      args: { source: "h" },
+    });
+    for (let index = 0; index < 50; index++)
+      huge.recordSubcall({
+        name: "exec_command",
+        durationMs: 1,
+        input: { index },
+        output: { output: "x".repeat(8_000) },
+        status: "success",
+      });
+    expect(activity.getCalls().items.map((c) => c.id)).toEqual([huge.id]);
+  });
+
+  it("finds text from subcalls added after an earlier search", () => {
+    const activity = new ActivityStore();
+    const tracker = activity.startCall({
+      tool: "exec",
+      sessionId: "s",
+      args: { source: "first" },
+    });
+    expect(activity.getCalls({ search: "NEEDLE" }).total).toBe(0);
+    const subcall = tracker.startSubcall("exec_command", { cmd: "echo" });
+    expect(activity.getCalls({ search: "needle" }).total).toBe(0);
+    subcall.finish({
+      status: "success",
+      durationMs: 1,
+      output: { output: "Needle found" },
+    });
+    expect(activity.getCalls({ search: "needle" }).total).toBe(1);
+    tracker.finish({ status: "error", error: "Second marker" });
+    expect(activity.getCalls({ search: "second MARKER" }).total).toBe(1);
   });
 });
 

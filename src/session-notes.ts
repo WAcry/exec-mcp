@@ -19,6 +19,7 @@ import {
   type UserQuestionView,
 } from "./user-questions-types.js";
 import type { PaginatedResult, SessionSummary } from "./web/types.js";
+import type { ApiErrorCode } from "./web/api-types.js";
 import {
   NOTE_LABEL_BYTES,
   NOTE_MAX_BYTES,
@@ -31,26 +32,35 @@ import {
   type SessionNotesEvent,
   type SessionNotesPage,
 } from "./session-notes-types.js";
+import {
+  loadNotesFile,
+  saveNotesFile,
+  type StoredConversation,
+} from "./session-notes-file.js";
 
-interface Conversation {
-  id: string;
-  label: string;
-  titled: boolean;
-  firstSeen: string;
-  touched: number;
-  sequence: number;
-  notes: SessionNote[];
-  requests: UserQuestionRequest[];
-  messages: AgentMessage[];
-}
+type Conversation = StoredConversation;
+
+export const SESSION_NOTES_BYTES = 16 * 1024 * 1024;
 
 export class SessionNoteError extends Error {
   constructor(
     readonly status: number,
+    readonly code: ApiErrorCode,
     message: string,
   ) {
     super(message);
   }
+}
+
+export interface SessionNotesOptions {
+  /** JSON file that keeps the store across process restarts. */
+  file?: string | undefined;
+  /** One line per load problem or failed write streak. */
+  log?: ((line: string) => void) | undefined;
+  /** Delay before saving user or agent content. */
+  saveDelayMs?: number;
+  /** Delay before saving changes that only record activity. */
+  touchSaveDelayMs?: number;
 }
 
 /** Count the representations the model receives, including structured-only direct results. */
@@ -76,6 +86,11 @@ const requestBytes = (request: UserQuestionRequest) => {
   const value = JSON.stringify(request);
   return 1024 + value.length * 2 + Buffer.byteLength(value);
 };
+const conversationBytes = (c: Conversation) =>
+  profileBytes(c) +
+  c.notes.reduce((sum, note) => sum + noteBytes(note), 0) +
+  c.requests.reduce((sum, request) => sum + requestBytes(request), 0) +
+  c.messages.reduce((sum, message) => sum + noteBytes(message), 0);
 const questionPending = (
   c: Conversation,
   question: UserQuestionRequest["questions"][number],
@@ -89,19 +104,125 @@ const pendingQuestions = (c: Conversation) =>
     0,
   );
 
-/** Ephemeral user messages, independent of audit eviction and native host generations.
+/** How soon a change must reach the file. */
+type Urgency = "now" | "soon" | "idle";
+
+/** User messages, questions, and agent messages, independent of audit eviction and native host generations.
  * All selection/commit operations are synchronous: no reservation protocol or model-side polling.
+ * With a file, the store survives process restarts; writes are debounced and atomic.
  */
 export class SessionNotes {
   private conversations = new Map<string, Conversation>();
   private bytes = 0;
   private webUsers = 0;
   private listeners = new Set<(event: SessionNotesEvent) => void>();
+  readonly #file: string | undefined;
+  readonly #log: (line: string) => void;
+  readonly #delays: Record<Urgency, number>;
+  #dirty = false;
+  #timer: NodeJS.Timeout | undefined;
+  #deadline = Infinity;
+  #queue: Promise<void> = Promise.resolve();
+  #failing = false;
+  #closed = false;
 
   constructor(
-    private readonly maximumBytes = 16 * 1024 * 1024,
+    private readonly maximumBytes = SESSION_NOTES_BYTES,
     private readonly now: () => number = Date.now,
-  ) {}
+    options: SessionNotesOptions = {},
+  ) {
+    this.#file = options.file;
+    this.#log = options.log ?? ((line) => console.error(line));
+    this.#delays = {
+      now: 0,
+      soon: options.saveDelayMs ?? 1000,
+      idle: options.touchSaveDelayMs ?? 30_000,
+    };
+    if (this.#file !== undefined) this.#load(this.#file);
+  }
+
+  #load(file: string): void {
+    const loaded = loadNotesFile(file);
+    if (loaded.status === "missing") return;
+    if (loaded.status === "rejected") {
+      this.#log(
+        loaded.movedTo === undefined
+          ? `exec-mcp: Cannot use the saved conversation messages in ${file} because ${loaded.reason}. The file stays in place, and this run does not save messages.`
+          : `exec-mcp: Cannot use the saved conversation messages because ${loaded.reason}. Moved the file to ${loaded.movedTo} and started with no messages.`,
+      );
+      // Never replace a file we could not move aside.
+      if (loaded.movedTo === undefined) this.#closed = true;
+      return;
+    }
+    for (const conversation of loaded.conversations) {
+      if (this.conversations.has(conversation.id)) continue;
+      this.conversations.set(conversation.id, conversation);
+      this.bytes += conversationBytes(conversation);
+    }
+    this.sweep();
+    if (this.bytes <= this.maximumBytes) return;
+    // Only a file from another budget or a manual edit can exceed it.
+    const oldest = [...this.conversations.values()].sort(
+      (a, b) => a.touched - b.touched,
+    );
+    for (const conversation of oldest) {
+      if (this.bytes <= this.maximumBytes) break;
+      this.conversations.delete(conversation.id);
+      this.bytes -= conversationBytes(conversation);
+    }
+    this.#changed("soon");
+    this.#log(
+      `exec-mcp: The saved conversation messages were larger than the ${this.maximumBytes}-byte budget. Removed the least recently used conversations.`,
+    );
+  }
+
+  #changed(urgency: Urgency): void {
+    if (this.#file === undefined || this.#closed) return;
+    this.#dirty = true;
+    const deadline = Date.now() + this.#delays[urgency];
+    if (this.#timer !== undefined && this.#deadline <= deadline) return;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#deadline = deadline;
+    this.#timer = setTimeout(() => {
+      this.#timer = undefined;
+      this.#deadline = Infinity;
+      void this.flush();
+    }, this.#delays[urgency]);
+    this.#timer.unref();
+  }
+
+  /** Writes pending changes now. Saving never throws; failures are logged and retried later. */
+  flush(): Promise<void> {
+    if (this.#timer !== undefined) {
+      clearTimeout(this.#timer);
+      this.#timer = undefined;
+      this.#deadline = Infinity;
+    }
+    this.#queue = this.#queue.then(() => this.#write());
+    return this.#queue;
+  }
+
+  /** Saves pending changes and stops saving. Normal shutdown calls this last. */
+  async close(): Promise<void> {
+    await this.flush();
+    this.#closed = true;
+  }
+
+  async #write(): Promise<void> {
+    if (!this.#dirty || this.#file === undefined) return;
+    this.#dirty = false;
+    try {
+      await saveNotesFile(this.#file, [...this.conversations.values()]);
+      this.#failing = false;
+    } catch (error) {
+      this.#dirty = true;
+      if (!this.#failing)
+        this.#log(
+          `exec-mcp: Cannot save conversation messages to ${this.#file} (${(error as NodeJS.ErrnoException).code ?? "unknown error"}). Messages stay in memory, and the next change tries again.`,
+        );
+      this.#failing = true;
+    }
+  }
 
   /** Capture conversation identities only while the management Web server is actually listening. */
   openWeb(listener: (event: SessionNotesEvent) => void): () => void {
@@ -122,6 +243,7 @@ export class SessionNotes {
     const existing = this.conversations.get(id);
     if (existing) {
       existing.touched = this.now();
+      this.#changed("idle");
       return;
     }
     // Observability capacity must not turn an otherwise valid tool call into a failure.
@@ -138,6 +260,7 @@ export class SessionNotes {
       messages: [],
     });
     this.bytes += 1024;
+    this.#changed("idle");
   }
 
   private require(id: string): Conversation {
@@ -146,7 +269,8 @@ export class SessionNotes {
     if (!conversation)
       throw new SessionNoteError(
         404,
-        "会话不存在、未提供对话标识或已过期；请等待该对话再次调用工具。",
+        "conversation_not_found",
+        "This conversation is not known, has no ID, or has expired. Wait until it calls a tool again.",
       );
     return conversation;
   }
@@ -156,7 +280,8 @@ export class SessionNotes {
     if (Buffer.byteLength(label) > NOTE_LABEL_BYTES)
       throw new SessionNoteError(
         413,
-        `备注名最多 ${NOTE_LABEL_BYTES} UTF-8 字节。`,
+        "label_too_long",
+        `The name is longer than ${NOTE_LABEL_BYTES} UTF-8 bytes.`,
       );
     const next = label.trim();
     const delta = 2 * (next.length - conversation.label.length);
@@ -164,6 +289,7 @@ export class SessionNotes {
     conversation.label = next;
     conversation.touched = this.now();
     this.bytes += delta;
+    this.#changed("soon");
     this.emit(id);
   }
 
@@ -184,6 +310,7 @@ export class SessionNotes {
     c.titled = true;
     c.touched = this.now();
     this.bytes += delta;
+    this.#changed("soon");
     this.emit(id);
     return { set: true };
   }
@@ -191,6 +318,7 @@ export class SessionNotes {
   enqueue(id: string, messageId: string, text: string): SessionNote {
     const conversation = this.require(id);
     const note = this.insertNote(conversation, messageId, text);
+    this.#changed("soon");
     this.emit(id);
     return { ...note };
   }
@@ -202,19 +330,26 @@ export class SessionNotes {
     questionId?: string,
   ): SessionNote {
     if (!/^[A-Za-z0-9_-]{1,80}$/.test(messageId))
-      throw new SessionNoteError(400, "消息提交 ID 无效。");
-    if (!text.trim()) throw new SessionNoteError(400, "请填写补充内容。");
+      throw new SessionNoteError(
+        400,
+        "note_invalid_id",
+        "The message ID must have 1 to 80 letters, digits, underscores, or hyphens.",
+      );
+    if (!text.trim())
+      throw new SessionNoteError(400, "note_empty", "The message is empty.");
     if (Buffer.byteLength(text) > NOTE_MAX_BYTES)
       throw new SessionNoteError(
         413,
-        `补充内容最多 ${NOTE_MAX_BYTES} UTF-8 字节。`,
+        "note_too_long",
+        `The message is longer than ${NOTE_MAX_BYTES} UTF-8 bytes.`,
       );
     const prior = conversation.notes.find((n) => n.id === messageId);
     if (prior) {
       if (prior.text !== text || prior.questionId !== questionId)
         throw new SessionNoteError(
           409,
-          "同一提交 ID 的内容已改变；请作为新消息发送。",
+          "note_changed",
+          "A message with this ID has different content. Send it as a new message.",
         );
       return { ...prior };
     }
@@ -240,14 +375,23 @@ export class SessionNotes {
     callId?: string,
   ): { accepted: true } {
     if (!this.webUsers)
-      throw new SessionNoteError(503, "异步消息需要已启动的 Web 控制台。");
+      throw new SessionNoteError(
+        503,
+        "web_unavailable",
+        "The Web console is not running, so the user cannot see this message. Tell the user in your reply instead.",
+      );
     if (!id)
-      throw new SessionNoteError(400, "宿主未提供对话标识，无法确定消息归属。");
+      throw new SessionNoteError(
+        400,
+        "conversation_unknown",
+        "The host did not send a conversation ID, so this message has no destination. Tell the user in your reply instead.",
+      );
     const { message } = SEND_MESSAGE_TO_USER_SCHEMA.parse(raw);
     if (Buffer.byteLength(message) > NOTE_MAX_BYTES)
       throw new SessionNoteError(
         413,
-        `消息最多 ${NOTE_MAX_BYTES} UTF-8 字节。`,
+        "message_too_long",
+        `message is longer than ${NOTE_MAX_BYTES} UTF-8 bytes. Send a shorter message.`,
       );
     this.observe(id);
     const c = this.require(id);
@@ -261,6 +405,7 @@ export class SessionNotes {
     c.messages.push(entry);
     c.touched = this.now();
     this.bytes += noteBytes(entry);
+    this.#changed("soon");
     this.emit(id, undefined, { id: entry.id });
     return { accepted: true };
   }
@@ -276,7 +421,9 @@ export class SessionNotes {
         message.readAt = readAt;
         changed = true;
       }
-    if (changed) this.emit(id);
+    if (!changed) return;
+    this.#changed("soon");
+    this.emit(id);
   }
 
   ask(
@@ -286,12 +433,14 @@ export class SessionNotes {
     if (!this.webUsers)
       throw new SessionNoteError(
         503,
-        "异步提问需要已启动的 Web 控制台；请在原对话中与用户沟通。",
+        "web_unavailable",
+        "The Web console is not running, so no one can see or answer this question. Ask the user in your reply instead.",
       );
     if (!id)
       throw new SessionNoteError(
         400,
-        "宿主未提供对话标识，无法确定提问归属；请在原对话中与用户沟通。",
+        "conversation_unknown",
+        "The host did not send a conversation ID, so this question has no destination. Ask the user in your reply instead.",
       );
     const input = REQUEST_USER_INPUT_SCHEMA.parse(raw);
     this.observe(id);
@@ -308,7 +457,8 @@ export class SessionNotes {
       )
         throw new SessionNoteError(
           409,
-          "同一 request_key 的问题已改变；请使用新的键。",
+          "request_key_changed",
+          `request_key ${JSON.stringify(input.request_key)} already belongs to different questions in this conversation. Use a new request_key, or send the original questions again without changes.`,
         );
       return { accepted: true, request_id: existing.id };
     }
@@ -330,6 +480,7 @@ export class SessionNotes {
     c.requests.push(request);
     c.touched = this.now();
     this.bytes += cost;
+    this.#changed("soon");
     this.emit(id, { id: request.id, count: request.questions.length });
     return { accepted: true, request_id: request.id };
   }
@@ -372,14 +523,26 @@ export class SessionNotes {
     );
     const question = request?.questions.find((q) => q.id === questionId);
     if (!request || !question)
-      throw new SessionNoteError(404, "问题不存在或已过期。");
+      throw new SessionNoteError(
+        404,
+        "question_not_found",
+        "This question does not exist or has expired.",
+      );
     if (
       input.option_index !== null &&
       input.option_index >= question.options.length
     )
-      throw new SessionNoteError(400, "请选择此问题提供的选项。");
+      throw new SessionNoteError(
+        400,
+        "invalid_option",
+        "Select one of the options of this question.",
+      );
     if (input.option_index === null && !input.note.trim())
-      throw new SessionNoteError(400, "选择‘以上都不是’时，请填写自己的回答。");
+      throw new SessionNoteError(
+        400,
+        "answer_required",
+        "None of the above needs your own answer in the note.",
+      );
     const text = formatUserAnswer(question, input.option_index, input.note);
     // Every admitted answer can fit even the JSON-based notes channel of a small response.
     if (
@@ -388,7 +551,8 @@ export class SessionNotes {
     )
       throw new SessionNoteError(
         413,
-        `问题、选择和补充合计最多 ${NOTE_MAX_BYTES} 字节（含 JSON 编码）；请缩短补充。`,
+        "answer_too_long",
+        `The question, the choice, and the note together are longer than ${NOTE_MAX_BYTES} bytes, including JSON encoding. Make the note shorter.`,
       );
     const noteId = `${question.id}_${input.id}`;
     const prior = c.notes.find((n) => n.id === noteId);
@@ -396,14 +560,16 @@ export class SessionNotes {
       if (prior.text !== text || prior.questionId !== questionId)
         throw new SessionNoteError(
           409,
-          "同一次提交的答复已改变；请刷新后确认。",
+          "answer_changed",
+          "This submission already has a different answer. Refresh the page and check it.",
         );
       return { ...prior };
     }
     if (!questionPending(c, question))
       throw new SessionNoteError(
         409,
-        "此问题已在另一处回答；草稿保留，可复制为补充消息。",
+        "question_answered",
+        "This question already has an answer from another page. The draft stays, and you can send it as a note.",
       );
     const answeredAt = new Date(this.now()).toISOString();
     const answer = {
@@ -425,6 +591,7 @@ export class SessionNotes {
     question.answer = answer;
     request.touched = replacement.touched;
     this.bytes += delta;
+    this.#changed("soon");
     this.emit(id);
     return note;
   }
@@ -432,13 +599,20 @@ export class SessionNotes {
   withdraw(id: string, noteId: string): void {
     const conversation = this.require(id);
     const note = conversation.notes.find((n) => n.id === noteId);
-    if (!note) throw new SessionNoteError(404, "消息不存在或已过期。");
+    if (!note)
+      throw new SessionNoteError(
+        404,
+        "note_not_found",
+        "This message does not exist or has expired.",
+      );
     if (note.status === "attached")
       throw new SessionNoteError(
         409,
-        "消息已附入工具响应，无法撤回；可再发一条补充。",
+        "note_attached",
+        "This message is already in a tool response, so it cannot be withdrawn. Send a new note to correct it.",
       );
     note.status = "withdrawn";
+    this.#changed("soon");
     this.emit(id);
   }
 
@@ -614,6 +788,8 @@ export class SessionNotes {
         note.attachedAt = attachedAt;
         if (callId !== "audit-disabled") note.callId = callId;
       }
+      // Save delivery at once, so a restart does not deliver the same note again.
+      this.#changed("now");
       this.emit(id);
       return response;
     } catch {
@@ -626,26 +802,31 @@ export class SessionNotes {
     if (this.bytes + bytes > this.maximumBytes)
       throw new SessionNoteError(
         429,
-        "补充消息临时空间已满；请复制到原对话，或等待旧记录过期。",
+        "notes_full",
+        "Storage for conversation messages is full. Old records leave after 72 hours; until then, use the conversation itself.",
       );
   }
 
   private sweep(): void {
     const deadline = this.now() - NOTE_RETENTION_MS;
+    let removed = false;
     for (const [id, c] of this.conversations) {
       c.notes = c.notes.filter((note) => {
         if (Date.parse(note.createdAt) > deadline) return true;
         this.bytes -= noteBytes(note);
+        removed = true;
         return false;
       });
       c.requests = c.requests.filter((request) => {
         if (request.touched > deadline) return true;
         this.bytes -= requestBytes(request);
+        removed = true;
         return false;
       });
       c.messages = c.messages.filter((message) => {
         if (Date.parse(message.createdAt) > deadline) return true;
         this.bytes -= noteBytes(message);
+        removed = true;
         return false;
       });
       if (
@@ -656,8 +837,10 @@ export class SessionNotes {
       ) {
         this.bytes -= profileBytes(c);
         this.conversations.delete(id);
+        removed = true;
       }
     }
+    if (removed) this.#changed("idle");
   }
 
   private emit(

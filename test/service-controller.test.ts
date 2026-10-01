@@ -8,6 +8,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { startServer } from "../src/server.js";
 import { ServiceController } from "../src/service-controller.js";
+import { ActivityStore } from "../src/web/activity.js";
 import { ConfigEditor } from "../src/web/config-edit.js";
 import { startWebServer } from "../src/web/server.js";
 import { jsonOutput } from "./helpers.js";
@@ -25,7 +26,10 @@ async function setup() {
   );
   const editor = new ConfigEditor(file);
   const first = await editor.read();
-  const server = await startServer(first.config);
+  // Like the CLI: the audit records calls when the Web console is on.
+  const server = await startServer(first.config, {
+    activity: new ActivityStore({ enabled: true }),
+  });
   const controller = new ServiceController(editor, {
     server,
     config: first.config,
@@ -79,6 +83,63 @@ describe("managed runtime replacement", () => {
     const status = await fetch(new URL("api/status", s.web.loopbackUrl));
     expect(status.status).toBe(200);
     expect(await status.json()).toMatchObject({ status: "ready" });
+  });
+  it("keeps call history and streams the new runtime's calls right after a restart", async () => {
+    const s = await setup();
+    const client = await s.connect();
+    const meta = { "openai/session": "history-chat" };
+    await client.callTool({
+      name: "exec",
+      arguments: { source: "text('before restart')" },
+      _meta: meta,
+    });
+    const stream = await fetch(new URL("api/events", s.web.loopbackUrl));
+    expect(stream.status).toBe(200);
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    const events: { type: string; state?: string }[] = [];
+    let pending = "";
+    const until = async (
+      match: (event: { type: string; state?: string }) => boolean,
+    ) => {
+      while (!events.some(match)) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("The event stream ended.");
+        pending += decoder.decode(value, { stream: true });
+        const frames = pending.split("\n\n");
+        pending = frames.pop() ?? "";
+        for (const frame of frames)
+          for (const line of frame.split("\n"))
+            if (line.startsWith("data: "))
+              events.push(JSON.parse(line.slice(6)));
+      }
+    };
+    cleanups.push(() => reader.cancel().catch(() => undefined));
+    await until((event) => event.type === "connected");
+
+    await s.controller.restart();
+    await until((event) => event.type === "runtime" && event.state === "ready");
+    expect(
+      events.filter((event) => event.type === "runtime").map((e) => e.state),
+    ).toEqual(["restarting", "ready"]);
+
+    // No Web request in between: the stream must already follow the new runtime.
+    const next = await s.connect();
+    await next.callTool({
+      name: "exec",
+      arguments: { source: "text('after restart')" },
+      _meta: meta,
+    });
+    await until((event) => event.type === "call:finish");
+    expect(events.map((event) => event.type)).not.toContain("call:clear");
+
+    const calls = (await (
+      await fetch(new URL("api/calls?pageSize=10", s.web.loopbackUrl))
+    ).json()) as { items: { args: { source: string } }[] };
+    expect(calls.items.map((call) => call.args.source)).toEqual([
+      "text('after restart')",
+      "text('before restart')",
+    ]);
   });
   it("keeps management recoverable after startup failure, allowing a configured MCP to be switched off and retried", async () => {
     const s = await setup();
@@ -167,6 +228,6 @@ describe("managed runtime replacement", () => {
     await restart;
     await stopping;
     expect(s.controller.state).toBe("stopped");
-    await expect(s.controller.restart()).rejects.toThrow("停止");
+    await expect(s.controller.restart()).rejects.toThrow("stopped");
   });
 });

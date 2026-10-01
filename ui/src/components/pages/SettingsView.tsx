@@ -14,9 +14,19 @@ import { useLocale } from "../../context/LocaleContext";
 import { useManagement } from "../../context/ManagementContext";
 import { useTheme } from "../../context/ThemeContext";
 import { apiFetch } from "../../lib/api";
-import { formatDuration } from "../../lib/format";
+import { errorFeedback } from "../../lib/errors";
+import { formatDuration, fullTime } from "../../lib/format";
+import {
+  feedback,
+  message as feedbackMessage,
+  type Feedback,
+} from "../../lib/locale";
 import type { Navigate } from "../../lib/router";
-import type { ConfigResponse } from "../../types";
+import type {
+  ConfigResponse,
+  ProtocolStats,
+  RegenerateTokenResponse,
+} from "../../types";
 import { LanguageOptions } from "../LanguageControl";
 import { CodeView } from "../ui/CodeSurface";
 import { Button, ConfirmButton, Segmented, Switch } from "../ui/Controls";
@@ -79,6 +89,36 @@ function UrlField({ value }: { value: string }) {
   );
 }
 
+/** Shows whether clients still use the 2025-era protocol before its support is removed. */
+function ProtocolUse({ stats }: { stats: ProtocolStats }) {
+  const { t, locale } = useLocale();
+  const last = (value: string | undefined) =>
+    value ? ` · ${t("settings.protocolLast", fullTime(value, locale))}` : "";
+  return (
+    <>
+      <dt className="text-ink-3">{t("settings.protocol")}</dt>
+      <dd className="space-y-0.5 text-ink">
+        <p className="tabular">
+          {t("settings.protocolModern", stats.modern.requests)}
+          <span className="text-ink-3">{last(stats.modern.lastRequestAt)}</span>
+        </p>
+        <p className="tabular">
+          {t(
+            "settings.protocolLegacy",
+            stats.legacy.requests,
+            stats.legacy.sessions,
+            stats.legacy.openSessions,
+          )}
+          <span className="text-ink-3">{last(stats.legacy.lastRequestAt)}</span>
+        </p>
+        <p className="text-xs text-ink-3">
+          {t("settings.protocolSince", fullTime(stats.since, locale))}
+        </p>
+      </dd>
+    </>
+  );
+}
+
 export function SettingsView({
   navigate,
   wide,
@@ -93,29 +133,29 @@ export function SettingsView({
   const { notifications } = useLive();
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [lanUrls, setLanUrls] = useState<string[] | null>(null);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState<Feedback>("");
+  const [error, setError] = useState<Feedback>("");
 
   useEffect(() => {
     apiFetch<ConfigResponse>("/api/config")
       .then(setConfig)
-      .catch((caught) => setError(String(caught)));
+      .catch((caught) => setError(errorFeedback(caught)));
   }, [management.data?.generation]);
 
   const rotate = async () => {
     setError("");
     try {
-      const result = await apiFetch<{ lanUrls: string[] }>(
+      const result = await apiFetch<RegenerateTokenResponse>(
         "/api/auth/regenerate-token",
         {
           method: "POST",
         },
       );
       setLanUrls(result.lanUrls);
-      setMessage(t("settings.rotated"));
+      setMessage(feedbackMessage("settings.rotated"));
       await refreshStatus();
     } catch (caught) {
-      setError(t("settings.rotateFailed", String(caught)));
+      setError(feedbackMessage("settings.rotateFailed", errorFeedback(caught)));
     }
   };
   const reveal = async () => {
@@ -123,17 +163,17 @@ export function SettingsView({
     try {
       await apiFetch("/api/config/reveal", { method: "POST" });
     } catch (caught) {
-      setError(t("settings.revealFailed", String(caught)));
+      setError(feedbackMessage("settings.revealFailed", errorFeedback(caught)));
     }
   };
   const clear = async () => {
     setError("");
     try {
       await apiFetch("/api/calls", { method: "DELETE" });
-      setMessage(t("settings.cleared"));
+      setMessage(feedbackMessage("settings.cleared"));
       await refreshStatus();
     } catch (caught) {
-      setError(t("activity.clearFailed", String(caught)));
+      setError(feedbackMessage("activity.clearFailed", errorFeedback(caught)));
     }
   };
 
@@ -153,7 +193,7 @@ export function SettingsView({
           role="status"
           className={`mb-5 text-sm ${error ? "text-err" : "text-ok"}`}
         >
-          {error || message}
+          {feedback(error || message, t)}
         </p>
       )}
 
@@ -307,7 +347,9 @@ export function SettingsView({
           />
           {(management.error || management.data.error) && (
             <p className="text-xs text-err">
-              {management.error || management.data.error}
+              {management.error
+                ? feedback(management.error, t)
+                : management.data.error}
             </p>
           )}
         </Group>
@@ -417,6 +459,9 @@ export function SettingsView({
               <dd className="tabular text-ink">
                 {formatDuration(systemStatus.uptime * 1000, t)}
               </dd>
+              {systemStatus.mcp.protocol && (
+                <ProtocolUse stats={systemStatus.mcp.protocol} />
+              )}
             </dl>
           </Panel>
         </Group>

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { NOTE_LABEL_BYTES } from "../../../../src/session-notes-types";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { plural } from "../../lib/locale";
 import { UNSCOPED, type ConversationState } from "../../lib/conversation";
 import { formatAgo, formatElapsed, utf8Bytes } from "../../lib/format";
@@ -68,7 +69,7 @@ function TitleEditor({
       setError("");
       onRenamed();
     } catch (caught) {
-      setError(String(caught));
+      setError(errorText(caught, t));
     }
   };
   if (value !== null)

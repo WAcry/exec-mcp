@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLive } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { useManagement } from "../../context/ManagementContext";
+import { feedback } from "../../lib/locale";
 import { ConfirmButton } from "../ui/Controls";
 
 function Travel() {
@@ -19,7 +20,7 @@ export function RuntimeBanner() {
   const { data, error, busy, restart } = useManagement();
   if (!data?.available) return null;
   const restarting = data.state === "restarting";
-  const failure = error || data.error;
+  const failure = error ? feedback(error, t) : data.error;
   if (!restarting && !data.pending && !failure) return null;
   return (
     <div

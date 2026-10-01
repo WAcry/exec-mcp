@@ -25,11 +25,11 @@ export async function prepareTunnel(
   validatePublicAccess(config);
   if (config.access !== "public" || !config.tunnel || !config.public_url)
     throw new Error(
-      "tunnel 命令只用于已配置认证的公网模式；先填写 server、auth 和 tunnel。",
+      "The tunnel command works only in public mode with authentication. First set server, auth, and tunnel in the configuration.",
     );
   if (config.port === 0)
     throw new Error(
-      "tunnel 命令需要固定的本机 server.port，不能使用随机端口 0。",
+      "The tunnel command needs a fixed local server.port. Do not use port 0, which selects a random port.",
     );
   signal?.throwIfAborted();
   const provider = config.tunnel.provider;
@@ -40,11 +40,11 @@ export async function prepareTunnel(
   );
   if (!file)
     throw new Error(
-      `找不到 ${provider === "cloudflare" ? "cloudflared" : "tailscale"}；请先安装官方客户端或配置 tunnel.executable。`,
+      `Cannot find ${provider === "cloudflare" ? "cloudflared" : "tailscale"}. Install the official client or set tunnel.executable.`,
     );
   if (/\.(cmd|bat)$/i.test(file))
     throw new Error(
-      "tunnel.executable 必须是原生可执行文件，不接受 Shell 包装。",
+      "tunnel.executable must be a native executable file. Do not use a shell wrapper.",
     );
   const target = `http://${config.host === "::1" ? "[::1]" : config.host}:${config.port}`;
   await verifyProtectedServer(target, config, signal);
@@ -64,7 +64,7 @@ export async function prepareTunnel(
       readTokenFile(tokenFile, "Cloudflare token_file");
     } else if (!process.env.TUNNEL_TOKEN) {
       throw new Error(
-        "Cloudflare 需要 tunnel.token_file 或环境 TUNNEL_TOKEN/TUNNEL_TOKEN_FILE；不会使用其他凭据启动。",
+        "Cloudflare needs tunnel.token_file or the TUNNEL_TOKEN or TUNNEL_TOKEN_FILE environment variable. The tunnel does not start with other credentials.",
       );
     }
     return {
@@ -88,7 +88,7 @@ export async function prepareTunnel(
       : "";
   if (info.BackendState !== "Running" || actualName !== expected.hostname)
     throw new Error(
-      "Tailscale 必须已登录，public_url 必须对应本节点的 DNSName；不会自动登录或修改 tailnet。",
+      "Tailscale must be signed in, and public_url must match the DNSName of this node. exec-mcp does not sign in or change the tailnet for you.",
     );
   const port = expected.port || "443";
   const serving = await providerJson(
@@ -98,7 +98,7 @@ export async function prepareTunnel(
   );
   if (hasListener(serving, port))
     throw new Error(
-      `Tailscale 的 ${port} 端口已有 Serve/Funnel 配置；不会覆盖或 reset 其他服务，请选择空闲端口。`,
+      `Tailscale port ${port} already has a Serve or Funnel configuration. exec-mcp does not replace or reset other services. Select a free port.`,
     );
   return {
     file,
@@ -124,12 +124,14 @@ async function verifyProtectedServer(
     !challenge.startsWith("Bearer ")
   )
     throw new Error(
-      "本机 MCP 未返回认证挑战；先使用同一配置启动 exec-mcp serve，不会公开当前端口。",
+      "The local MCP server did not return an authentication challenge. First start exec-mcp serve with the same configuration. The current port stays private.",
     );
   if (config.auth?.type === "oauth") {
     const origin = new URL(config.public_url!).origin;
     if (!challenge.includes(`${origin}${RESOURCE_METADATA_PATH}`))
-      throw new Error("本机 MCP 的公网身份与配置不同；不会启动 Tunnel。");
+      throw new Error(
+        "The public identity of the local MCP server does not match the configuration. The tunnel does not start.",
+      );
     const metadata = await localRequest(
       target + RESOURCE_METADATA_PATH,
       signal,
@@ -138,12 +140,16 @@ async function verifyProtectedServer(
     try {
       parsed = JSON.parse(metadata.body);
     } catch {
-      throw new Error("本机 OAuth 资源元数据无效。");
+      throw new Error("The local OAuth resource metadata is not valid.");
     }
     if (metadata.status !== 200 || parsed.resource !== origin + "/mcp")
-      throw new Error("本机 OAuth 资源身份与配置不同；不会启动 Tunnel。");
+      throw new Error(
+        "The local OAuth resource identity does not match the configuration. The tunnel does not start.",
+      );
   } else if (challenge !== 'Bearer realm="exec-mcp"') {
-    throw new Error("本机认证方式与配置不同；不会启动 Tunnel。");
+    throw new Error(
+      "The local authentication type does not match the configuration. The tunnel does not start.",
+    );
   }
 }
 
@@ -166,10 +172,10 @@ function localRequest(
       response.on("data", (chunk) => {
         body += chunk;
         if (body.length > 64 * 1024)
-          response.destroy(new Error("本机检查响应过大。"));
+          response.destroy(new Error("The local check response is too large."));
       });
       response.once("error", () =>
-        reject(new Error("无法验证本机 MCP 入口。")),
+        reject(new Error("Cannot verify the local MCP endpoint.")),
       );
       response.once("end", () =>
         resolve({
@@ -180,7 +186,11 @@ function localRequest(
       );
     });
     request.once("error", () =>
-      reject(new Error("无法连接本机 MCP；先启动 exec-mcp serve。")),
+      reject(
+        new Error(
+          "Cannot connect to the local MCP server. Start exec-mcp serve first.",
+        ),
+      ),
     );
   });
 }
@@ -212,7 +222,7 @@ async function providerJson(
     return value as Record<string, unknown>;
   } catch {
     throw new Error(
-      "无法读取 Tailscale 状态；请检查客户端登录和本机服务权限。未修改现有配置。",
+      "Cannot read the Tailscale status. Check the client sign-in and the local service permissions. exec-mcp did not change the current configuration.",
     );
   }
 }
@@ -265,6 +275,6 @@ export async function runTunnel(
   });
   if (!options.signal?.aborted && result.code !== 0)
     throw new Error(
-      `Tunnel 客户端已退出（${result.code ?? result.signal ?? "unknown"}）；请使用供应商客户端检查连接和授权，MCP 服务未重启。`,
+      `The tunnel client stopped (${result.code ?? result.signal ?? "unknown"}). Use the provider client to check the connection and authorization. exec-mcp did not restart the MCP server.`,
     );
 }

@@ -3,6 +3,20 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
+import {
+  DEFAULT_EXEC_YIELD_TIME_MS,
+  DEFAULT_WAIT_YIELD_TIME_MS,
+  MAX_EXEC_YIELD_TIME_MS,
+  MAX_WAIT_YIELD_TIME_MS,
+} from "./code-mode/exec-source.js";
+import { MODEL_TEXT_BYTES } from "./code-mode/model-output.js";
+import {
+  COMMAND_YIELD_TIME_MS,
+  STDIN_YIELD_TIME_MS,
+  TERMINAL_READ_BYTES,
+} from "./limits.js";
+import { MiB } from "./memory.js";
+import { NOTES_RESPONSE_BYTES } from "./session-notes-types.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import type { NativeToolName } from "./tool-names.js";
 import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
@@ -15,8 +29,11 @@ import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
   EXPORT_FILE_SCHEMA,
+  RESOURCE_FILE_BYTES,
 } from "./files/contracts.js";
 
+const bytes = (value: number) => value.toLocaleString("en-US");
+const mib = (value: number) => `${value / MiB} MiB`;
 const ms = (maximum: number, description: string) =>
   z.number().int().min(0).max(maximum).describe(description).optional();
 const tokenBudget = z
@@ -51,8 +68,8 @@ export const EXEC_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      30_000,
-      "Time before yielding a still-running script. Defaults to 10000 ms; range 0-30000. Does not set an execution deadline.",
+      MAX_EXEC_YIELD_TIME_MS,
+      `Time before yielding a still-running script. Defaults to ${DEFAULT_EXEC_YIELD_TIME_MS} ms; range 0-${MAX_EXEC_YIELD_TIME_MS}. Does not set an execution deadline.`,
     ),
   })
   .strict();
@@ -66,8 +83,8 @@ export const WAIT_SCHEMA = z
         "Running exec cell to resume, as returned by exec. Distinct from a terminal session_id.",
       ),
     yield_time_ms: ms(
-      110_000,
-      "Time before yielding again. Defaults to 110000 ms; range 0-110000. Completion or yield_control returns sooner.",
+      MAX_WAIT_YIELD_TIME_MS,
+      `Time before yielding again. Defaults to ${DEFAULT_WAIT_YIELD_TIME_MS} ms; range 0-${MAX_WAIT_YIELD_TIME_MS}. Completion or yield_control returns sooner.`,
     ),
     terminate: z
       .boolean()
@@ -111,8 +128,8 @@ export const COMMAND_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      30_000,
-      "Wait before yielding output. Defaults to 10000 ms; range 0-30000. Commands that finish sooner return immediately.",
+      COMMAND_YIELD_TIME_MS.max,
+      `Wait before yielding output. Defaults to ${COMMAND_YIELD_TIME_MS.default} ms; range 0-${COMMAND_YIELD_TIME_MS.max}. Commands that finish sooner return immediately.`,
     ),
   })
   .strict();
@@ -135,8 +152,8 @@ export const STDIN_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      300_000,
-      "Output collection window. Non-empty writes default to 250 ms and clamp to 250-30000; empty reads default to 5000 and clamp to 5000-300000. Process exit returns sooner; new output does not end the window. Explicit 0 reads immediately.",
+      STDIN_YIELD_TIME_MS.read.max,
+      `Output collection window. Non-empty writes default to ${STDIN_YIELD_TIME_MS.default} ms and clamp to ${STDIN_YIELD_TIME_MS.write.min}-${STDIN_YIELD_TIME_MS.write.max}; empty reads default to ${STDIN_YIELD_TIME_MS.read.min} and clamp to ${STDIN_YIELD_TIME_MS.read.min}-${STDIN_YIELD_TIME_MS.read.max}. Process exit returns sooner; new output does not end the window. Explicit 0 reads immediately.`,
     ),
     cols: z
       .number()
@@ -202,8 +219,7 @@ const TERMINAL_OUTPUT = {
   properties: {
     output: {
       type: "string",
-      description:
-        "Unread terminal output, up to 4 MiB per call. Larger remaining output can be collected with the same session_id.",
+      description: `Unread terminal output, up to ${mib(TERMINAL_READ_BYTES)} per call. Larger remaining output can be collected with the same session_id.`,
     },
     wall_time_seconds: { type: "number" },
     session_id: {
@@ -285,8 +301,7 @@ const NATIVE_CONTRACTS = {
   export_file: contract({
     name: "export_file",
     schema: EXPORT_FILE_SCHEMA,
-    description:
-      "Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to 32 MiB via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.",
+    description: `Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to ${mib(RESOURCE_FILE_BYTES)} via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.`,
   }),
   exec_command: contract({
     name: "exec_command",
@@ -547,12 +562,15 @@ The catalog is not automatically printed; changes appear in the next exec. list_
 ## Results and execution
 Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources.
 An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.
-Final response text is limited to 36,000 UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is 37,000 UTF-8 bytes.
-exec waits 10000 ms by default, at most 30000. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
+Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
+exec waits ${DEFAULT_EXEC_YIELD_TIME_MS} ms by default, at most ${MAX_EXEC_YIELD_TIME_MS}. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
 cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.
 
 ## Local tools
 ${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
-export const WAIT_DESCRIPTION =
-  "Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to 110000 ms (also the maximum); longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to 36,000 UTF-8 bytes, or 37,000 with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.";
+const WAIT_DEFAULT =
+  DEFAULT_WAIT_YIELD_TIME_MS === MAX_WAIT_YIELD_TIME_MS
+    ? `${DEFAULT_WAIT_YIELD_TIME_MS} ms (also the maximum)`
+    : `${DEFAULT_WAIT_YIELD_TIME_MS} ms, at most ${MAX_WAIT_YIELD_TIME_MS}`;
+export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;

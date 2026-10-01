@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import type * as grpc from "@grpc/grpc-js";
 
 import { abortError, errorMessage } from "../util.js";
+import { DEFAULT_EXEC_YIELD_TIME_MS } from "./exec-source.js";
 import {
   nestedToolReservationBytes,
   WeightedAdmissionQueue,
@@ -211,7 +212,7 @@ export class CodeModeSession {
       stream = this.#client.execute(request, {
         deadline:
           Date.now() +
-          (options.yieldTimeMs ?? 10_000) +
+          (options.yieldTimeMs ?? DEFAULT_EXEC_YIELD_TIME_MS) +
           this.#transportTimeoutMs +
           1_000,
       });

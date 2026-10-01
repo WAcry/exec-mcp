@@ -12,6 +12,11 @@ import {
 import { terminateProcessTree } from "./platform.js";
 import { inheritedEnvironment } from "../environment.js";
 import { DEFAULT_IDLE_MS, MEMORY_DEFAULTS, MiB } from "../memory.js";
+import {
+  COMMAND_YIELD_TIME_MS,
+  STDIN_YIELD_TIME_MS,
+  TERMINAL_READ_BYTES,
+} from "../limits.js";
 import { RollingOutputBuffer } from "./output-buffer.js";
 import { inputPreview } from "../tool-names.js";
 import {
@@ -70,14 +75,14 @@ interface Session {
   terminating?: Promise<void>;
   stderrBytes: number;
 }
-export const TERMINAL_READ_BYTES = 4 * 1024 * 1024;
 /** Codex's collection windows, with an explicit zero for immediate local inspection. */
 export function stdinYieldTime(input: WriteStdinInput): number {
-  const requested = input.yield_time_ms ?? 250;
+  const requested = input.yield_time_ms ?? STDIN_YIELD_TIME_MS.default;
   if (requested === 0) return 0;
-  return input.chars
-    ? Math.max(250, Math.min(30_000, requested))
-    : Math.max(5000, Math.min(300_000, requested));
+  const window = input.chars
+    ? STDIN_YIELD_TIME_MS.write
+    : STDIN_YIELD_TIME_MS.read;
+  return Math.max(window.min, Math.min(window.max, requested));
 }
 export class TerminalManager {
   readonly shell: CommandShell;
@@ -224,7 +229,11 @@ export class TerminalManager {
     }
     const started = performance.now();
     try {
-      await waitUntil(done, input.yield_time_ms ?? 10_000, signal);
+      await waitUntil(
+        done,
+        input.yield_time_ms ?? COMMAND_YIELD_TIME_MS.default,
+        signal,
+      );
       return this.collect(session, started);
     } catch (error) {
       await this.terminate(session);

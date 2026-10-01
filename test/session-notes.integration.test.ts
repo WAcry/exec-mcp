@@ -399,7 +399,7 @@ describe.each([false, true])(
       expect(noteBlocks(response)).toEqual([
         {
           type: "text",
-          text: `用户额外补充：\n问题：Which database?\n选择：SQLite\n补充：${answer.note}`,
+          text: `用户额外补充：\nQuestion: Which database?\nSelected: SQLite\nNote: ${answer.note}`,
         },
         { type: "text", text: "用户额外补充：\n其他工作继续" },
       ]);
@@ -417,7 +417,7 @@ describe.each([false, true])(
       expect(noteBlocks(failed)).toEqual([
         {
           type: "text",
-          text: "用户额外补充：\n问题：How to roll out?\n选择：以上都不是\n补充：先做影子流量验证。",
+          text: "用户额外补充：\nQuestion: How to roll out?\nSelected: None of the above\nNote: 先做影子流量验证。",
         },
       ]);
       const detail = f.activity.getCalls({ tool: "request_user_input_async" });
@@ -436,7 +436,7 @@ describe.each([false, true])(
         ...nativeRequest("request_user_input_async", args),
       });
       expect(missing.isError).toBe(true);
-      expect(JSON.stringify(missing)).toContain("对话标识");
+      expect(JSON.stringify(missing)).toContain("conversation ID");
       const before = await f.api(`/api/sessions/${hashA}/questions`);
       expect((await before.json()).total).toBe(0);
       await f.web.close();
@@ -531,7 +531,7 @@ describe.each([false, true])(
       expect(noteBlocks(result)).toEqual([
         {
           type: "text",
-          text: "用户额外补充：\n问题：Keep compatibility?\n选择：Keep\n补充：Node 20 too.",
+          text: "用户额外补充：\nQuestion: Keep compatibility?\nSelected: Keep\nNote: Node 20 too.",
         },
       ]);
     });

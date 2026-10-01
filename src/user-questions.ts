@@ -22,7 +22,7 @@ export const REQUEST_USER_INPUT_SCHEMA = z
               .max(6)
               .refine(
                 (options) => new Set(options).size === options.length,
-                "同一问题的选项不能重复",
+                "The options of one question must all be different.",
               )
               .describe(
                 "Distinct suggested answers in display order. The first is marked recommended but not preselected. The UI adds 'None of the above' and a note field for every choice.",

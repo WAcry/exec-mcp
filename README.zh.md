@@ -154,4 +154,8 @@ npm run test:package
 具体调用示例见 [Code Mode 示例](docs/guides/code-mode-examples.zh.md)。
 
 未交付计划见 [Backlog](docs/backlog.zh.md)。
-本项目尚未授予公开开源许可，公共 npm 分发需另行确定许可与发布流程。
+
+## 许可证
+
+exec-mcp 采用 [Apache License 2.0](LICENSE) 许可。固定版本的 Codex 组件与 proto/ 中的协议保留各自的 Apache-2.0 声明，见 [proto/LICENSE](proto/LICENSE)。
+安装包尚未发布到 npm，公开分发需另行确定发布流程。

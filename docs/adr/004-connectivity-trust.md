@@ -121,9 +121,11 @@ and [ADR-002](002-tool-discovery.md) defines startup checks and failures.
 
 ## Versions and releases
 
-1.0.0 is the first stable version and currently runs from source builds. Public npm distribution still requires licensing, permissions, and a publication process.
+1.0.0 is the first stable version and currently runs from source builds. The repository uses Apache-2.0, the same license as the pinned Codex components
+and protocol ([proto/LICENSE](../../proto/LICENSE)), so one set of terms covers the source and its upstream attribution.
+The package stays private: true; public npm distribution still requires a package name, publishing permissions, and a publication process.
 CHANGELOG.md and CHANGELOG.zh.md record the same release entry. Adding an entry does not create a tag, GitHub Release, or npm publication.
-Change the version only on explicit user request. Changing private/UNLICENSED, choosing a license, creating a Release, or publishing a package
+Change the version only on explicit user request. Removing private, changing the license, creating a Release, or publishing a package
 requires separate authorization and validation. Deployment and restarting existing instances require their own authorization.
 
 Preserve existing configuration, credential formats, and runtime contracts. Supply migration steps when a later change affects compatibility.

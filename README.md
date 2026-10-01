@@ -156,4 +156,8 @@ Developers can read the [architecture](docs/architecture.md); coding agents shou
 See [Code Mode examples](docs/guides/code-mode-examples.md) for usage.
 
 Unshipped plans are in the [Backlog](docs/backlog.md).
-This project has not granted a public open-source license. Public npm distribution requires a separate licensing and release decision.
+
+## License
+
+exec-mcp is licensed under the [Apache License 2.0](LICENSE). The pinned Codex components and the protocol in proto/ keep their own Apache-2.0 notice in [proto/LICENSE](proto/LICENSE).
+The package is not published to npm yet; public distribution needs a separate release decision.

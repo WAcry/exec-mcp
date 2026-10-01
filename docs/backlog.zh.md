@@ -11,7 +11,8 @@
 Windows、macOS、Linux 共用这一方式，暂不提供额外的桌面安装器。
 1.0.0 当前通过源码构建使用，[README](../README.zh.md) 保留相应步骤。
 
-公开发布前需要确定许可、包名和发布权限，并验证从公共 registry 安装后的启动过程。
+项目采用 Apache-2.0 许可。公开发布前需要确定包名和发布权限，移除 "private": true，
+并验证从公共 registry 安装后的启动过程。
 现有 CI 已覆盖独立打包安装与跨平台执行，公共分发还需单独验证。
 
 Web 控制台、Cloudflare/Tailscale 接入及异步提问与通知已经交付，相关用法见 [README](../README.zh.md)。

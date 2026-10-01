@@ -11,7 +11,8 @@ No public npm package has been published. The plan is distribution through the p
 Windows, macOS, and Linux would share this approach without an additional desktop installer.
 Version 1.0.0 currently runs from a source build; the [README](../README.md) provides those steps.
 
-Before publication, decide licensing, package naming, and publishing permissions, and validate startup after installation from the public registry.
+The project uses the Apache-2.0 license. Before publication, decide the package name and publishing permissions, remove "private": true,
+and validate startup after installation from the public registry.
 CI already covers isolated package installation and cross-platform execution. Public distribution needs separate validation.
 
 The Web console, Cloudflare/Tailscale connections, asynchronous questions, and notifications have shipped. See the [README](../README.md) for usage.

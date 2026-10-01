@@ -2,7 +2,7 @@
 
 English | [简体中文](001-exec-runtime.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-10-01.
 
 ## Rationale
 
@@ -50,6 +50,9 @@ so callers must check its result. The service does not generate additional snaps
 TypeScript/Node handles MCP, configuration, downstream connections, and platform adaptation. JavaScript and patch execution reuse components
 from the same pinned Codex version, and MCP uses the official SDK. The integration excludes the full Codex App Server and model loop;
 it does not read the installed Codex configuration or database. Component upgrades are explicit dependency changes with contract validation.
+The [provenance record](../../proto/PROVENANCE.json) gives the upstream tag, commit, path, and SHA-256 of the Code Mode protocol copy, and tests check the copy against it.
+The binary locator reads codex-package.json and stops with a clear error when the layout, version, or target is not the expected one.
+An upgrade changes the version pin, the protocol copy, and its provenance record together.
 See the [Apache-2.0 text](../../proto/LICENSE) for the components and protocol. Retain licenses and NOTICE files shipped with dependencies.
 
 Windows, Linux, and macOS are product targets; Windows uses native execution.

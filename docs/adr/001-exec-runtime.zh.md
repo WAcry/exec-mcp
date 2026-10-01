@@ -2,7 +2,7 @@
 
 [English](001-exec-runtime.md) | 简体中文
 
-当前生效，2026-09-22 更新。
+当前生效，2026-10-01 更新。
 
 ## 选择原因
 
@@ -50,6 +50,9 @@ MCP 外层使用 source/workdir/files 对象，exec 内各方法保留自己的�
 TypeScript/Node 负责 MCP、配置、下游连接和平台适配。JavaScript 与补丁执行复用同一固定版本的
 Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Server 或模型循环，
 服务也不读取机器上 Codex 的配置与数据库。组件升级通过显式依赖更新，并验证调用契约。
+[来源记录](../../proto/PROVENANCE.json)写明 Code Mode 协议副本的上游 tag、commit、路径和 SHA-256，测试据此校验副本。
+二进制定位读取 codex-package.json，布局、版本或目标与预期不符时给出明确错误并停止。
+升级时，版本 pin、协议副本及其来源记录一并修改。
 Codex 组件及协议的许可见 [Apache-2.0 原文](../../proto/LICENSE)，依赖自带的许可证与 NOTICE 保留。
 
 Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。

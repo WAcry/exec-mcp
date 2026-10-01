@@ -29,6 +29,7 @@ Downloads use HTTPS without redirects. Direct connections pin validated public D
 under [ADR-008](008-environment-and-proxy.md). Signed URLs are used for downloading only and never enter JS, the tool catalog, persistent logs, or echoed results.
 
 Files stream first into a sibling temporary file, with length checking and a digest, then move into place. Existing files are preserved by default.
+Without overwrite, a hard link publishes the file. On file systems without hard links, an exclusive create and copy keeps the same guarantee.
 Overwrite, cancellation, or replacement failures may occur after some effects and require inspection of the actual state.
 Sources are limited to host-bound attachments. MCP ingress authentication authorizes calls; URL shape itself grants no authority.
 
@@ -63,6 +64,7 @@ Users configure a download tunnel or object storage. A failed private-resource d
 MCP binary resources use Base64, and the SDK may buffer entire responses. Resource mode therefore has its own size limit
 and a total concurrent-read byte limit. URL mode streams bytes for larger files.
 Snapshot quotas include management overhead to bound records from many empty files. Code and the configuration guide define numeric values.
+A snapshot keeps its quota until its file is actually removed. A failed removal is tried again by later sweeps and exports, and shutdown removes the private directory.
 Transfers have independent cancellation and total deadlines that may exceed one 110-second wait window.
 
 Validate the resource protocol, browser downloads, ChatGPT attachment presentation, and sandbox mounting separately.

@@ -28,7 +28,7 @@ function terminal(bufferBytes = 4096, idleMs?: number) {
   return value;
 }
 const marker =
-  /\n\[中间已省略 \d+ 字节；输出已滚动截断，不能通过后续读取恢复\]\n/g;
+  /\n\[\d+ bytes omitted from the middle; the output buffer rolled over and later reads cannot recover them\]\n/g;
 function plain(output: string) {
   return stripVTControlCharacters(output).replaceAll("\r\n", "\n");
 }
@@ -65,10 +65,10 @@ describe("real rolling terminal output, not output files", () => {
       expect(result.exit_code).toBe(0);
       expect(result.session_id).toBeUndefined();
       expect(output).not.toContain("\ufffd");
-      expect(output).toContain("已滚动截断");
+      expect(output).toContain("rolled over");
       await expect(
         value.writeStdin({ session_id: first.session_id! }),
-      ).rejects.toThrow("未知或已读完");
+      ).rejects.toThrow("Unknown terminal session");
     },
   );
   it("can stop a noisy process while another session continues producing readable progress", async () => {

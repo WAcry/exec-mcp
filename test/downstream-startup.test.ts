@@ -288,10 +288,10 @@ describe("complete downstream startup before readiness", () => {
     } catch (caught) {
       error = String(caught);
     }
-    expect(error).toContain("服务未就绪");
+    expect(error).toContain("exec-mcp is not ready");
     expect(error).toContain("auth-at-init");
     expect(error).toContain("auth-at-list");
-    expect(error).toContain("鉴权");
+    expect(error).toContain("authentication is missing or was rejected");
     expect(error).not.toMatch(
       /DO_NOT_ECHO|issuer.example.test|fixture-credential/,
     );
@@ -315,7 +315,7 @@ describe("complete downstream startup before readiness", () => {
     };
     const bad = await httpFixture("bad", { pages: [[invalid]] });
     await expect(start([bad.definition])).rejects.toThrow(
-      "无法校验工具输入契约",
+      "is not valid JSON Schema",
     );
     expect(bad.state.calls).toBe(0);
     const ordinary = await httpFixture("ordinary");
@@ -358,7 +358,7 @@ describe("complete downstream startup before readiness", () => {
       timeout: 700,
     });
     const began = Date.now();
-    await expect(start([fixture.definition])).rejects.toThrow("超时");
+    await expect(start([fixture.definition])).rejects.toThrow("it timed out");
     expect(Date.now() - began).toBeLessThan(2000);
     expect(fixture.state.lists).toBeLessThan(3);
   });
@@ -396,7 +396,7 @@ describe("discovery is a local snapshot, never a tool-unlock handshake", () => {
     expect(server.runtime.downstream.catalogErrors()).toEqual({});
     expect(fixture.state.requests).toBe(requests);
   });
-  it("can call a known method again after a disconnect without any preceding search", async () => {
+  it("sends a known call again after an expired session without any preceding search", async () => {
     const fixture = await httpFixture();
     const server = await start([fixture.definition]);
     const client = await clientFor(server.url);
@@ -409,19 +409,15 @@ describe("discovery is a local snapshot, never a tool-unlock handshake", () => {
       structuredContent: { generation: 1 },
     });
     fixture.state.generation = 2;
-    const failed = await run();
-    expect(failed.isError).toBe(true);
-    expect(fixture.state.calls).toBe(2);
-    const listings = fixture.state.lists;
-    expect(server.runtime.discovery.snapshot()).toHaveLength(1);
-    expect(server.runtime.downstream.catalogErrors().fixture).toBeTruthy();
-    expect(fixture.state.lists).toBe(listings);
     const recovered = await run();
     expect(recovered.isError).not.toBe(true);
     expect(jsonOutput(recovered)).toMatchObject({
       structuredContent: { generation: 2 },
     });
+    // The expired session answered 404 before running the first attempt.
     expect(fixture.state.calls).toBe(3);
     expect(fixture.state.initialized).toBe(2);
+    expect(server.runtime.discovery.snapshot()).toHaveLength(1);
+    expect(server.runtime.downstream.catalogErrors()).toEqual({});
   });
 });

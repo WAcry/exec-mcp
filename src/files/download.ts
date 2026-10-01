@@ -44,7 +44,7 @@ export function downloadUrl(value: string): URL {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("宿主文件地址无效。");
+    throw new Error("The download_url of the file is not valid.");
   }
   if (
     url.protocol !== "https:" ||
@@ -53,7 +53,9 @@ export function downloadUrl(value: string): URL {
     url.hash ||
     (url.port && url.port !== "443")
   )
-    throw new Error("宿主文件地址必须是无凭据、无片段的 HTTPS 443 地址。");
+    throw new Error(
+      "The download_url of the file must be an https URL on port 443 without a user name, password, or fragment.",
+    );
   return url;
 }
 export type DownloadResponse = Readable & { headers: IncomingHttpHeaders };
@@ -67,7 +69,11 @@ export type OpenDownload = (
  */
 export const publicLookup: LookupFunction = (hostname, options, callback) => {
   let completed = false;
-  const timer = setTimeout(() => finish(new Error("文件地址解析超时。")), 5000);
+  const timer = setTimeout(
+    () =>
+      finish(new Error("Resolving the host of the download_url timed out.")),
+    5000,
+  );
   timer.unref();
   function finish(
     error: Error | null,
@@ -86,10 +92,14 @@ export const publicLookup: LookupFunction = (hostname, options, callback) => {
         !addresses.length ||
         addresses.some((item) => !isPublicAddress(item.address))
       )
-        finish(new Error("宿主文件地址不得指向本机、私网或保留地址。"));
+        finish(
+          new Error(
+            "The download_url of the file must not point to this machine, a private network, or a reserved address.",
+          ),
+        );
       else finish(null, addresses);
     },
-    () => finish(new Error("无法解析宿主文件地址。")),
+    () => finish(new Error("Cannot resolve the host of the download_url.")),
   );
 };
 
@@ -99,12 +109,14 @@ export const openDownload: OpenDownload = async (value, signal) => {
   const url = downloadUrl(value);
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (isIP(host) && !isPublicAddress(host))
-    throw new Error("宿主文件地址不得指向本机、私网或保留地址。");
+    throw new Error(
+      "The download_url of the file must not point to this machine, a private network, or a reserved address.",
+    );
   const client = new EnvironmentHttpClient(process.env, {
     directLookup: publicLookup,
   });
   let failure =
-    "文件下载失败或取消（检查代理、地址和响应）；下载及代理凭据未回显，不直接重试。";
+    "The file download failed or was cancelled. Check the proxy settings and that the link has not expired. The download link and proxy credentials are not shown. The download was not retried.";
   try {
     const response = await client.get(url, signal);
     // Own abort/error events even when rejecting a response before a consumer attaches.
@@ -114,13 +126,15 @@ export const openDownload: OpenDownload = async (value, signal) => {
     response.body.once("end", cleanup);
     response.body.once("close", cleanup);
     response.body.once("error", cleanup);
-    if (
-      response.statusCode !== 200 ||
-      (response.headers["content-encoding"] &&
-        response.headers["content-encoding"] !== "identity")
-    ) {
+    const encoded =
+      response.headers["content-encoding"] &&
+      response.headers["content-encoding"] !== "identity";
+    if (response.statusCode !== 200 || encoded) {
       response.body.destroy();
-      failure = `文件下载被拒绝（HTTP ${response.statusCode}）；不跟随重定向。`;
+      failure =
+        response.statusCode !== 200
+          ? `The file download was refused (HTTP ${response.statusCode}). Redirects are not followed.`
+          : "The file download used a Content-Encoding, which exec-mcp does not accept. The file was not saved.";
       throw new Error(failure);
     }
     const body: DownloadResponse = Object.assign(response.body, {

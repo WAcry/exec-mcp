@@ -26,14 +26,17 @@ export async function discoverSkills(
   const enabled = await skillSelection(options.config ?? [], signal);
   const catalog: SkillCatalog = { skills: [], warnings: [] };
   const warn = (file: string, message: string) =>
-    catalog.warnings.push(`${JSON.stringify(file)}：${message}`);
+    catalog.warnings.push(`${JSON.stringify(file)}: ${message}`);
   const roots: string[] = [];
   if (options.workdir !== undefined) {
     try {
       roots.push(...(await projectRoots(options.workdir, signal)));
     } catch {
       signal?.throwIfAborted();
-      warn(options.workdir, "无法确认项目范围；仍列出用户级 Skills。");
+      warn(
+        options.workdir,
+        "Cannot confirm the project scope. User-level skills are still listed.",
+      );
     }
   }
   roots.push(
@@ -49,7 +52,7 @@ export async function discoverSkills(
       await lstat(root);
     } catch (error) {
       signal?.throwIfAborted();
-      if (!missing(error)) warn(root, "无法检查 Skill 根目录。");
+      if (!missing(error)) warn(root, "Cannot check the Skill root directory.");
       continue;
     }
     const queue = [root];
@@ -66,7 +69,7 @@ export async function discoverSkills(
         entries = await readdir(directory);
       } catch {
         signal?.throwIfAborted();
-        warn(candidate, "无法读取目录或软链接目标。");
+        warn(candidate, "Cannot read the directory or its symlink target.");
         continue;
       }
       entries.sort(compare);
@@ -82,7 +85,7 @@ export async function discoverSkills(
           target = await realpath(discovered);
         } catch {
           signal?.throwIfAborted();
-          warn(discovered, "无法解析 SKILL.md 的真实路径。");
+          warn(discovered, "Cannot resolve the real path of SKILL.md.");
           continue;
         }
         if (files.has(target)) continue;
@@ -96,14 +99,7 @@ export async function discoverSkills(
             target,
             typeof metadata.name === "string" ? metadata.name.trim() : "",
           );
-          if (
-            !options.includeDisabled &&
-            !enabled(
-              target,
-              typeof metadata.name === "string" ? metadata.name.trim() : "",
-            )
-          )
-            continue;
+          if (!options.includeDisabled && !selected) continue;
           if (
             typeof metadata.name !== "string" ||
             !metadata.name.trim() ||
@@ -150,7 +146,7 @@ export async function discoverSkills(
               implicit = false;
               warn(
                 policyPath,
-                "调用策略无法确认；仅用户明确要求使用时读取，不展示触发描述。",
+                "The invocation policy cannot be confirmed. Read this skill only when the user explicitly asks for it; its description is not shown.",
               );
             }
           }
@@ -167,7 +163,7 @@ export async function discoverSkills(
           if (!enabled(target, "")) continue;
           warn(
             target,
-            "SKILL.md 元数据不可读或无有效 name/description；未列出该 Skill。",
+            "The SKILL.md metadata cannot be read, or it has no valid name and description. This skill is not listed.",
           );
         }
         // A bundle is a leaf, even when malformed. Don't scan scripts/vendor/references.
@@ -185,7 +181,7 @@ export async function discoverSkills(
           }
         } catch {
           signal?.throwIfAborted();
-          warn(child, "无法检查条目或软链接目标。");
+          warn(child, "Cannot check the entry or its symlink target.");
         }
       }
     }

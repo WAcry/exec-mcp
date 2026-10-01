@@ -8,7 +8,8 @@ export type MemoryReader = (pid: number) => Promise<number>;
 
 /** Approximate resident memory of exactly one owned host, never its process tree. */
 export const readProcessMemory: MemoryReader = async (pid) => {
-  if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("进程标识无效。");
+  if (!Number.isSafeInteger(pid) || pid < 1)
+    throw new Error("The process ID is not valid.");
   try {
     let text: string;
     let multiplier = 1;
@@ -57,6 +58,8 @@ export const readProcessMemory: MemoryReader = async (pid) => {
     return bytes;
   } catch {
     // A missing/blocked measurement is not evidence of excessive memory usage.
-    throw new Error("无法读取 Code Mode host 内存；本次不进行压力回收。");
+    throw new Error(
+      "Could not read the Code Mode host memory, so no memory-pressure recovery runs this time.",
+    );
   }
 };

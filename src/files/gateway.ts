@@ -3,12 +3,13 @@ import type { AddressInfo } from "node:net";
 import { pipeline } from "node:stream/promises";
 import type { ArtifactStore } from "./artifacts.js";
 
-/** 与有执行权限的 MCP 入口分离；这里只接受显式导出的限时 bearer URL。 */
+/** Separate from the MCP endpoint that can run commands. It serves only explicit, time-limited exports by bearer URL. */
 export async function startDownloadGateway(
   store: ArtifactStore,
 ): Promise<{ address: string; close(): Promise<void> }> {
   const config = store.config.download;
-  if (!config) throw new Error("未配置下载入口。");
+  if (!config)
+    throw new Error("No download endpoint is configured (files.download).");
   const base = new URL(config.base_url);
   const prefix = base.pathname.replace(/\/+$/, "") + "/";
   let closing: Promise<void> | undefined;
@@ -143,5 +144,7 @@ function fail(response: ServerResponse, status: number): void {
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
   });
-  response.end("下载不存在、已过期或请求无效。");
+  response.end(
+    "The download does not exist, has expired, or the request is not valid.",
+  );
 }

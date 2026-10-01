@@ -229,6 +229,6 @@ describe("pinned freeform patch engine", () => {
     patches.push(runner);
     await expect(
       runner.apply("not a patch", await directory()),
-    ).rejects.toThrow("envelope");
+    ).rejects.toThrow('must start with "*** Begin Patch"');
   });
 });

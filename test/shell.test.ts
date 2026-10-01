@@ -122,7 +122,7 @@ describe("one configured shell per runtime", () => {
         { shell: "missing.exe" },
         { platform: "win32", env: {}, lookup: find.lookup },
       ),
-    ).toThrow("指定的 Shell");
+    ).toThrow("selected shell was not found");
     expect(find.calls).toEqual(["powershell.exe", "missing.exe"]);
   });
   it("selects the inherited Unix shell, then zsh on macOS or sh on Linux", () => {
@@ -161,7 +161,7 @@ describe("one configured shell per runtime", () => {
     ).toBe("/bin/sh");
     expect(() =>
       resolveShell({}, { platform: "linux", env: {}, lookup: () => undefined }),
-    ).toThrow("没有可用");
+    ).toThrow("No command shell is available");
   });
   it("rejects CMD, batch files and argument strings without running a command", () => {
     for (const shell of [
@@ -173,14 +173,14 @@ describe("one configured shell per runtime", () => {
     ])
       expect(() =>
         resolveShell({ shell }, { platform: "win32", lookup: (name) => name }),
-      ).toThrow("不支持");
+      ).toThrow("CMD and batch files");
     for (const shell of ["", " ", "file\0name"])
       expect(() => resolveShell({ shell }, { lookup: (name) => name })).toThrow(
-        "可执行文件",
+        "executable name or path",
       );
     expect(() =>
       resolveShell({ shell: "pwsh -NoProfile" }, { lookup: () => undefined }),
-    ).toThrow("找不到");
+    ).toThrow("was not found");
   });
   it("expands home paths but preserves their executable identity", () => {
     const result = resolveShell(
@@ -442,7 +442,7 @@ describe("independent per-command overrides", () => {
     if (process.platform !== "win32") await chmod(file, 0o755);
     const defaults = resolveShell();
     expect(() => resolveCommandShell(defaults, { shell: name }, root)).toThrow(
-      "指定的 Shell",
+      "selected shell was not found",
     );
     expect(
       resolveCommandShell(defaults, { shell: `./${path.basename(file)}` }, root)
@@ -450,9 +450,9 @@ describe("independent per-command overrides", () => {
     ).toBe(file);
     expect(() =>
       resolveCommandShell(defaults, { shell: "cmd.exe" }, root),
-    ).toThrow("不支持");
+    ).toThrow("CMD and batch files");
     expect(() =>
       resolveCommandShell(defaults, { shell: "pwsh -Command" }, root),
-    ).toThrow("指定的 Shell");
+    ).toThrow("selected shell was not found");
   });
 });

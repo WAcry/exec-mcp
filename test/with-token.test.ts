@@ -158,7 +158,7 @@ describe("CLI adapter for external token consumers", () => {
     });
     expect(result.code).not.toBe(0);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("损坏或版本不支持");
+    expect(result.stderr).toContain("is damaged or uses a version");
     expect(result.stderr).not.toContain("CORRUPT");
     expect(result.stderr).not.toContain("still-not-a-fallback");
     expect(await readFile(filename, "utf8")).toBe(

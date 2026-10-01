@@ -44,7 +44,7 @@ export const FILE_CONFIG_SCHEMA = z
           } catch {
             return false;
           }
-        }, "下载地址必须是不含凭据、查询或片段的 HTTPS 基址。"),
+        }, "base_url must be an https URL without a user name, password, query, or fragment."),
         port: z.number().int().min(0).max(65535).default(8892),
       })
       .strict()

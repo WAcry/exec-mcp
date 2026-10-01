@@ -1,14 +1,7 @@
-import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
 import {
   Client,
-  ProtocolError,
-  SdkError,
-  SdkErrorCode,
-  SdkHttpError,
-  UnauthorizedError,
-  StreamableHTTPClientTransport,
   type CallToolResult,
   type Implementation,
   type Tool,
@@ -16,12 +9,24 @@ import {
   type RequestOptions,
 } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { inheritedEnvironment } from "../environment.js";
+import { captureProcessTree } from "../host/platform.js";
 import { EnvironmentHttpClient } from "../network/http.js";
 
 import type { DownstreamTool, JsonObject } from "../types.js";
+import { abortError, throwIfAborted } from "../util.js";
 import { VERSION } from "../version.js";
 import type { DownstreamMcpServerConfig } from "./config.js";
+import {
+  definitelyNotSent,
+  disconnectedReason,
+  notSentError,
+  positiveInteger,
+  requestFailure,
+  SetupError,
+  setupError,
+  shouldDiscardConnection,
+  type DownstreamOperation,
+} from "./errors.js";
 import {
   listResourceCatalog,
   ResourceError,
@@ -29,15 +34,15 @@ import {
   type ResourceListInput,
   type ResourceReadInput,
 } from "./resources.js";
+import { decodeDownstreamToolId, describeTools } from "./tool-id.js";
+import { createTransport } from "./transport.js";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
 const MAX_LIST_PAGES = 100;
-const TOOL_ID_PREFIX = "mcp-id:v1:";
-const MAX_CODE_NAME_LENGTH = 128;
-const CODE_NAME_HASH_LENGTH = 12;
+const CANCELLED = "The downstream MCP operation was cancelled.";
 
 export interface DownstreamMcpRegistryOptions {
   readonly servers: readonly DownstreamMcpServerConfig[];
@@ -47,19 +52,12 @@ export interface DownstreamMcpRegistryOptions {
   readonly clientInfo?: Implementation;
 }
 
-export interface DownstreamMcpInventory {
-  readonly tools: readonly DownstreamTool[];
-  readonly errors: Readonly<Record<string, string>>;
-}
-
 export interface DownstreamStartupEvent {
   server: string;
   status: "connecting" | "ready" | "error";
   tools?: number;
   message?: string;
 }
-
-class SetupError extends Error {}
 
 interface ServerState {
   readonly config: DownstreamMcpServerConfig;
@@ -77,10 +75,12 @@ interface ServerState {
 }
 
 /**
- * Owns one official MCP client per configured downstream server.
+ * Owns one official MCP client per configured downstream server: connection,
+ * catalog, reconnection, and shutdown.
  *
- * Tool calls are never retried. A thrown error can follow a downstream side
- * effect, so callers receive an explicit indeterminate-outcome message.
+ * A request that may have reached the server is never retried, because it can
+ * have side effects. Only a request that provably did not reach it (not
+ * connected, or an expired HTTP session) is sent once more after reconnecting.
  */
 export class DownstreamMcpRegistry {
   private readonly definitions: ReadonlyMap<string, DownstreamMcpServerConfig>;
@@ -124,7 +124,9 @@ export class DownstreamMcpRegistry {
     const definitions = new Map<string, DownstreamMcpServerConfig>();
     for (const definition of options.servers) {
       if (definitions.has(definition.name)) {
-        throw new Error(`Duplicate downstream MCP server: ${definition.name}`);
+        throw new Error(
+          `Two downstream MCP servers have the name ${JSON.stringify(definition.name)}.`,
+        );
       }
       definitions.set(definition.name, definition);
     }
@@ -159,14 +161,8 @@ export class DownstreamMcpRegistry {
           });
         } catch (error) {
           if (signal?.aborted || this.lifecycleAbort.signal.aborted)
-            throw abortError(
-              signal?.reason ?? this.lifecycleAbort.signal.reason,
-            );
-          const message = startupError(
-            serverId,
-            "连接与工具发现",
-            error,
-          ).message;
+            throw abortError(CANCELLED);
+          const message = setupError(serverId, "connect", error).message;
           failed.push(message);
           notify({ server: serverId, status: "error", message });
         }
@@ -176,67 +172,26 @@ export class DownstreamMcpRegistry {
     throwIfAborted(signal);
     if (failed.length)
       throw new Error(
-        `下游 MCP 启动失败，服务未就绪：\n${failed.sort().join("\n")}\n请在本机完成登录或修正配置后重启；不使用的服务可设 enabled=false。`,
+        `Downstream MCP servers failed to start, so exec-mcp is not ready:\n${failed.sort().join("\n")}\nSign in or fix the configuration on this machine, then restart exec-mcp. Set enabled=false for servers you do not use.`,
       );
     // A server could disconnect while a slower sibling was still initializing.
     for (const name of this.definitions.keys())
-      if (!this.ready.has(name)) throw startupError(name, "启动期间连接已断开");
+      if (!this.ready.has(name))
+        throw new SetupError(
+          `Downstream MCP server ${JSON.stringify(name)}: the connection closed during startup. Check the server's diagnostics in the exec-mcp log, then restart exec-mcp.`,
+        );
   }
 
+  /** Last verified contracts of every server, sorted by tool ID. */
   public bindingSnapshot(): readonly DownstreamTool[] {
     return [...this.catalogs.values()]
       .flatMap((tools) => [...tools.values()])
       .sort((left, right) => left.id.localeCompare(right.id));
   }
 
+  /** The recorded reason for each server that is not ready. */
   public catalogErrors(): Record<string, string> {
     return Object.fromEntries(this.errors);
-  }
-
-  public async inventory(
-    signal?: AbortSignal,
-  ): Promise<DownstreamMcpInventory> {
-    this.assertOpen();
-    throwIfAborted(signal);
-    const errors: Record<string, string> = {};
-    await Promise.all(
-      [...this.definitions.keys()].map(async (serverId) => {
-        try {
-          const state = await this.ensureServer(serverId, signal);
-          if (state.lastRefreshError !== undefined) {
-            try {
-              await this.refreshTools(state, signal);
-            } catch {
-              // Keep the last complete catalog and report the refresh failure.
-            }
-          }
-          if (state.lastRefreshError !== undefined)
-            errors[serverId] = state.lastRefreshError;
-        } catch (error) {
-          if (signal?.aborted === true || this.lifecycleAbort.signal.aborted) {
-            throw abortError(
-              signal?.reason ?? this.lifecycleAbort.signal.reason,
-            );
-          }
-          errors[serverId] = startupError(
-            serverId,
-            "连接与工具发现",
-            error,
-          ).message;
-        }
-      }),
-    );
-
-    return {
-      tools: this.catalogSnapshot(),
-      errors,
-    };
-  }
-
-  public async listTools(
-    signal?: AbortSignal,
-  ): Promise<readonly DownstreamTool[]> {
-    return (await this.inventory(signal)).tools;
   }
 
   public async callTool(
@@ -249,71 +204,62 @@ export class DownstreamMcpRegistry {
     this.assertOpen();
     throwIfAborted(signal);
     const { serverId, toolName } = decodeDownstreamToolId(toolId);
-    let state: ServerState;
-    try {
-      state = await this.ensureServer(serverId, signal);
-      if (state.lastRefreshError !== undefined)
-        await this.refreshTools(state, signal);
-      await raceWithSignal(
-        state.refreshTail,
-        combinedSignal(this.lifecycleAbort.signal, signal),
+    for (let attempt = 0; ; attempt++) {
+      const timeout = positiveInteger(
+        timeoutMs,
+        this.definitions.get(serverId)?.toolTimeoutMs ?? this.toolTimeoutMs,
+        "timeoutMs",
       );
-    } catch {
-      if (signal?.aborted || this.lifecycleAbort.signal.aborted) {
-        throw abortError("下游连接准备已取消；未发送本次工具调用。");
-      }
-      throw new Error(
-        `下游 ${serverId} 的连接或工具目录不可用；未发送本次调用，请在本机检查连接、凭据并重启服务。`,
-      );
-    }
-    const descriptor = state.tools.get(toolName);
-    if (descriptor === undefined || descriptor.id !== toolId) {
-      throw new Error(
-        `工具已移除或目录过期：${serverId}/${toolName}；请在新的 exec 中读取目录。`,
-      );
-    }
-
-    if (
-      state.lastRefreshError !== undefined ||
-      (expected !== undefined && !isDeepStrictEqual(expected, descriptor.tool))
-    ) {
-      throw new Error(
-        "工具契约已变更或无法确认；尚未发送，请在新的 exec 中读取最新契约。",
-      );
-    }
-    const timeout = positiveInteger(
-      timeoutMs,
-      state.config.toolTimeoutMs ?? this.toolTimeoutMs,
-      "timeoutMs",
-    );
-    state.activeCalls += 1;
-    try {
-      return await state.client.callTool(
-        { name: toolName, arguments: args },
-        {
-          signal: combinedSignal(this.lifecycleAbort.signal, signal),
-          timeout,
-          maxTotalTimeout: timeout,
-          toolDefinition: descriptor.tool,
-        },
-      );
-    } catch (error) {
-      if (signal?.aborted === true || this.lifecycleAbort.signal.aborted) {
-        const aborted = new Error(
-          "下游 MCP 调用开始后被取消；操作可能已部分或全部生效，请先检查，不要自动重试。",
-          { cause: signal?.reason ?? this.lifecycleAbort.signal.reason },
+      const operation: DownstreamOperation = {
+        server: serverId,
+        method: "tools/call",
+        target: toolName,
+        mutating: true,
+        timeoutMs: timeout,
+      };
+      const state = await this.prepare(operation, signal, true);
+      const descriptor = state.tools.get(toolName);
+      if (descriptor === undefined || descriptor.id !== toolId) {
+        throw new Error(
+          `Tool ${JSON.stringify(toolName)} is no longer in the catalog of downstream MCP server ${JSON.stringify(serverId)}. The request was not sent. Read ALL_TOOLS again in a new exec call.`,
         );
-        aborted.name = "AbortError";
-        throw aborted;
       }
-      if (shouldDiscardConnection(error, state.transport))
-        this.markStale(state);
-      throw new Error(
-        `下游 MCP 调用失败：${serverId}/${toolName}；操作可能已部分或全部生效，未自动重试。`,
-      );
-    } finally {
-      state.activeCalls -= 1;
-      if (state.stale && state.activeCalls === 0) void this.closeState(state);
+      if (
+        state.lastRefreshError !== undefined ||
+        (expected !== undefined &&
+          !isDeepStrictEqual(expected, descriptor.tool))
+      ) {
+        throw new Error(
+          `The contract of tool ${JSON.stringify(toolName)} on downstream MCP server ${JSON.stringify(serverId)} changed or could not be confirmed. The request was not sent. Read the current contract from ALL_TOOLS in a new exec call.`,
+        );
+      }
+      state.activeCalls += 1;
+      try {
+        return await state.client.callTool(
+          { name: toolName, arguments: args },
+          {
+            signal: combinedSignal(this.lifecycleAbort.signal, signal),
+            timeout,
+            maxTotalTimeout: timeout,
+            toolDefinition: descriptor.tool,
+          },
+        );
+      } catch (error) {
+        if (signal?.aborted === true || this.lifecycleAbort.signal.aborted) {
+          throw abortError(
+            "The call was cancelled after the request was sent. The tool may have done part or all of its work; check its effects before you call again.",
+          );
+        }
+        const unsent = definitelyNotSent(error, state.transport);
+        if (unsent || shouldDiscardConnection(error, state.transport))
+          this.markStale(state);
+        // The server never saw this request, so one resend cannot repeat work.
+        if (unsent && attempt === 0) continue;
+        throw requestFailure(operation, error, { sent: !unsent });
+      } finally {
+        state.activeCalls -= 1;
+        if (state.stale && state.activeCalls === 0) void this.closeState(state);
+      }
     }
   }
 
@@ -360,7 +306,9 @@ export class DownstreamMcpRegistry {
       "resources/read",
       async (client, options) => {
         if (!client.getServerCapabilities()?.resources)
-          throw new ResourceError("该服务未声明 resources 能力。");
+          throw new ResourceError(
+            `Downstream MCP server ${JSON.stringify(input.server)} does not offer resources. Use its tools instead.`,
+          );
         const { _meta: _private, ...result } = await client.readResource(
           { uri: input.uri },
           { ...options, cacheMode: "bypass" },
@@ -370,6 +318,7 @@ export class DownstreamMcpRegistry {
         return value;
       },
       signal,
+      input.uri,
     );
   }
 
@@ -381,55 +330,94 @@ export class DownstreamMcpRegistry {
     method: string,
     operation: (client: Client, options: RequestOptions) => Promise<T>,
     signal?: AbortSignal,
+    target?: string,
   ): Promise<T> {
     this.assertOpen();
     throwIfAborted(signal);
-    if (!this.definitions.has(server))
+    const definition = this.definitions.get(server);
+    if (definition === undefined)
       throw new ResourceError(
-        `未知或未启用的下游 MCP 服务：${JSON.stringify(server)}。`,
+        `Unknown or disabled downstream MCP server: ${JSON.stringify(server)}. Use a server name from the list results.`,
       );
-    const state = await this.ensureServer(server, signal);
-    const timeout = state.config.toolTimeoutMs ?? this.toolTimeoutMs;
-    const deadline = AbortSignal.timeout(timeout);
-    const requestSignal = combinedSignal(
-      this.lifecycleAbort.signal,
-      signal,
-      deadline,
-    );
-    state.activeCalls++;
+    const timeout = definition.toolTimeoutMs ?? this.toolTimeoutMs;
+    const request: DownstreamOperation = {
+      server,
+      method,
+      ...(target === undefined ? {} : { target }),
+      mutating: false,
+      timeoutMs: timeout,
+    };
+    for (let attempt = 0; ; attempt++) {
+      const state = await this.prepare(request, signal, false);
+      const deadline = AbortSignal.timeout(timeout);
+      const requestSignal = combinedSignal(
+        this.lifecycleAbort.signal,
+        signal,
+        deadline,
+      );
+      state.activeCalls++;
+      try {
+        return await raceWithSignal(
+          operation(state.client, {
+            signal: requestSignal,
+            timeout,
+            maxTotalTimeout: timeout,
+          }),
+          requestSignal,
+        );
+      } catch (error) {
+        if (signal?.aborted || this.lifecycleAbort.signal.aborted)
+          throw abortError(
+            "The downstream MCP resource request was cancelled.",
+          );
+        if (error instanceof ResourceError) throw error;
+        const unsent = definitelyNotSent(error, state.transport);
+        if (unsent || shouldDiscardConnection(error, state.transport))
+          this.markStale(state);
+        if (unsent && attempt === 0) continue;
+        throw requestFailure(request, error, {
+          sent: !unsent,
+          timedOut: deadline.aborted,
+        });
+      } finally {
+        state.activeCalls--;
+        if (state.stale && state.activeCalls === 0) void this.closeState(state);
+      }
+    }
+  }
+
+  /**
+   * Connect (or reconnect) before sending. Every failure here happens before
+   * the request leaves this machine, so it reports the recorded reason.
+   */
+  private async prepare(
+    operation: DownstreamOperation,
+    signal: AbortSignal | undefined,
+    catalog: boolean,
+  ): Promise<ServerState> {
     try {
-      return await raceWithSignal(
-        operation(state.client, {
-          signal: requestSignal,
-          timeout,
-          maxTotalTimeout: timeout,
-        }),
-        requestSignal,
-      );
+      const state = await this.ensureServer(operation.server, signal);
+      if (catalog) {
+        if (state.lastRefreshError !== undefined)
+          await this.refreshTools(state, signal);
+        await raceWithSignal(
+          state.refreshTail,
+          combinedSignal(this.lifecycleAbort.signal, signal),
+        );
+      }
+      return state;
     } catch (error) {
       if (signal?.aborted || this.lifecycleAbort.signal.aborted)
-        throw abortError("下游 MCP 资源请求已取消。");
-      if (error instanceof ResourceError) throw error;
-      if (shouldDiscardConnection(error, state.transport))
-        this.markStale(state);
-      if (
-        deadline.aborted ||
-        (SdkError.isInstance(error) &&
-          error.code === SdkErrorCode.RequestTimeout)
-      )
-        throw new Error(
-          `下游 MCP ${JSON.stringify(server)} ${method} 超时；可调整 tool_timeout_sec。`,
+        throw abortError(
+          "The request was cancelled while the downstream connection was being prepared. It was not sent.",
         );
-      if (ProtocolError.isInstance(error))
-        throw new Error(
-          `下游 MCP ${JSON.stringify(server)} ${method} 被拒绝（协议错误 ${error.code}）；请核对资源 URI、游标及服务凭据。`,
-        );
-      throw new Error(
-        `下游 MCP ${JSON.stringify(server)} ${method} 失败；请检查连接和凭据，未自动重试。`,
+      throw notSentError(
+        operation,
+        error instanceof SetupError
+          ? error.message
+          : (this.errors.get(operation.server) ??
+              setupError(operation.server, "connect", error).message),
       );
-    } finally {
-      state.activeCalls--;
-      if (state.stale && state.activeCalls === 0) void this.closeState(state);
     }
   }
 
@@ -453,7 +441,9 @@ export class DownstreamMcpRegistry {
     this.assertOpen();
     const definition = this.definitions.get(serverId);
     if (definition === undefined)
-      throw new Error(`Unknown downstream MCP server: ${serverId}`);
+      throw new Error(
+        `Unknown downstream MCP server: ${JSON.stringify(serverId)}.`,
+      );
 
     let connection = this.connecting.get(serverId);
     if (connection === undefined) {
@@ -471,65 +461,65 @@ export class DownstreamMcpRegistry {
     config: DownstreamMcpServerConfig,
   ): Promise<ServerState> {
     let state: ServerState | undefined;
-    const connectTimeout = positiveInteger(
-      config.startupTimeoutMs,
-      this.connectTimeoutMs,
-      "startupTimeoutMs",
-    );
+    let attempt: Promise<void> | undefined;
     // One budget covers protocol negotiation, initialization and every list page.
+    const connectTimeout = config.startupTimeoutMs ?? this.connectTimeoutMs;
     const deadline = AbortSignal.timeout(connectTimeout);
-    const startupSignal = combinedSignal(this.lifecycleAbort.signal, deadline);
-    const client = new Client(this.clientInfo, {
-      listMaxPages: MAX_LIST_PAGES,
-      versionNegotiation: {
-        mode: "auto",
-        probe: { timeoutMs: connectTimeout },
-      },
-      // exec-mcp cannot complete a nested user-input round while it owns the
-      // outer ChatGPT tool call. Surface input_required as a call failure.
-      inputRequired: { autoFulfill: false },
-      listChanged: {
-        tools: {
-          autoRefresh: false,
-          debounceMs: 0,
-          onChanged: () => {
-            if (
-              state === undefined ||
-              !state.connected ||
-              state.stale ||
-              this.closed
-            )
-              return;
-            void this.refreshTools(state).catch(() => undefined);
+    try {
+      positiveInteger(connectTimeout, connectTimeout, "startupTimeoutMs");
+      const startupSignal = combinedSignal(
+        this.lifecycleAbort.signal,
+        deadline,
+      );
+      const client = new Client(this.clientInfo, {
+        listMaxPages: MAX_LIST_PAGES,
+        versionNegotiation: {
+          mode: "auto",
+          probe: { timeoutMs: connectTimeout },
+        },
+        // exec-mcp cannot complete a nested user-input round while it owns the
+        // outer ChatGPT tool call. Surface input_required as a call failure.
+        inputRequired: { autoFulfill: false },
+        listChanged: {
+          tools: {
+            autoRefresh: false,
+            debounceMs: 0,
+            onChanged: () => {
+              if (
+                state === undefined ||
+                !state.connected ||
+                state.stale ||
+                this.closed
+              )
+                return;
+              void this.refreshTools(state).catch(() => undefined);
+            },
           },
         },
-      },
-    });
-    const transport = createTransport(
-      config,
-      this.env,
-      config.transport === "stdio"
-        ? undefined
-        : (this.http ??= new EnvironmentHttpClient(this.env)),
-    );
-    state = {
-      config,
-      client,
-      transport,
-      tools: new Map(),
-      refreshTail: Promise.resolve(),
-      connected: false,
-      stale: false,
-      activeCalls: 0,
-    };
-    client.onclose = () => {
-      if (state !== undefined && state.connected && !state.stale)
-        this.markStale(state);
-    };
-    this.allStates.add(state);
+      });
+      const transport = createTransport(
+        config,
+        this.env,
+        config.transport === "stdio"
+          ? undefined
+          : (this.http ??= new EnvironmentHttpClient(this.env)),
+      );
+      state = {
+        config,
+        client,
+        transport,
+        tools: new Map(),
+        refreshTail: Promise.resolve(),
+        connected: false,
+        stale: false,
+        activeCalls: 0,
+      };
+      const current = state;
+      client.onclose = () => {
+        if (current.connected && !current.stale) this.markStale(current);
+      };
+      this.allStates.add(state);
 
-    let attempt: Promise<void> | undefined;
-    try {
       attempt = client.connect(transport, {
         signal: startupSignal,
         timeout: connectTimeout,
@@ -543,21 +533,22 @@ export class DownstreamMcpRegistry {
       if (instructions !== undefined)
         state.namespaceInstructions = instructions;
       await this.refreshTools(state, startupSignal);
-      if (this.closed) throw abortError(this.lifecycleAbort.signal.reason);
+      if (this.closed) throw abortError(CANCELLED);
       if (state.stale) throw new Error("disconnected during startup");
       this.ready.set(config.name, state);
       this.errors.delete(config.name);
       return state;
     } catch (error) {
-      this.markStale(state);
-      await this.closeState(state);
+      if (state !== undefined) {
+        this.markStale(state);
+        await this.closeState(state);
+      }
       // Await the SDK's negotiation cleanup, including its disposable stdio probe.
       await attempt?.catch(() => undefined);
-      if (this.lifecycleAbort.signal.aborted)
-        throw abortError(this.lifecycleAbort.signal.reason);
-      const failure = startupError(
+      if (this.lifecycleAbort.signal.aborted) throw abortError(CANCELLED);
+      const failure = setupError(
         config.name,
-        "连接与工具发现",
+        "connect",
         deadline.aborted ? deadline.reason : error,
       );
       this.errors.set(config.name, failure.message);
@@ -574,11 +565,7 @@ export class DownstreamMcpRegistry {
       .then(async () => {
         if (state.stale || this.closed)
           throw new Error("Downstream MCP connection is closed");
-        const timeout = positiveInteger(
-          state.config.startupTimeoutMs,
-          this.connectTimeoutMs,
-          "startupTimeoutMs",
-        );
+        const timeout = state.config.startupTimeoutMs ?? this.connectTimeoutMs;
         const deadline = AbortSignal.timeout(timeout);
         const requestSignal = combinedSignal(
           this.lifecycleAbort.signal,
@@ -602,10 +589,10 @@ export class DownstreamMcpRegistry {
         } catch (error) {
           if (signal?.aborted === true || this.lifecycleAbort.signal.aborted)
             throw error;
-          state.lastRefreshError = startupError(
+          state.lastRefreshError = setupError(
             state.config.name,
-            "获取工具目录",
-            error,
+            "catalog",
+            deadline.aborted ? deadline.reason : error,
           ).message;
           this.errors.set(state.config.name, state.lastRefreshError);
           if (shouldDiscardConnection(error, state.transport))
@@ -617,19 +604,6 @@ export class DownstreamMcpRegistry {
     return operation;
   }
 
-  public catalogSnapshot(): readonly DownstreamTool[] {
-    const tools = [...this.ready.values()]
-      .filter(
-        (state) =>
-          state.connected &&
-          !state.stale &&
-          state.lastRefreshError === undefined,
-      )
-      .flatMap((state) => [...state.tools.values()])
-      .sort((left, right) => left.id.localeCompare(right.id));
-    return tools;
-  }
-
   private markStale(state: ServerState): void {
     if (state.stale) return;
     state.stale = true;
@@ -638,10 +612,7 @@ export class DownstreamMcpRegistry {
       this.ready.delete(state.config.name);
       this.connecting.delete(state.config.name);
     }
-    this.errors.set(
-      state.config.name,
-      startupError(state.config.name, "连接已断开").message,
-    );
+    this.errors.set(state.config.name, disconnectedReason(state.config.name));
     if (state.activeCalls === 0) void this.closeState(state);
   }
 
@@ -649,6 +620,13 @@ export class DownstreamMcpRegistry {
     state.closePromise ??= (async () => {
       state.stale = true;
       state.connected = false;
+      // The SDK stops only its direct stdio child. Record the child's
+      // descendants first so wrappers such as npx cannot leave servers behind.
+      const pid =
+        state.transport instanceof StdioClientTransport
+          ? state.transport.pid
+          : null;
+      const tree = pid ? await captureProcessTree(pid) : undefined;
       try {
         await state.client.close();
       } catch {
@@ -661,110 +639,15 @@ export class DownstreamMcpRegistry {
       } catch {
         // Shutdown is best effort after the transport has failed.
       }
+      await tree?.reap();
       this.allStates.delete(state);
     })();
     return state.closePromise;
   }
 
   private assertOpen(): void {
-    if (this.closed) throw new Error("Downstream MCP registry is closed");
+    if (this.closed) throw new Error("The downstream MCP registry is closed.");
   }
-}
-
-export { DownstreamMcpRegistry as McpRegistry };
-
-export function encodeDownstreamToolId(
-  serverId: string,
-  toolName: string,
-): string {
-  if (serverId.length === 0 || toolName.length === 0) {
-    throw new Error("Downstream MCP server and tool names must not be empty");
-  }
-  return (
-    TOOL_ID_PREFIX +
-    Buffer.from(JSON.stringify([serverId, toolName]), "utf8").toString(
-      "base64url",
-    )
-  );
-}
-
-export function decodeDownstreamToolId(toolId: string): {
-  serverId: string;
-  toolName: string;
-} {
-  if (!toolId.startsWith(TOOL_ID_PREFIX))
-    throw new Error("Invalid downstream MCP tool id");
-  try {
-    const raw = Buffer.from(
-      toolId.slice(TOOL_ID_PREFIX.length),
-      "base64url",
-    ).toString("utf8");
-    const decoded: unknown = JSON.parse(raw);
-    if (
-      !Array.isArray(decoded) ||
-      decoded.length !== 2 ||
-      typeof decoded[0] !== "string" ||
-      decoded[0].length === 0 ||
-      typeof decoded[1] !== "string" ||
-      decoded[1].length === 0 ||
-      encodeDownstreamToolId(decoded[0], decoded[1]) !== toolId
-    ) {
-      throw new Error("invalid");
-    }
-    return { serverId: decoded[0], toolName: decoded[1] };
-  } catch {
-    throw new Error("Invalid downstream MCP tool id");
-  }
-}
-
-export function createDownstreamCodeName(
-  serverId: string,
-  toolName: string,
-): string {
-  const rawBase = `mcp__${serverId}__${toolName}`;
-  const sanitized = sanitizeCodeName(rawBase);
-  const unambiguous =
-    !serverId.includes("__") &&
-    !toolName.includes("__") &&
-    !serverId.endsWith("_") &&
-    !toolName.startsWith("_") &&
-    sanitized === rawBase &&
-    sanitized.length <= MAX_CODE_NAME_LENGTH;
-  if (unambiguous) return sanitized;
-
-  const suffix = `_${crypto
-    .createHash("sha256")
-    .update(serverId)
-    .update("\0")
-    .update(toolName)
-    .digest("hex")
-    .slice(0, CODE_NAME_HASH_LENGTH)}`;
-  const prefix = "mcp_h__";
-  const available = MAX_CODE_NAME_LENGTH - prefix.length - suffix.length;
-  return `${prefix}${sanitized.slice("mcp__".length, "mcp__".length + available)}${suffix}`;
-}
-
-function createTransport(
-  config: DownstreamMcpServerConfig,
-  environment: Environment,
-  http?: EnvironmentHttpClient,
-): Transport {
-  if (config.transport === "stdio") {
-    return new StdioClientTransport({
-      command: config.command,
-      args: [...config.args],
-      env: inheritedEnvironment(environment, config.env),
-      // stdio stdout belongs to MCP; diagnostics/login hints belong in the terminal.
-      stderr: "inherit",
-      ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
-    });
-  }
-  return new StreamableHTTPClientTransport(new URL(config.url), {
-    fetch: http!.fetch,
-    ...(Object.keys(config.headers).length === 0
-      ? {}
-      : { requestInit: { headers: { ...config.headers } } }),
-  });
 }
 
 async function listTools(
@@ -779,58 +662,6 @@ async function listTools(
     maxTotalTimeout: timeout,
   });
   return (await raceWithSignal(listing, signal)).tools;
-}
-
-function describeTools(
-  state: ServerState,
-  values: readonly Tool[],
-): ReadonlyMap<string, DownstreamTool> {
-  const tools = new Map<string, DownstreamTool>();
-  const seen = new Set<string>();
-  const enabled =
-    state.config.enabledTools === undefined
-      ? undefined
-      : new Set(state.config.enabledTools);
-  for (const value of values) {
-    if (seen.has(value.name)) {
-      throw new Error(
-        `MCP server "${state.config.name}" returned duplicate tool names`,
-      );
-    }
-    seen.add(value.name);
-    if (enabled !== undefined && !enabled.has(value.name)) continue;
-    const tool = structuredClone(value);
-    tools.set(value.name, {
-      id: encodeDownstreamToolId(state.config.name, value.name),
-      codeName: createDownstreamCodeName(state.config.name, value.name),
-      serverId: state.config.name,
-      ...(state.serverVersion === undefined
-        ? {}
-        : {
-            serverName: state.serverVersion.name,
-            ...(state.serverVersion.title === undefined
-              ? {}
-              : { serverTitle: state.serverVersion.title }),
-          }),
-      ...(state.namespaceInstructions === undefined
-        ? {}
-        : { namespaceInstructions: state.namespaceInstructions }),
-      tool,
-    });
-  }
-  for (const name of enabled ?? [])
-    if (!seen.has(name))
-      throw new SetupError(
-        `下游 MCP ${JSON.stringify(state.config.name)}：enabled_tools 中的 ${JSON.stringify(name)} 不在目录中；请修正配置。`,
-      );
-  return tools;
-}
-
-function sanitizeCodeName(value: string): string {
-  const sanitized = [...value]
-    .map((character) => (/[A-Za-z0-9_]/u.test(character) ? character : "_"))
-    .join("");
-  return sanitized.length === 0 ? "_" : sanitized;
 }
 
 function combinedSignal(
@@ -849,9 +680,9 @@ function raceWithSignal<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   if (signal === undefined) return promise;
-  if (signal.aborted) return Promise.reject(abortError(signal.reason));
+  if (signal.aborted) return Promise.reject(abortError(CANCELLED));
   return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => reject(abortError(signal.reason));
+    const onAbort = (): void => reject(abortError(CANCELLED));
     signal.addEventListener("abort", onAbort, { once: true });
     void promise.then(
       (value) => {
@@ -864,81 +695,4 @@ function raceWithSignal<T>(
       },
     );
   });
-}
-
-function shouldDiscardConnection(
-  error: unknown,
-  transport: Transport,
-): boolean {
-  if (error instanceof ProtocolError) return false;
-  // A legacy HTTP session can expire without closing the transport. Discard
-  // that session, but leave reconnecting to the next independent operation.
-  if (
-    SdkHttpError.isInstance(error) &&
-    error.status === 404 &&
-    transport.sessionId !== undefined
-  ) {
-    return true;
-  }
-  if (SdkError.isInstance(error)) {
-    return (
-      error.code === SdkErrorCode.NotConnected ||
-      error.code === SdkErrorCode.ConnectionClosed ||
-      error.code === SdkErrorCode.SendFailed
-    );
-  }
-  return error instanceof Error && error.name !== "AbortError";
-}
-
-function startupError(
-  serverId: string,
-  stage: string,
-  error?: unknown,
-): SetupError {
-  if (error instanceof SetupError) return error;
-  let detail = "请检查地址、启动命令、依赖和终端诊断";
-  if (
-    error instanceof UnauthorizedError ||
-    (SdkHttpError.isInstance(error) && [401, 403].includes(error.status)) ||
-    (SdkError.isInstance(error) &&
-      (error.code === SdkErrorCode.ClientHttpAuthentication ||
-        error.code === SdkErrorCode.ClientHttpForbidden))
-  )
-    detail =
-      "鉴权未完成或权限不足；请先在本机登录并配置下游凭据，ChatGPT 调用中不提供登录交互";
-  else if (
-    (error instanceof Error && error.name === "TimeoutError") ||
-    (SdkError.isInstance(error) && error.code === SdkErrorCode.RequestTimeout)
-  )
-    detail =
-      "超时；请检查终端诊断、完成登录，或调整 startup_timeout_sec 后重启";
-  else if (ProtocolError.isInstance(error))
-    detail =
-      "协议或工具目录被拒绝；若服务需要登录或用户输入，请先在本机完成，不在 ChatGPT 工具调用中交互";
-  return new SetupError(
-    `下游 MCP ${JSON.stringify(serverId)} ${stage}失败：${detail}。`,
-  );
-}
-
-function positiveInteger(
-  value: number | undefined,
-  fallback: number,
-  name: string,
-): number {
-  const resolved = value ?? fallback;
-  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return resolved;
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted === true) throw abortError(signal.reason);
-}
-
-function abortError(reason: unknown): Error {
-  void reason;
-  const error = new Error("Operation aborted");
-  error.name = "AbortError";
-  return error;
 }

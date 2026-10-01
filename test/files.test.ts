@@ -6,6 +6,7 @@ import {
   readdir,
   rm,
   stat,
+  chmod,
   symlink,
   truncate,
 } from "node:fs/promises";
@@ -99,7 +100,7 @@ describe("streaming file import", () => {
     await writeFile(path.join(dir, "input"), "old");
     const files = store(undefined, { download: async () => response("new") });
     await expect(files.importFile(reference, "input", dir)).rejects.toThrow(
-      "不覆盖",
+      "already exists",
     );
     expect(await readFile(path.join(dir, "input"), "utf8")).toBe("old");
     await files.importFile(reference, "input", dir, true);
@@ -133,7 +134,7 @@ describe("streaming file import", () => {
       } catch (error) {
         message = String(error);
       }
-      expect(message).toContain("导入失败");
+      expect(message).toContain("The file import failed");
       expect(message).not.toContain("PRIVATE_TEST_VALUE");
       expect(await readFile(path.join(dir, "input"), "utf8")).toBe("original");
       expect(await readdir(dir)).toEqual(["input"]);
@@ -162,7 +163,7 @@ describe("streaming file import", () => {
     );
     await ready;
     abort.abort();
-    await expect(operation).rejects.toThrow("取消");
+    await expect(operation).rejects.toThrow("cancelled");
     expect(await readdir(dir)).toEqual([]);
   });
   it("does no download on pre-cancel or oversized host metadata", async () => {
@@ -183,7 +184,7 @@ describe("streaming file import", () => {
     ).rejects.toThrow();
     await expect(
       files.importFile({ ...reference, size: 5 }, "input", dir),
-    ).rejects.toThrow("大小限制");
+    ).rejects.toThrow("transfer limit");
     expect(calls).toBe(0);
   });
 });
@@ -222,18 +223,20 @@ describe("private export snapshots", () => {
     const exported = await files.exportFile("file.txt", dir, "owner");
     await expect(
       files.readResource(exported.info.uri, "another"),
-    ).rejects.toThrow("不属于");
+    ).rejects.toThrow("belongs to another conversation");
     expect((await files.readResource(exported.info.uri)).contents).toHaveLength(
       1,
     );
     await expect(files.revoke(exported.info.id, "another")).rejects.toThrow(
-      "不属于",
+      "belongs to another conversation",
     );
-    await expect(files.revoke(exported.info.id)).rejects.toThrow("不属于");
+    await expect(files.revoke(exported.info.id)).rejects.toThrow(
+      "belongs to another conversation",
+    );
     await files.revoke(exported.info.id, "owner");
     await expect(
       files.readResource(exported.info.uri, "owner"),
-    ).rejects.toThrow("失效");
+    ).rejects.toThrow("has expired");
   });
   it("expires exports and does not transfer handles between service instances", async () => {
     let now = 1000;
@@ -243,10 +246,12 @@ describe("private export snapshots", () => {
     const other = store();
     const exported = await files.exportFile("file", dir);
     await expect(other.readResource(exported.info.uri)).rejects.toThrow(
-      "不存在",
+      "does not exist",
     );
     now = 2001;
-    await expect(files.readResource(exported.info.uri)).rejects.toThrow("失效");
+    await expect(files.readResource(exported.info.uri)).rejects.toThrow(
+      "has expired",
+    );
   });
   it("reserves snapshot space under concurrent exports and reclaims it on revocation", async () => {
     const dir = await directory();
@@ -262,20 +267,49 @@ describe("private export snapshots", () => {
     await files.revoke(item.value.info.id);
     expect((await files.exportFile("file", dir)).info.size).toBe(4);
   });
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "keeps the space of a snapshot that could not be removed, and removes it on the next export",
+    async () => {
+      const dir = await directory();
+      await writeFile(path.join(dir, "file"), "data");
+      const files = store(
+        { max_export_bytes: 4100 },
+        { temporaryDirectory: dir },
+      );
+      const first = await files.exportFile("file", dir);
+      const root = path.join(
+        dir,
+        (await readdir(dir)).find((name) =>
+          name.startsWith("exec-mcp-files-"),
+        )!,
+      );
+      await chmod(root, 0o500);
+      try {
+        expect(await files.revoke(first.info.id)).toEqual({ revoked: true });
+        await expect(files.exportFile("file", dir)).rejects.toThrow(
+          "files.max_export_bytes",
+        );
+      } finally {
+        await chmod(root, 0o700);
+      }
+      expect((await files.exportFile("file", dir)).info.size).toBe(4);
+      expect(await readdir(root)).toHaveLength(1);
+    },
+  );
   it("rejects directories, unsafe names and unconfigured public delivery", async () => {
     const dir = await directory();
     await writeFile(path.join(dir, "file"), "data");
     const files = store();
-    await expect(files.exportFile(dir, dir)).rejects.toThrow("普通文件");
+    await expect(files.exportFile(dir, dir)).rejects.toThrow("regular file");
     await expect(
       files.exportFile("file", dir, undefined, "resource", "../bad"),
-    ).rejects.toThrow("文件名");
+    ).rejects.toThrow("file name is not valid");
     await expect(
       files.exportFile("file", dir, undefined, "resource", "bad\r\nHeader"),
-    ).rejects.toThrow("文件名");
+    ).rejects.toThrow("file name is not valid");
     await expect(
       files.exportFile("missing", dir, undefined, "url"),
-    ).rejects.toThrow("未配置");
+    ).rejects.toThrow("No download endpoint is configured");
   });
   it.skipIf(process.platform === "win32")(
     "refuses source symlinks",
@@ -335,10 +369,10 @@ describe("file ingress and download request validation", () => {
   it("rejects local addresses without establishing a download connection", async () => {
     await expect(
       openDownload("https://127.0.0.1/x", new AbortController().signal),
-    ).rejects.toThrow("私网");
+    ).rejects.toThrow("private network");
     await expect(
       openDownload("https://[::1]/x", new AbortController().signal),
-    ).rejects.toThrow("私网");
+    ).rejects.toThrow("private network");
   });
   it("requires an explicit HTTPS download base without inline credentials", () => {
     for (const base_url of [

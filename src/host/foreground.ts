@@ -27,22 +27,10 @@ export async function runForeground(
   let stop: Promise<void> | undefined;
   const abort = () => {
     if (!child.pid || closed || stop) return;
-    const pid = child.pid;
-    stop = (async () => {
-      await terminateProcessTree(pid);
-      let timer: NodeJS.Timeout | undefined;
-      try {
-        await Promise.race([
-          exited,
-          new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, 3000);
-          }),
-        ]);
-      } finally {
-        if (timer) clearTimeout(timer);
-      }
-      if (!closed) await terminateProcessTree(pid, true);
-    })();
+    stop = terminateProcessTree(child.pid, exited, {
+      graceMs: 3000,
+      confirmMs: 0,
+    }).then(() => undefined);
     void stop.catch(() => undefined);
   };
   options.signal?.addEventListener("abort", abort, { once: true });
@@ -56,12 +44,16 @@ export async function runForeground(
             options.onStarted?.();
           } catch {
             abort();
-            reject(new Error("客户端启动回调失败。"));
+            reject(new Error("The client start callback failed."));
           }
         }
       });
       child.once("error", () =>
-        reject(new Error("客户端启动失败；请检查可执行文件和权限。")),
+        reject(
+          new Error(
+            "The client failed to start. Check the executable path and its permissions.",
+          ),
+        ),
       );
       child.once("close", (code, signal) => resolve({ code, signal }));
     });

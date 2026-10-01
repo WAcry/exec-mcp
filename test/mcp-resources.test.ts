@@ -126,7 +126,7 @@ async function fixture(name = "docs", resources = true) {
         reply({
           error: {
             code: -32002,
-            message: "PRIVATE_PROVIDER_KEY must not appear in model errors",
+            message: "Provider failure while listing",
           },
         });
       }
@@ -232,13 +232,13 @@ describe("MCP resource protocol bridge", () => {
     });
     await expect(
       r.readResource({ server: "tool-only", uri: "file:///etc/passwd" }),
-    ).rejects.toThrow("未声明 resources");
+    ).rejects.toThrow("does not offer resources");
     await expect(r.listResources({ server: "disabled" })).rejects.toThrow(
-      "未启用",
+      "Unknown or disabled downstream MCP server",
     );
     await expect(
       r.readResource({ server: "TOOL-ONLY", uri: "https://example.test" }),
-    ).rejects.toThrow("未启用");
+    ).rejects.toThrow("Unknown or disabled downstream MCP server");
     expect(f.resourceRequests()).toEqual([]);
     expect(f.state.initialized).toBe(1);
     await r.listResources({ server: "tool-only" });
@@ -293,12 +293,13 @@ describe("MCP resource protocol bridge", () => {
     expect(result.resources).toHaveLength(2);
     expect(result.resources.every((row) => row.server === "good")).toBe(true);
     expect(result.errors).toEqual({
-      broken: expect.stringContaining("协议错误 -32002"),
+      broken: expect.stringContaining(
+        "returned an error for resources/list (MCP error -32002: Provider failure while listing)",
+      ),
     });
-    expect(JSON.stringify(result)).not.toContain("PRIVATE_PROVIDER_KEY");
     await expect(
       r.listResources({ server: "broken", cursor: nextCursor }),
-    ).rejects.toThrow("协议错误 -32002");
+    ).rejects.toThrow("MCP error -32002: Provider failure while listing");
     expect(broken.state.initialized).toBe(1);
   });
 
@@ -332,13 +333,17 @@ describe("MCP resource protocol bridge", () => {
     expect(single.nextCursor).toBe("");
     await r.listResources({ server: "docs", cursor: "" });
     expect(f.resourceRequests().at(-1)!.params?.cursor).toBe("");
-    expect((await r.listResources({})).errors?.docs).toContain("游标重复");
+    expect((await r.listResources({})).errors?.docs).toContain(
+      "same nextCursor twice",
+    );
     f.state.list = async (_method, cursor) => ({
       resources: [],
       nextCursor: String(Number(cursor ?? 0) + 1),
     });
     const before = f.resourceRequests().length;
-    expect((await r.listResources({})).errors?.docs).toContain("100 页");
+    expect((await r.listResources({})).errors?.docs).toContain(
+      "more than 100 pages",
+    );
     expect(f.resourceRequests().length - before).toBe(100);
     expect(f.state.initialized).toBe(1);
   });
@@ -353,19 +358,17 @@ describe("MCP resource protocol bridge", () => {
     f.state.delayMs = 200;
     const result = await r.listResources({});
     expect(result.resources).toEqual([]);
-    expect(result.errors?.docs).toContain("超时");
+    expect(result.errors?.docs).toContain(
+      "did not answer resources/list within 0.3 s",
+    );
     expect(f.resourceRequests()).toHaveLength(2);
   });
 
-  it("can reconnect on the next resource request without searching tools or replaying the failed read", async () => {
+  it("reconnects and reads again once when the HTTP session expired, without searching tools", async () => {
     const f = await fixture();
     const r = await registry(f);
     await r.readResource({ server: "docs", uri: "memo://one" });
     f.state.generation++;
-    await expect(
-      r.readResource({ server: "docs", uri: "memo://one" }),
-    ).rejects.toThrow("失败");
-    expect(f.resourceRequests()).toHaveLength(2);
     const restored = await r.readResource({
       server: "docs",
       uri: "memo://one",

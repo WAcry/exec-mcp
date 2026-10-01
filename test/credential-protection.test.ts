@@ -149,7 +149,7 @@ describe("lightweight token-file protection", () => {
     for (const value of values) {
       await writeFile(target, value);
       expect(() => readTokenFile(target, "fixture")).toThrow(
-        "损坏或版本不支持",
+        "is damaged or uses a version",
       );
       expect(await readFile(target, "utf8")).toBe(value);
     }
@@ -164,14 +164,16 @@ describe("lightweight token-file protection", () => {
     await writeFile(target, largest + "x");
     expect(() => readTokenFile(target, "fixture")).toThrow("64 KiB");
     await writeFile(target, Buffer.from([0xff, 0xfe, 0, 0]));
-    expect(() => readTokenFile(target, "fixture")).toThrow("普通 token 文件");
+    expect(() => readTokenFile(target, "fixture")).toThrow(
+      "regular token file",
+    );
   });
   it.each(["sync", "rename"] as const)(
     "leaves the original file intact and no temporary files on %s failure",
     async (stage) => {
       const { root, target } = await file();
       fault.stage = stage;
-      expect(() => readTokenFile(target, "fixture")).toThrow("无法保存");
+      expect(() => readTokenFile(target, "fixture")).toThrow("Cannot save");
       let message = "";
       try {
         readTokenFile(target, "fixture");
@@ -188,7 +190,7 @@ describe("lightweight token-file protection", () => {
     const { root, target } = await file();
     fault.stage = "rotation";
     fault.target = target;
-    expect(() => readTokenFile(target, "fixture")).toThrow("无法保存");
+    expect(() => readTokenFile(target, "fixture")).toThrow("Cannot save");
     expect(await readFile(target, "utf8")).toBe("newer-token-from-user");
     expect(await readdir(root)).toEqual(["token.txt"]);
     fault.stage = "";
@@ -230,7 +232,7 @@ describe("lightweight token-file protection", () => {
     async () => {
       const { target } = await file();
       await chmod(target, 0o400);
-      expect(() => readTokenFile(target, "fixture")).toThrow("无法保存");
+      expect(() => readTokenFile(target, "fixture")).toThrow("Cannot save");
       expect(await readFile(target, "utf8")).toBe(token);
       await chmod(target, 0o600);
       readTokenFile(target, "fixture");

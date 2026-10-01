@@ -33,7 +33,7 @@ export class EnvironmentHttpClient {
       });
     } catch {
       throw new Error(
-        "HTTP 代理配置无效；请检查 HTTP_PROXY/HTTPS_PROXY，代理凭据未回显。",
+        "The HTTP proxy settings are not valid. Check HTTP_PROXY, HTTPS_PROXY, and NO_PROXY. Proxy credentials are not shown.",
       );
     }
   }
@@ -43,7 +43,7 @@ export class EnvironmentHttpClient {
     init?: RequestInit,
   ): Promise<Response> => {
     if (this.#closing)
-      return Promise.reject(new Error("HTTP 网络客户端已关闭。"));
+      return Promise.reject(new Error("The HTTP client is closed."));
     // The dispatcher interface is supported by Node 20's fetch as well as 22/24.
     const options: RequestInit & { dispatcher: Dispatcher } = {
       ...init,
@@ -54,7 +54,7 @@ export class EnvironmentHttpClient {
 
   get(url: URL, signal: AbortSignal) {
     if (this.#closing)
-      return Promise.reject(new Error("HTTP 网络客户端已关闭。"));
+      return Promise.reject(new Error("The HTTP client is closed."));
     return request(url, {
       dispatcher: this.#agent,
       method: "GET",

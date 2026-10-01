@@ -30,7 +30,7 @@ export const RESOURCE_LIST_SCHEMA = z
   .strict()
   .refine(
     (value) => value.cursor === undefined || value.server !== undefined,
-    "cursor 必须与 server 一起提供",
+    "cursor requires server. Pass the server whose list returned this cursor.",
   );
 export const RESOURCE_READ_SCHEMA = z
   .object({
@@ -72,7 +72,7 @@ export function resourceResultBytes(value: unknown): number {
   const bytes = Buffer.byteLength(JSON.stringify(value));
   if (bytes > MAX_PAYLOAD_BYTES)
     throw new ResourceError(
-      `MCP 资源结果超过 ${MAX_PAYLOAD_BYTES / 1024 / 1024} MiB 传输上限，未截断或落盘；目录可指定 server 并分页读取。`,
+      `The MCP resource result is larger than the ${MAX_PAYLOAD_BYTES / 1024 / 1024} MiB transfer limit, so it was not returned. To list a catalog, pass server and read it one page at a time.`,
     );
   return bytes;
 }
@@ -87,7 +87,9 @@ export async function listResourceCatalog<K extends CatalogKey>(
   useClient: UseResourceClient,
 ): Promise<ResourceCatalog<K>> {
   if (input.cursor !== undefined && input.server === undefined)
-    throw new Error("cursor 必须与 server 一起提供。");
+    throw new Error(
+      "cursor requires server. Pass the server whose list returned this cursor.",
+    );
   const list = (server: string, allPages: boolean) =>
     useClient(server, async (client, options) => {
       const items: (Catalogs[K] & { server: string })[] = [];
@@ -116,7 +118,7 @@ export async function listResourceCatalog<K extends CatalogKey>(
         bytes += resourceResultBytes(page);
         if (bytes > MAX_PAYLOAD_BYTES)
           throw new ResourceError(
-            "资源目录超过传输上限；请指定 server 并分页读取。",
+            "The resource catalog is larger than the transfer limit. Pass server and read it one page at a time with cursor.",
           );
         const rows = page[key] as Catalogs[K][];
         for (const row of rows) items.push({ ...row, server });
@@ -127,12 +129,14 @@ export async function listResourceCatalog<K extends CatalogKey>(
             ...(nextCursor === undefined ? {} : { nextCursor }),
           } as ResourcePage<K>;
         if (seen.has(nextCursor))
-          throw new ResourceError("资源目录的分页游标重复。");
+          throw new ResourceError(
+            "The server returned the same nextCursor twice while listing its resource catalog. Pass server and read one page at a time.",
+          );
         seen.add(nextCursor);
         cursor = nextCursor;
       }
       throw new ResourceError(
-        `资源目录超过 ${MAX_RESOURCE_LIST_PAGES} 页；请指定 server 并分页读取。`,
+        `The resource catalog has more than ${MAX_RESOURCE_LIST_PAGES} pages. Pass server and read one page at a time with cursor.`,
       );
     });
   if (input.server !== undefined)

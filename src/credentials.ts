@@ -178,15 +178,17 @@ export function readTokenFile(filename: string, field: string): string {
       }
       const detail =
         stage === "decode"
-          ? "加密 token 文件损坏或版本不支持；请使用兼容版本或用新明文 token 覆盖原文件。"
+          ? "The encrypted token file is damaged or uses a version that this release does not support. Use a compatible release, or replace the file with a new plain-text token."
           : stage === "protect"
-            ? "无法保存 token 文件的轻量加密；请确认文件及所在目录可写，或稍后重试。未回退使用明文。"
-            : "必须是可读、非空的普通 token 文件；明文最多 64 KiB。";
+            ? "Cannot save the encrypted form of the token file. Make sure that the file and its directory are writable, or try again later. The plain-text token was not used instead."
+            : "It must be a readable, non-empty regular token file. A plain-text token can be at most 64 KiB.";
       const reason =
         typeof code === "string" && /^E[A-Z0-9_]{1,30}$/.test(code)
-          ? `（${code}）`
+          ? ` Error code: ${code}.`
           : "";
-      throw new Error(`${field}：${detail}${reason}凭据未回显。`);
+      throw new Error(
+        `${field}: ${detail}${reason} The credential is not shown.`,
+      );
     }
   }
 }

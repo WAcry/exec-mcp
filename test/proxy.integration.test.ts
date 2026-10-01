@@ -54,7 +54,8 @@ describe("proxy settings across actual execution paths", () => {
       ],
     });
     close.push(() => registry.close());
-    const tools = await registry.listTools();
+    await registry.initialize();
+    const tools = registry.bindingSnapshot();
     expect(tools).toHaveLength(1);
     expect(await registry.callTool(tools[0]!.id)).toMatchObject({
       content: [{ type: "text", text: "PROXIED_MCP_RESULT" }],
@@ -122,7 +123,7 @@ describe("proxy settings across actual execution paths", () => {
     );
     const output = JSON.parse(run.stdout);
     expect(output.files).toEqual([]);
-    expect(output.error).toContain("导入失败");
+    expect(output.error).toContain("The file import failed");
     expect(output.error).not.toContain("PRIVATE_TEST");
     expect(proxy.calls).toHaveLength(1);
     expect(directHits).toBe(0);
@@ -231,7 +232,8 @@ serveStdio(()=>{const server=new Server({name:'proxied-child',version:'1'},{capa
       ],
     });
     close.push(() => registry.close());
-    const tools = await registry.listTools();
+    await registry.initialize();
+    const tools = registry.bindingSnapshot();
     expect(await registry.callTool(tools[0]!.id)).toMatchObject({
       structuredContent: { body: "child-via-proxy", env: "synthetic-key" },
     });

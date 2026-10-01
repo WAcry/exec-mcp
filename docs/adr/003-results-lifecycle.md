@@ -37,6 +37,12 @@ Buffers are bounded at receipt, independently for each session, so a noisy termi
 Callers explicitly redirect to files when they need complete logs or data. Users manage generated file sizes and disk quotas.
 
 Exited terminals that remain unread can expire. Running processes remain retained.
+Two shared limits bound all terminals together: a session count and a total budget for unread output.
+When a limit is reached, finished sessions that nobody is reading are released first, oldest first.
+If unread output still exceeds the budget, the oldest unread tail of running sessions is dropped, starting with the session that produced the new output,
+and the omission is reported like any other. A limit never stops a running process: Codex caps its processes at 64 too,
+but stopping a user's process could interrupt work that has side effects. When only running sessions fill a limit,
+exec_command fails with an error that names the setting and tells the caller to read or terminate sessions.
 OS pipes, PTYs, and in-flight copies use additional memory, so the terminal capacity applies only to logs retained by this service.
 
 ## Cells, terminals, and waiting

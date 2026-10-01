@@ -212,7 +212,7 @@ describe.each([false, true])(
         'await tools.mcp__fixture__fixture_79({value:"invalid"});',
       );
       expect(invalid.isError).toBe(true);
-      expect(JSON.stringify(invalid)).toContain("未发送调用");
+      expect(JSON.stringify(invalid)).toContain("The request was not sent");
     });
 
     it("keeps metadata and bindings on an executing cell's snapshot; the next exec sees catalog updates", async () => {
@@ -287,13 +287,15 @@ describe.each([false, true])(
         body.tools.map(({ name, description }) => ({ name, description })),
       ).toEqual(expected);
       vi.spyOn(s.server.runtime.downstream, "catalogErrors").mockReturnValue({
-        fixture: "连接已断开；目录保留上次快照。",
+        fixture:
+          'Downstream MCP server "fixture": the connection closed. The next call reconnects.',
       });
       const disconnected = await fetch(
         new URL("api/mcp-servers", s.console!.loopbackUrl),
       );
       expect((await disconnected.json()).errors).toEqual({
-        fixture: "连接已断开；目录保留上次快照。",
+        fixture:
+          'Downstream MCP server "fixture": the connection closed. The next call reconnects.',
       });
       const response = await fetch(
         new URL("api/mcp-servers/test-search", s.console!.loopbackUrl),

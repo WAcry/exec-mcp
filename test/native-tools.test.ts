@@ -295,7 +295,7 @@ describe.each([false, true])(
       const implicit = await t.exec("text(await tools.list_skills({}));");
       expect(texts(explicit).join("\n")).toContain("native-entry");
       const directoryText = texts(explicit).find((text) =>
-        text.includes("Skill 目录"),
+        text.includes("Skill catalog"),
       )!;
       expect(texts(implicit)).toContain(directoryText);
     });

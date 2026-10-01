@@ -98,19 +98,19 @@ export function resolveShell(
       /\.(cmd|bat)$/i.test(file)
     )
       throw new Error(
-        "Shell 不支持 CMD 或批处理入口；请指定 Shell 可执行文件。",
+        "CMD and batch files cannot be the shell. Set shell to a shell executable such as pwsh, powershell, bash, or sh.",
       );
   };
   const selected = config.shell;
   let file: string | undefined;
   if (selected !== undefined) {
     if (!selected.trim() || selected.includes("\0"))
-      throw new Error("Shell 必须是可执行文件名或路径。");
+      throw new Error("shell must be an executable name or path.");
     rejectBatch(selected);
     file = lookup(expand(selected));
     if (!file)
       throw new Error(
-        "找不到或无法执行指定的 Shell；请检查路径与服务的 PATH。",
+        "The selected shell was not found or cannot run. Check the path, or use an executable name on the service PATH.",
       );
   } else {
     const candidates: string[] = [];
@@ -145,7 +145,9 @@ export function resolveShell(
       if (file) break;
     }
     if (!file)
-      throw new Error("没有可用的命令 Shell；请配置 execution.shell。");
+      throw new Error(
+        "No command shell is available. Set execution.shell in config.toml.",
+      );
   }
   rejectBatch(file);
   const basename = paths

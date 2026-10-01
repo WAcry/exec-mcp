@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { RollingOutputBuffer } from "../src/host/output-buffer.js";
 
 const marker =
-  /\n\[中间已省略 \d+ 字节；输出已滚动截断，不能通过后续读取恢复\]\n/g;
+  /\n\[\d+ bytes omitted from the middle; the output buffer rolled over and later reads cannot recover them\]\n/g;
 function raw(output: string): string {
   return output.replace(marker, "");
 }
@@ -43,7 +43,7 @@ describe("bounded oldest-prefix/newest-tail output", () => {
       omitted_bytes: input.length - 1024,
     });
     expect(raw(result.output)).toBe(input.slice(0, 64) + input.slice(-960));
-    expect(result.output).toContain("不能通过后续读取恢复");
+    expect(result.output).toContain("later reads cannot recover them");
     expect(buffer.pending).toBe(false);
   });
   it("rolls forward for unlimited writes, preserving the first unread prefix", () => {
@@ -97,7 +97,7 @@ describe("bounded oldest-prefix/newest-tail output", () => {
     const second = buffer.read(256);
     expect(second).toEqual({ output: "H".repeat(256) });
     const last = drain(buffer, 4096);
-    expect(last.output.startsWith("\n[中间已省略")).toBe(true);
+    expect(last.output).toMatch(/^\n\[\d+ bytes omitted/);
     expect(raw(last.output)).toBe("T".repeat(7680));
     expect(last.omitted).toBe(40_000);
   });
@@ -124,7 +124,7 @@ describe("bounded oldest-prefix/newest-tail output", () => {
     const buffer = new RollingOutputBuffer(128);
     buffer.append(JSON.stringify({ text: "hello".repeat(1000) }));
     const result = drain(buffer);
-    expect(result.output).toContain("已滚动截断");
+    expect(result.output).toContain("rolled over");
     expect(() => JSON.parse(result.output)).toThrow();
     expect(buffer.allocatedBytes).toBe(0);
   });

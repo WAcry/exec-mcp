@@ -13,6 +13,7 @@ import { DownstreamMcpRegistry } from "../src/downstream/registry.js";
 const registries: DownstreamMcpRegistry[] = [];
 const httpServers: HttpServer[] = [];
 const handlers: McpHttpHandler[] = [];
+const strayPids: number[] = [];
 
 afterEach(async () => {
   await Promise.allSettled(
@@ -25,10 +26,18 @@ afterEach(async () => {
     httpServers.splice(0).map(
       async (server) =>
         new Promise<void>((resolve) => {
+          server.closeAllConnections();
           server.close(() => resolve());
         }),
     ),
   );
+  for (const pid of strayPids.splice(0)) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already gone, which is the expected result.
+    }
+  }
 });
 
 describe("DownstreamMcpRegistry official SDK integration", () => {
@@ -81,10 +90,11 @@ serveStdio(() => {
     });
     registries.push(registry);
 
-    const inventory = await registry.inventory();
-    expect(inventory.errors).toEqual({});
-    expect(inventory.tools).toHaveLength(2);
-    const echo = inventory.tools.find(({ tool }) => tool.name === "echo");
+    await registry.initialize();
+    expect(registry.catalogErrors()).toEqual({});
+    const tools = registry.bindingSnapshot();
+    expect(tools).toHaveLength(2);
+    const echo = tools.find(({ tool }) => tool.name === "echo");
     expect(echo).toMatchObject({
       serverId: "fixture",
       serverName: "registry-integration-fixture",
@@ -99,7 +109,7 @@ serveStdio(() => {
     });
   });
 
-  it("reconnects after a real stdio server exits and never returns its stale catalog", async () => {
+  it("reconnects after a real stdio server exits and binds only its fresh catalog", async () => {
     const serverSource = `
 import { Server } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -131,17 +141,70 @@ serveStdio(() => {
     });
     registries.push(registry);
 
-    const first = (await registry.listTools())[0]!.tool.name;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const second = (await registry.listTools())[0]!.tool.name;
+    await registry.initialize();
+    const [first] = registry.bindingSnapshot();
+    await waitUntil(async () => registry.catalogErrors().fixture !== undefined);
 
-    expect(first).toMatch(/^pid_\d+$/u);
-    expect(second).toMatch(/^pid_\d+$/u);
-    expect(second).not.toBe(first);
+    // The next call reconnects first, so it sees that the old tool is gone.
+    await expect(registry.callTool(first!.id)).rejects.toThrow(
+      /no longer in the catalog.*The request was not sent/u,
+    );
+    const [second] = registry.bindingSnapshot();
+    expect(first!.tool.name).toMatch(/^pid_\d+$/u);
+    expect(second!.tool.name).toMatch(/^pid_\d+$/u);
+    expect(second!.tool.name).not.toBe(first!.tool.name);
   });
 
-  it("uses Streamable HTTP and configured headers", async () => {
-    let observedHeader: string | undefined;
+  it.skipIf(process.platform === "win32")(
+    "stops the processes that a stdio server started when it closes",
+    async () => {
+      const serverSource = `
+import { spawn } from "node:child_process";
+import { Server } from "@modelcontextprotocol/server";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
+
+const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+  stdio: "ignore",
+});
+serveStdio(() => {
+  const server = new Server(
+    { name: "wrapper-fixture", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler("tools/list", async () => ({
+    tools: [{ name: "helper_" + helper.pid, inputSchema: { type: "object" } }],
+  }));
+  return server;
+});
+`;
+      const registry = new DownstreamMcpRegistry({
+        servers: [
+          {
+            name: "fixture",
+            transport: "stdio",
+            command: process.execPath,
+            args: ["--input-type=module", "--eval", serverSource],
+            env: {},
+            cwd: process.cwd(),
+          },
+        ],
+        connectTimeoutMs: 5_000,
+      });
+      registries.push(registry);
+      await registry.initialize();
+      const pid = Number(
+        /^helper_(\d+)$/u.exec(registry.bindingSnapshot()[0]!.tool.name)?.[1],
+      );
+      strayPids.push(pid);
+      expect(alive(pid)).toBe(true);
+
+      await registry.close();
+      await waitUntil(async () => !alive(pid));
+    },
+  );
+
+  it("uses Streamable HTTP with static and environment headers", async () => {
+    const observed: Record<string, string | undefined> = {};
     let toolName = "echo";
     const handler = createMcpHandler(
       () => fixtureServer("http-sdk-ok", toolName),
@@ -152,8 +215,10 @@ serveStdio(() => {
     handlers.push(handler);
     const nodeHandler = toNodeHandler(handler);
     const server = createServer((request, response) => {
-      const header = request.headers["x-registry-test"];
-      observedHeader = Array.isArray(header) ? header.join(",") : header;
+      for (const name of ["x-registry-test", "x-env-test", "authorization"]) {
+        const header = request.headers[name];
+        observed[name] = Array.isArray(header) ? header.join(",") : header;
+      }
       // Node's IncomingMessage method is optional in @types/node, while the
       // SDK adapter requires the field its HTTP server always supplies.
       void nodeHandler(request as Parameters<typeof nodeHandler>[0], response);
@@ -172,95 +237,114 @@ serveStdio(() => {
           name: "remote",
           transport: "streamable-http",
           url: `http://127.0.0.1:${address.port}/mcp`,
-          headers: { "X-Registry-Test": "present" },
+          headers: { "X-Registry-Test": "present", authorization: "static" },
+          envHeaders: { "X-Env-Test": "REGISTRY_HEADER", "X-Unset": "UNSET" },
+          bearerTokenEnvVar: "REGISTRY_TOKEN",
         },
       ],
+      env: {
+        ...process.env,
+        REGISTRY_HEADER: "from-env",
+        REGISTRY_TOKEN: "token-1",
+      },
       connectTimeoutMs: 5_000,
       toolTimeoutMs: 5_000,
     });
     registries.push(registry);
 
-    const [tool] = await registry.listTools();
+    await registry.initialize();
+    const [tool] = registry.bindingSnapshot();
     expect(tool?.tool.name).toBe("echo");
     expect(await registry.callTool(tool!.id)).toMatchObject({
       content: [{ type: "text", text: "http-sdk-ok" }],
     });
-    expect(observedHeader).toBe("present");
+    expect(observed).toEqual({
+      "x-registry-test": "present",
+      "x-env-test": "from-env",
+      authorization: "Bearer token-1",
+    });
 
     toolName = "renamed";
     handler.notify.toolsChanged();
     await waitUntil(async () =>
-      (await registry.listTools()).some(
-        ({ tool: value }) => value.name === "renamed",
-      ),
+      registry
+        .bindingSnapshot()
+        .some(({ tool: value }) => value.name === "renamed"),
     );
     expect(
-      (await registry.listTools()).map(({ tool: value }) => value.name),
+      registry.bindingSnapshot().map(({ tool: value }) => value.name),
     ).toEqual(["renamed"]);
   });
 
-  it.each(["inventory", "call"] as const)(
-    "reconnects an expired HTTP session on the next %s without retrying the failed call",
-    async (nextOperation) => {
-      const { registry, state } = await legacyHttpFixture();
-      const [tool] = await registry.listTools();
-      await registry.callTool(tool!.id);
-      state.generation += 1;
+  it("names a missing bearer token variable without starting the server", async () => {
+    const registry = new DownstreamMcpRegistry({
+      servers: [
+        {
+          name: "remote",
+          transport: "streamable-http",
+          url: "http://127.0.0.1:9/mcp",
+          headers: {},
+          bearerTokenEnvVar: "REGISTRY_MISSING_TOKEN",
+        },
+      ],
+      env: {},
+      connectTimeoutMs: 1_000,
+    });
+    registries.push(registry);
 
-      await expect(registry.callTool(tool!.id)).rejects.toThrow(
-        /可能已部分或全部生效.*未自动重试/u,
-      );
-      expect(state.initializes).toBe(1);
-      expect(state.callSessions).toEqual(["session-1", "session-1"]);
+    await expect(registry.initialize()).rejects.toThrow(
+      "the environment variable REGISTRY_MISSING_TOKEN named by bearer_token_env_var is not set",
+    );
+    expect(registry.catalogErrors().remote).toContain("REGISTRY_MISSING_TOKEN");
+  });
 
-      if (nextOperation === "inventory") {
-        const inventory = await registry.inventory();
-        expect(inventory.errors).toEqual({});
-        expect(inventory.tools[0]!.tool.description).toBe(
-          "Session generation 2",
-        );
-      }
-      expect(await registry.callTool(tool!.id)).toMatchObject({
-        content: [{ type: "text", text: "session-2" }],
-      });
-      expect(state.initializes).toBe(2);
-      expect(state.callSessions).toEqual([
-        "session-1",
-        "session-1",
-        "session-2",
-      ]);
-    },
-  );
-
-  it("rejects a stale bound contract before sending a call after reconnect", async () => {
+  it("sends a call again once after an expired HTTP session, because the server did not run it", async () => {
     const { registry, state } = await legacyHttpFixture();
-    const [old] = await registry.listTools();
+    const [tool] = registry.bindingSnapshot();
+    await registry.callTool(tool!.id);
     state.generation += 1;
-    await expect(registry.callTool(old!.id)).rejects.toThrow("未自动重试");
-    const [fresh] = (await registry.inventory()).tools;
-    expect(fresh!.tool.description).not.toBe(old!.tool.description);
-    const sent = [...state.callSessions];
+
+    expect(await registry.callTool(tool!.id)).toMatchObject({
+      content: [{ type: "text", text: "session-2" }],
+    });
+    expect(state.initializes).toBe(2);
+    expect(state.callSessions).toEqual(["session-1", "session-1", "session-2"]);
+    expect(registry.catalogErrors()).toEqual({});
+    expect(registry.bindingSnapshot()[0]!.tool.description).toBe(
+      "Session generation 2",
+    );
+  });
+
+  it("rejects a stale bound contract after reconnect without sending it", async () => {
+    const { registry, state } = await legacyHttpFixture();
+    const [old] = registry.bindingSnapshot();
+    state.generation += 1;
+
     await expect(
       registry.callTool(old!.id, {}, undefined, undefined, old!.tool),
-    ).rejects.toThrow("契约已变更");
-    expect(state.callSessions).toEqual(sent);
+    ).rejects.toThrow(/changed or could not be confirmed.*was not sent/u);
+    expect(state.callSessions).toEqual(["session-1"]);
+    const [fresh] = registry.bindingSnapshot();
+    expect(fresh!.tool.description).not.toBe(old!.tool.description);
     await expect(
       registry.callTool(fresh!.id, {}, undefined, undefined, fresh!.tool),
     ).resolves.toMatchObject({
       content: [{ type: "text", text: "session-2" }],
     });
+    expect(state.callSessions).toEqual(["session-1", "session-2"]);
   });
 
-  it("reports an unavailable server instead of its expired HTTP catalog", async () => {
+  it("reports the recorded reason when the server cannot reconnect", async () => {
     const { registry, state } = await legacyHttpFixture();
-    const [tool] = await registry.listTools();
+    const [tool] = registry.bindingSnapshot();
     state.generation += 1;
     state.failInitialize = true;
 
-    await expect(registry.callTool(tool!.id)).rejects.toThrow("未自动重试");
-    expect(await registry.inventory()).toMatchObject({
-      tools: [],
-      errors: { fixture: expect.stringContaining('下游 MCP "fixture"') },
+    await expect(registry.callTool(tool!.id)).rejects.toThrow(
+      /^The request was not sent: tools\/call for "echo" on downstream MCP server "fixture" could not start\. Downstream MCP server "fixture": connection and tool discovery failed: /u,
+    );
+    expect(registry.catalogErrors()).toEqual({
+      fixture: expect.stringContaining('Downstream MCP server "fixture"'),
     });
     expect(state.callSessions).toEqual(["session-1"]);
 
@@ -271,20 +355,56 @@ serveStdio(() => {
     expect(state.callSessions).toEqual(["session-1", "session-2"]);
   });
 
-  it("keeps a valid HTTP session after an ordinary tool protocol error", async () => {
+  it("keeps the session and the server's message after a rejected call", async () => {
     const { registry, state } = await legacyHttpFixture();
-    const [tool] = await registry.listTools();
+    const [tool] = registry.bindingSnapshot();
     state.protocolError = true;
 
-    await expect(registry.callTool(tool!.id)).rejects.toThrow("未自动重试");
-    expect((await registry.inventory()).errors).toEqual({});
+    await expect(registry.callTool(tool!.id)).rejects.toThrow(
+      'The downstream MCP server "fixture" rejected tools/call for "echo" (MCP error -32602: Invalid tool arguments). It did not run the request.',
+    );
+    expect(registry.catalogErrors()).toEqual({});
     state.protocolError = false;
     await registry.callTool(tool!.id);
 
     expect(state.initializes).toBe(1);
     expect(state.callSessions).toEqual(["session-1", "session-1"]);
   });
+
+  it("does not send a call again when the connection drops after sending it", async () => {
+    const { registry, state } = await legacyHttpFixture();
+    const [tool] = registry.bindingSnapshot();
+    state.dropCall = true;
+
+    await expect(registry.callTool(tool!.id)).rejects.toThrow(
+      /^The request was sent, but the connection to the downstream MCP server "fixture" failed before a result arrived for tools\/call for "echo" .*It was not retried\.$/u,
+    );
+    expect(state.callSessions).toEqual(["session-1"]);
+  });
+
+  it("reports a timeout as sent with an unknown result", async () => {
+    const { registry, state } = await legacyHttpFixture();
+    const [tool] = registry.bindingSnapshot();
+    state.hangCall = true;
+
+    await expect(
+      registry.callTool(tool!.id, {}, undefined, 200),
+    ).rejects.toThrow(
+      /^The request was sent, but the downstream MCP server "fixture" did not answer tools\/call for "echo" within 0\.2 s \(tool_timeout_sec\)\. The tool may have done part or all of its work/u,
+    );
+    expect(state.callSessions).toEqual(["session-1"]);
+    expect(registry.catalogErrors()).toEqual({});
+  });
 });
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function legacyHttpFixture(): Promise<{
   registry: DownstreamMcpRegistry;
@@ -293,6 +413,8 @@ async function legacyHttpFixture(): Promise<{
     initializes: number;
     failInitialize: boolean;
     protocolError: boolean;
+    dropCall: boolean;
+    hangCall: boolean;
     callSessions: (string | undefined)[];
   };
 }> {
@@ -301,6 +423,8 @@ async function legacyHttpFixture(): Promise<{
     initializes: 0,
     failInitialize: false,
     protocolError: false,
+    dropCall: false,
+    hangCall: false,
     callSessions: [] as (string | undefined)[],
   };
   const server = createServer(async (request, response) => {
@@ -340,7 +464,7 @@ async function legacyHttpFixture(): Promise<{
           serverInfo: { name: "legacy-http-fixture", version: "1.0.0" },
         },
       });
-    } else if (message.method === "notifications/initialized") {
+    } else if (message.method.startsWith("notifications/")) {
       response.writeHead(202).end();
     } else {
       if (message.method === "tools/call") state.callSessions.push(session);
@@ -358,6 +482,10 @@ async function legacyHttpFixture(): Promise<{
             ],
           },
         });
+      } else if (message.method === "tools/call" && state.dropCall) {
+        request.socket.destroy();
+      } else if (message.method === "tools/call" && state.hangCall) {
+        // Never answer; the client times out.
       } else if (message.method === "tools/call" && state.protocolError) {
         reply({
           error: {
@@ -389,6 +517,7 @@ async function legacyHttpFixture(): Promise<{
     toolTimeoutMs: 1_000,
   });
   registries.push(registry);
+  await registry.initialize();
   return { registry, state };
 }
 

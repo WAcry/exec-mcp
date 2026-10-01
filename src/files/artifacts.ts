@@ -42,7 +42,7 @@ export interface ArtifactOptions {
   now?: () => number;
 }
 
-/** 显式文件传输服务；快照与 cell 分离，二进制不经过 V8 或模型文本。 */
+/** Explicit file transfer. Snapshots are independent of cells; bytes never pass through V8 or model text. */
 export class ArtifactStore {
   readonly config: FileConfig;
   readonly #records = new Map<string, RecordEntry>();
@@ -113,7 +113,7 @@ export class ArtifactStore {
     return this.#run(async (active) => {
       if (delivery === "url" && !this.config.download)
         throw new Error(
-          "尚未配置独立下载入口；可使用 resource 交付，未公开文件。",
+          'No download endpoint is configured (files.download), so delivery "url" is not available. Use delivery "resource". The file was not shared.',
         );
       const sourcePath = resolveUserPath(file, cwd);
       const leaf = name ?? path.basename(sourcePath);
@@ -124,11 +124,13 @@ export class ArtifactStore {
         leaf.length > 255 ||
         /[\x00-\x1f\x7f/\\]/u.test(leaf)
       )
-        throw new Error("交付文件名无效；不得包含目录分隔符或控制字符。");
+        throw new Error(
+          "The file name is not valid. Use 1 to 255 characters without /, \\, or control characters, and do not use . or ...",
+        );
       const selected = await lstat(sourcePath, { bigint: true });
       if (!selected.isFile())
         throw new Error(
-          "只允许导出普通文件，不支持符号链接、目录、管道或设备。",
+          "Only a regular file can be exported. Symlinks, directories, pipes, and devices are not supported.",
         );
       const source = await open(sourcePath, READ_FLAGS);
       let snapshot: FileHandle | undefined;
@@ -142,7 +144,9 @@ export class ArtifactStore {
           before.ino !== selected.ino ||
           before.dev !== selected.dev
         )
-          throw new Error("源文件在打开时已被替换，或不是普通文件；未导出。");
+          throw new Error(
+            "The source file was replaced while it was opened, or it is not a regular file. It was not exported.",
+          );
         const limit =
           delivery === "resource"
             ? Math.min(this.config.max_file_bytes, RESOURCE_FILE_BYTES)
@@ -150,14 +154,18 @@ export class ArtifactStore {
         if (before.size > BigInt(limit))
           throw new Error(
             delivery === "resource"
-              ? "文件超过 MCP 资源交付大小限制（至多 32 MiB）；大文件请配置 url 交付。"
-              : "文件超过配置的传输大小限制。",
+              ? 'The file is larger than the limit for delivery "resource" (32 MiB at most). For a larger file, configure files.download and use delivery "url".'
+              : "The file is larger than the configured transfer limit (files.max_file_bytes).",
           );
         this.#sweep();
+        // Let removals in progress return their space before the quota check.
+        await Promise.all([...this.#all].map((record) => record.removing));
         charge = Number(before.size) + 4096;
         if (charge > this.config.max_export_bytes - this.#usedBytes) {
           charge = 0;
-          throw new Error("导出快照空间不足；等待过期或撤销已有导出。");
+          throw new Error(
+            "There is not enough space for export snapshots (files.max_export_bytes). Wait for earlier exports to expire, or revoke exports you no longer need.",
+          );
         }
         this.#usedBytes += charge;
         const id = `file_${randomBytes(24).toString("base64url")}`;
@@ -185,7 +193,7 @@ export class ArtifactStore {
           )
         )
           throw new Error(
-            "源文件在导出期间发生变化；未发布快照，请重新确认源文件。",
+            "The source file changed during the export, so no snapshot was published. Check the file, then export it again.",
           );
         await snapshot.chmod(0o400);
         await snapshot.close();
@@ -255,7 +263,7 @@ export class ArtifactStore {
   async revokeFromInstance(id: string): Promise<{ revoked: boolean }> {
     const record = this.#records.get(id);
     if (!record || !this.#valid(record))
-      throw new Error("文件资源不存在或已失效。");
+      throw new Error("The file resource does not exist or has expired.");
     this.#retire(record);
     await record.removing;
     return { revoked: true };
@@ -272,7 +280,7 @@ export class ArtifactStore {
 
   async readResource(uri: string, scope?: string, signal?: AbortSignal) {
     if (!uri.startsWith(ARTIFACT_URI_PREFIX))
-      throw new Error("文件资源不存在或已失效。");
+      throw new Error("The file resource does not exist or has expired.");
     // resources/read may omit conversation metadata. The private, single-operator
     // MCP ingress remains the authorization boundary, not this optional hint.
     const record = this.#lookup(
@@ -281,7 +289,9 @@ export class ArtifactStore {
       true,
     );
     if (record.token || record.info.size > RESOURCE_FILE_BYTES)
-      throw new Error("此导出仅支持下载 URL。");
+      throw new Error(
+        "This export is available only through its download URL.",
+      );
     return this.#use(
       record,
       async (handle, info, active) => {
@@ -296,12 +306,13 @@ export class ArtifactStore {
         for await (const chunk of stream) {
           const buffer = Buffer.from(chunk);
           bytes += buffer.length;
-          if (bytes > info.size) throw new Error("导出快照已变化。");
+          if (bytes > info.size)
+            throw new Error("The export snapshot changed.");
           hash.update(buffer);
           chunks.push(buffer);
         }
         if (bytes !== info.size || hash.digest("hex") !== info.sha256)
-          throw new Error("导出快照校验失败。");
+          throw new Error("The export snapshot failed its integrity check.");
         return {
           contents: [
             {
@@ -325,7 +336,9 @@ export class ArtifactStore {
   ): Promise<T> {
     const record = this.#tokens.get(token);
     if (!record || record.info.name !== name || !this.#valid(record))
-      return Promise.reject(new Error("下载不存在或已失效。"));
+      return Promise.reject(
+        new Error("The download does not exist or has expired."),
+      );
     return this.#use(record, fn, signal);
   }
 
@@ -352,7 +365,8 @@ export class ArtifactStore {
     fn: (signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T> {
-    if (this.#closed) return Promise.reject(new Error("文件传输服务已关闭。"));
+    if (this.#closed)
+      return Promise.reject(new Error("The file transfer service is closed."));
     const active = AbortSignal.any([
       this.#lifetime.signal,
       AbortSignal.timeout(FILE_TRANSFER_TIMEOUT_MS),
@@ -376,18 +390,20 @@ export class ArtifactStore {
     reservation = 256 * 1024,
   ): Promise<T> {
     return this.#run(async (active) => {
-      if (!this.#valid(record)) throw new Error("文件资源不存在或已失效。");
+      if (!this.#valid(record))
+        throw new Error("The file resource does not exist or has expired.");
       const release = await this.#readBudget.acquire(reservation, active);
       let admitted = false;
       let handle: FileHandle | undefined;
       try {
-        if (!this.#valid(record)) throw new Error("文件资源不存在或已失效。");
+        if (!this.#valid(record))
+          throw new Error("The file resource does not exist or has expired.");
         record.readers++;
         admitted = true;
         handle = await open(record.file, READ_FLAGS);
         const stat = await handle.stat();
         if (!stat.isFile() || stat.size !== record.info.size)
-          throw new Error("导出快照已变化。");
+          throw new Error("The export snapshot changed.");
         return await fn(handle, record.info, active);
       } finally {
         try {
@@ -412,7 +428,9 @@ export class ArtifactStore {
         )) ||
       !this.#valid(record)
     )
-      throw new Error("文件资源不存在、已失效或不属于当前对话。");
+      throw new Error(
+        "The file resource does not exist, has expired, or belongs to another conversation.",
+      );
     return record;
   }
   #valid(record: RecordEntry): boolean {
@@ -422,6 +440,9 @@ export class ArtifactStore {
   #sweep(): void {
     for (const record of this.#records.values())
       if (record.expiresAt <= this.#now()) this.#retire(record);
+    // Try again to remove snapshots whose earlier removal failed.
+    for (const record of this.#all)
+      if (record.retired && !record.removing) this.#remove(record);
   }
   #retire(record: RecordEntry): void {
     record.retired = true;
@@ -431,13 +452,17 @@ export class ArtifactStore {
   }
   #remove(record: RecordEntry): void {
     if (record.readers || record.removing) return;
-    record.removing = rm(record.file, { force: true }).then(() => {
-      this.#usedBytes -= record.charge;
-      this.#all.delete(record);
-    });
-    void record.removing.catch(() => {
-      /* 正常关闭会再次清理整个私有临时目录。 */
-    });
+    // The charge stays while the file can still use disk space. A failed
+    // removal is tried again by the next sweep, and close() removes the root.
+    record.removing = rm(record.file, { force: true }).then(
+      () => {
+        this.#usedBytes -= record.charge;
+        this.#all.delete(record);
+      },
+      () => {
+        delete record.removing;
+      },
+    );
   }
 }
 

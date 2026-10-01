@@ -15,7 +15,7 @@ import {
 import type { TerminalResult } from "../src/host/terminal.js";
 import { startServer } from "../src/server.js";
 import type { DownstreamMcpServerConfig } from "../src/downstream/config.js";
-import { createDownstreamCodeName } from "../src/downstream/registry.js";
+import { createDownstreamCodeName } from "../src/downstream/tool-id.js";
 
 const connections: Awaited<ReturnType<typeof connect>>[] = [];
 const dirs: string[] = [];
@@ -259,7 +259,7 @@ describe.each([false, true])(
         'text(await tools.mcp__fixture__add({value:"bad"}));',
       );
       expect(invalid.isError).toBe(true);
-      expect(texts(invalid).join("\n")).toContain("未发送调用");
+      expect(texts(invalid).join("\n")).toContain("The request was not sent");
       expect(await readFile(marker, "utf8")).toBe(before);
       const failed = await exec(
         client,
@@ -283,7 +283,7 @@ describe.each([false, true])(
           },
           legacy,
         ),
-      ).rejects.toThrow('下游 MCP "offline"');
+      ).rejects.toThrow('Downstream MCP server "offline"');
     });
     it("keeps names stable and disambiguates normalization collisions", () => {
       expect(createDownstreamCodeName("a", "b")).toBe("mcp__a__b");

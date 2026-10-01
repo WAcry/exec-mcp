@@ -36,6 +36,7 @@ PowerShell uses its own launch arguments on each platform; Windows retains the e
 login controls profile loading for PowerShell and login mode for other shells.
 With login=false, shell-specific rules such as zshenv or BASH_ENV may still apply. PTY allocation does not itself change interactive mode or profile behavior.
 Custom shells use a -c/-lc interface. CMD and batch-file entry points remain unsupported.
+When a signal N ends the shell, exit_code is 128 + N, the shell convention, in both pipe and PTY modes; no separate signal field is added.
 
 ## Dynamic descriptions
 

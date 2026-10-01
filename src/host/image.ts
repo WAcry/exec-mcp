@@ -11,10 +11,13 @@ export async function viewImage(
   let data: Buffer;
   try {
     const stat = await handle.stat();
-    if (!stat.isFile()) throw new Error("图片路径必须是普通文件。");
+    if (!stat.isFile())
+      throw new Error("The image path must point to a regular file.");
     const max = Math.floor((MAX_PAYLOAD_BYTES * 3) / 4) - 4096;
     if (stat.size > max)
-      throw new Error("图片编码后将超过传输边界，请先缩小图片。");
+      throw new Error(
+        "The encoded image would be larger than the transport limit. Make the image smaller first.",
+      );
     const chunks: Buffer[] = [];
     const stream = handle.createReadStream({
       autoClose: false,
@@ -24,7 +27,9 @@ export async function viewImage(
     for await (const chunk of stream) chunks.push(Buffer.from(chunk));
     data = Buffer.concat(chunks);
     if (data.length > max)
-      throw new Error("图片在读取期间变大，超过传输边界。");
+      throw new Error(
+        "The image grew while it was read and is now larger than the transport limit.",
+      );
   } finally {
     await handle.close();
   }
@@ -33,7 +38,7 @@ export async function viewImage(
     !type ||
     !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(type.mime)
   )
-    throw new Error("仅支持 PNG、JPEG、WebP 或 GIF 图片。");
+    throw new Error("Only PNG, JPEG, WebP, and GIF images are supported.");
   return {
     content: [
       {

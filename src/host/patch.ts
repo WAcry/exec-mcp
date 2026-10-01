@@ -15,22 +15,26 @@ export class PatchRunner {
     workdir: string,
     signal?: AbortSignal,
   ): Promise<{ success: boolean; exit_code: number; output: string }> {
-    if (this.closed) throw new Error("补丁执行器已关闭。");
+    if (this.closed) throw new Error("The patch runner is closed.");
     throwIfAborted(signal);
     const cwd = await realpath(workdir);
     const lock = this.locks.get(cwd) ?? { mutex: new AsyncMutex(), users: 0 };
     this.locks.set(cwd, lock);
     lock.users++;
     const operation = lock.mutex.run(async () => {
-      if (this.closed) throw new Error("补丁执行器已关闭。");
+      if (this.closed) throw new Error("The patch runner is closed.");
       throwIfAborted(signal);
       if (
         !patch.startsWith("*** Begin Patch\n") ||
         !patch.trimEnd().endsWith("*** End Patch")
       )
-        throw new Error("补丁需要完整的 Begin Patch / End Patch envelope。");
+        throw new Error(
+          'The patch must start with "*** Begin Patch" on its own line and end with "*** End Patch". Send the complete patch text.',
+        );
       if (Buffer.byteLength(patch) > MAX_PAYLOAD_BYTES)
-        throw new Error("补丁超过传输大小限制，尚未执行。");
+        throw new Error(
+          "The patch is larger than the transport limit and was not applied. Split it into smaller patches.",
+        );
       const abort = new AbortController();
       this.active.add(abort);
       const combined = signal
@@ -87,28 +91,20 @@ export class PatchRunner {
     let exitCode: number;
     try {
       const completed = await waitUntil(done, 110_000, signal);
-      if (completed === undefined) throw new Error("补丁执行超时。");
+      if (completed === undefined)
+        throw new Error("The patch did not finish in time.");
       exitCode = completed;
     } catch (error) {
-      if (child.pid !== undefined) {
-        await terminateProcessTree(child.pid);
-        if (
-          (await waitUntil(
-            done.catch(() => 1),
-            750,
-          )) === undefined
-        )
-          await terminateProcessTree(child.pid, true);
-      }
+      if (child.pid !== undefined) await terminateProcessTree(child.pid, done);
       await done.catch(() => undefined);
       throw new Error(
-        "补丁执行被中断，可能已经部分生效；请检查文件后再决定下一步。",
+        "The patch was interrupted and may be partly applied. Check the files before you decide the next step.",
         { cause: error },
       );
     }
     if (overflow)
       throw new Error(
-        "补丁结果超过传输边界，文件可能已修改；未截断交付或自动重试。",
+        "The patch output is larger than the transport limit. Files may have changed; the output was not truncated and the patch was not retried.",
       );
     return {
       success: exitCode === 0,

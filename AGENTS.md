@@ -80,6 +80,8 @@ Preserve upstream licenses and attribution. Reference repositories must not beco
 
 Choose validation based on risk. For tool contracts, check actual MCP responses and argument validation, and verify that a fresh agent has enough information to call correctly.
 For platform changes, exercise real processes and installation paths, and report platform results separately.
+Before pushing to main, run npm run check and npm run test:package and confirm both pass.
+The build replaces dist, so run them in a worktree, not in a checkout that serves a running instance.
 Change the version only when the user explicitly requests it. Routine changes, commits, and pushes retain the current version.
 When bumping it, update the package manifest, lockfile, and runtime constant, then verify agreement across CLI, MCP, and Web.
 Source version changes, Git tags or Releases, npm publication, and deployment require separate authorization under ADR-004.

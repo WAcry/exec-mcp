@@ -193,7 +193,7 @@ async function terminateAndReap(
     ]);
     if (!reaped)
       throw new Error(
-        "Code Mode host 终止尚未确认；本次操作失败，后续调用可重新尝试恢复，不自动重跑命令。",
+        "Could not confirm that the Code Mode host stopped. This operation failed; a later call can try recovery again. Commands are not rerun automatically.",
       );
   } finally {
     child.removeListener("close", onClose);

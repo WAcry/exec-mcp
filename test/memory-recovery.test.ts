@@ -42,6 +42,7 @@ function service(
   options: CodeModeServiceOptions = {},
 ) {
   const reads: number[] = [];
+  const errors: Error[] = [];
   const reader = vi.fn(async (pid: number) => {
     reads.push(pid);
     return samples.length > 1 ? samples.shift()! : samples[0]!;
@@ -50,10 +51,11 @@ function service(
     memoryHighWaterBytes: 1000,
     memoryReader: reader,
     memoryCheckIntervalMs: 60_000,
+    onError: (error) => errors.push(error),
     ...options,
   });
   services.push(value);
-  return { value, reads, reader };
+  return { value, reads, reader, errors };
 }
 const run = (
   value: CodeModeService,
@@ -149,7 +151,7 @@ describe("native host pressure reclamation", () => {
       "b",
     );
     expect(jsonOutput(replacement)).toBe(true);
-    expect(texts(replacement)[0]).toContain("新建原生执行会话");
+    expect(texts(replacement)[0]).toContain("New native session");
     expect(opened[2]!.id).not.toBe(b!.id);
   });
   it("does not evict active sessions just to hit the 75% target after idle cleanup brought memory below high water", async () => {
@@ -195,15 +197,15 @@ describe("native host pressure reclamation", () => {
     expect(preserved!.usable).toBe(true);
     await expect(
       value.wait({ cellId: cellId(a), sessionScope: "a" }),
-    ).rejects.toThrow("内存压力");
+    ).rejects.toThrow("memory pressure");
     await expect(
       value.wait({ cellId: cellId(a), sessionScope: "b" }),
-    ).rejects.toThrow("其他");
+    ).rejects.toThrow("another ChatGPT conversation");
     const newA = await run(value, 'text(load("anything")===undefined);', "a");
     expect(jsonOutput(newA)).toBe(true);
     await expect(
       value.wait({ cellId: cellId(a), sessionScope: "a" }),
-    ).rejects.toThrow("内存压力");
+    ).rejects.toThrow("memory pressure");
     expect(
       (
         await value.wait({
@@ -311,10 +313,15 @@ describe("native host pressure reclamation", () => {
     }
   });
   it("recycles an empty but resident host and can immediately serve the same metadata scope again", async () => {
-    const { value, reads } = service([1200, 1200, 500]);
+    const { value, reads, errors } = service([1200, 1200, 500]);
     await run(value, 'store("old",7);');
     await value.checkMemory();
     expect(opened[0]!.usable).toBe(false);
+    expect(errors.map((error) => error.message)).toEqual([
+      expect.stringMatching(
+        /^Restarting the Code Mode host \(PID \d+\) because memory was \d+ MiB after all native sessions were reclaimed/,
+      ),
+    ]);
     expect(jsonOutput(await run(value, 'text(load("old")===undefined);'))).toBe(
       true,
     );
@@ -499,12 +506,12 @@ describe.each([false, true])(
         _meta: metadata,
       });
       expect(forgotten.isError).toBe(true);
-      expect(texts(forgotten).join("\n")).toContain("内存压力");
+      expect(texts(forgotten).join("\n")).toContain("memory pressure");
       const fresh = await call('text(load("old")===undefined);store("new",7);');
       expect(fresh.isError).not.toBe(true);
       expect(jsonOutput(fresh)).toBe(true);
       expect(opened[1]!.id).not.toBe(oldNativeId);
-      expect(texts(fresh)[0]).toContain("新建原生执行会话");
+      expect(texts(fresh)[0]).toContain("New native session");
       expect(jsonOutput(await call('text(load("new"));'))).toBe(7);
       const stale = await connection.client.callTool({
         name: "wait",
@@ -512,7 +519,7 @@ describe.each([false, true])(
         _meta: metadata,
       });
       expect(stale.isError).toBe(true);
-      expect(texts(stale).join("\n")).toContain("内存压力");
+      expect(texts(stale).join("\n")).toContain("memory pressure");
       expect(jsonOutput(await call('text(load("new"));'))).toBe(7);
       expect(
         (await connection.client.listTools()).tools.map((tool) => tool.name),

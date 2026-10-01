@@ -22,8 +22,8 @@ describe("exact received-source syntax diagnostics", () => {
     expect(result.isError).toBe(true);
     const output = texts(result).join("\n");
     expect(output).toContain("SyntaxError");
-    expect(output).toContain("解析阶段");
-    expect(output).toContain("第 3 行");
+    expect(output).toContain("JavaScript parse error");
+    expect(output).toContain("at line 3,");
     expect(output).toContain("call-fixture");
     expect(output).toContain(createHash("sha256").update(source).digest("hex"));
     expect(output).toContain("observations.push");
@@ -38,7 +38,7 @@ describe("exact received-source syntax diagnostics", () => {
     )!;
     expect(result.length).toBeLessThan(600);
     expect(result).toContain(createHash("sha256").update(source).digest("hex"));
-    expect(result).toContain("第 1 行");
+    expect(result).toContain("at line 1,");
     expect(source.endsWith("text(x]);")).toBe(true);
   });
   it("does not relabel a runtime SyntaxError as a verified parsing failure", () => {
@@ -47,8 +47,8 @@ describe("exact received-source syntax diagnostics", () => {
       "SyntaxError: intentional",
       "fixture",
     )!;
-    expect(result).toContain("独立语法检查未能定位");
-    expect(result).not.toContain("解析阶段定位");
+    expect(result).toContain("could not locate it");
+    expect(result).not.toContain("JavaScript parse error");
     expect(
       syntaxDiagnostic("text(1)", "Error: runtime failure", "fixture"),
     ).toBeUndefined();

@@ -13,6 +13,11 @@ import {
 import { terminateProcessTree } from "./platform.js";
 import { inheritedEnvironment } from "../environment.js";
 import { DEFAULT_IDLE_MS, MEMORY_DEFAULTS, MiB } from "../memory.js";
+import {
+  COMMAND_YIELD_TIME_MS,
+  STDIN_YIELD_TIME_MS,
+  TERMINAL_READ_BYTES,
+} from "../limits.js";
 import { RollingOutputBuffer } from "./output-buffer.js";
 import { inputPreview } from "../tool-names.js";
 import {
@@ -71,19 +76,19 @@ interface Session {
   terminating?: Promise<void>;
   stderrBytes: number;
 }
-export const TERMINAL_READ_BYTES = 4 * 1024 * 1024;
 /** Codex's minimum collection window for an empty write_stdin read. */
-export const EMPTY_POLL_MIN_MS = 5000;
+export const EMPTY_POLL_MIN_MS = STDIN_YIELD_TIME_MS.read.min;
 /** Codex's collection windows, with an explicit zero for immediate local inspection. */
 export function stdinYieldTime(
   input: WriteStdinInput,
-  minEmptyPollMs = EMPTY_POLL_MIN_MS,
+  minEmptyPollMs: number = EMPTY_POLL_MIN_MS,
 ): number {
-  const requested = input.yield_time_ms ?? 250;
+  const requested = input.yield_time_ms ?? STDIN_YIELD_TIME_MS.default;
   if (requested === 0) return 0;
-  return input.chars
-    ? Math.max(250, Math.min(30_000, requested))
-    : Math.max(minEmptyPollMs, Math.min(300_000, requested));
+  const window = input.chars
+    ? STDIN_YIELD_TIME_MS.write
+    : { min: minEmptyPollMs, max: STDIN_YIELD_TIME_MS.read.max };
+  return Math.max(window.min, Math.min(window.max, requested));
 }
 /** Shell convention: a process that signal N ended reports exit code 128 + N. */
 export function exitStatus(
@@ -272,7 +277,11 @@ export class TerminalManager {
     }
     const started = performance.now();
     try {
-      await waitUntil(done, input.yield_time_ms ?? 10_000, signal);
+      await waitUntil(
+        done,
+        input.yield_time_ms ?? COMMAND_YIELD_TIME_MS.default,
+        signal,
+      );
       return this.collect(session, started);
     } catch (error) {
       await this.terminate(session);

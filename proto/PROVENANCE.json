@@ -1,0 +1,8 @@
+{
+  "file": "codex.code_mode.v1.proto",
+  "repository": "https://github.com/openai/codex",
+  "tag": "rust-v0.155.1",
+  "commit": "be2951ea34f0d295ed0becf97079f92fa5f6950e",
+  "path": "codex-rs/code-mode-protocol/src/grpc/codex.code_mode.v1.proto",
+  "sha256": "406d8f47d8d0b95a9d4ae104890e5e52764c9597e9271f75ff434a4ce24748d0"
+}

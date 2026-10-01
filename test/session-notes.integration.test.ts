@@ -686,7 +686,9 @@ describe.each([false, true])(
         expect(response.isError).not.toBe(true); // The script explicitly prints a command failure.
         if (padding) {
           expect(response.structuredContent).toBeUndefined();
-          expect(JSON.stringify(response)).toContain("保留首尾");
+          expect(JSON.stringify(response)).toContain(
+            "the beginning and end are kept",
+          );
         } else {
           expect(jsonOutput(response)).toMatchObject({
             output: "BEGINEND",

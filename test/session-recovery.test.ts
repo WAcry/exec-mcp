@@ -82,8 +82,8 @@ describe("metadata scope is stable; the native session generation is replaceable
     const value = pool(async () => (++count === 1 ? opening.promise : fresh));
     const first = value.acquire("same-scope"),
       second = value.acquire("same-scope");
-    const firstError = expect(first).rejects.toThrow("内存压力"),
-      secondError = expect(second).rejects.toThrow("内存压力");
+    const firstError = expect(first).rejects.toThrow("memory pressure"),
+      secondError = expect(second).rejects.toThrow("memory pressure");
     const retiring = value.reclaimOldest(false)!;
     const newLease = await value.acquire("same-scope");
     expect(newLease.session).toBe(fresh);
@@ -132,7 +132,7 @@ describe("metadata scope is stable; the native session generation is replaceable
     await value.reclaimOldest(false);
     expect(value.has(a.session)).toBe(true);
     expect(value.has(b.session)).toBe(false);
-    expect(() => b.touch()).toThrow("内存压力");
+    expect(() => b.touch()).toThrow("memory pressure");
     a.release();
     b.release();
   });
@@ -145,7 +145,7 @@ describe("metadata scope is stable; the native session generation is replaceable
     const fresh = fake("new");
     const value = pool(async () => (++opens === 1 ? bad : fresh));
     const waiting = value.acquire("stable");
-    const failed = expect(waiting).rejects.toThrow("内存压力");
+    const failed = expect(waiting).rejects.toThrow("memory pressure");
     const retiring = value.reclaimOldest(false)!;
     const replacement = await value.acquire("stable");
     reject(new Error("old host failed"));

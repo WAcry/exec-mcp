@@ -3,6 +3,20 @@
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
+import {
+  DEFAULT_EXEC_YIELD_TIME_MS,
+  DEFAULT_WAIT_YIELD_TIME_MS,
+  MAX_EXEC_YIELD_TIME_MS,
+  MAX_WAIT_YIELD_TIME_MS,
+} from "./code-mode/exec-source.js";
+import { MODEL_TEXT_BYTES } from "./code-mode/model-output.js";
+import {
+  COMMAND_YIELD_TIME_MS,
+  STDIN_YIELD_TIME_MS,
+  TERMINAL_READ_BYTES,
+} from "./limits.js";
+import { MiB } from "./memory.js";
+import { NOTES_RESPONSE_BYTES } from "./session-notes-types.js";
 import { shellDescription, type CommandShell } from "./host/shell.js";
 import type { NativeToolName } from "./tool-names.js";
 import { REQUEST_USER_INPUT_SCHEMA } from "./user-questions.js";
@@ -15,8 +29,11 @@ import {
   HOST_FILE_SCHEMA,
   IMPORT_FILE_SCHEMA,
   EXPORT_FILE_SCHEMA,
+  RESOURCE_FILE_BYTES,
 } from "./files/contracts.js";
 
+const bytes = (value: number) => value.toLocaleString("en-US");
+const mib = (value: number) => `${value / MiB} MiB`;
 const ms = (maximum: number, description: string) =>
   z.number().int().min(0).max(maximum).describe(description).optional();
 const tokenBudget = z
@@ -51,8 +68,8 @@ export const EXEC_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      30_000,
-      "Time before yielding a still-running script. Defaults to 10000 ms; range 0-30000. Does not set an execution deadline.",
+      MAX_EXEC_YIELD_TIME_MS,
+      `Time before yielding a still-running script. Defaults to ${DEFAULT_EXEC_YIELD_TIME_MS} ms; range 0-${MAX_EXEC_YIELD_TIME_MS}. Does not set an execution deadline.`,
     ),
   })
   .strict();
@@ -66,8 +83,8 @@ export const WAIT_SCHEMA = z
         "Running exec cell to resume, as returned by exec. Distinct from a terminal session_id.",
       ),
     yield_time_ms: ms(
-      110_000,
-      "Time before yielding again. Defaults to 110000 ms; range 0-110000. Completion or yield_control returns sooner.",
+      MAX_WAIT_YIELD_TIME_MS,
+      `Time before yielding again. Defaults to ${DEFAULT_WAIT_YIELD_TIME_MS} ms; range 0-${MAX_WAIT_YIELD_TIME_MS}. Completion or yield_control returns sooner.`,
     ),
     terminate: z
       .boolean()
@@ -90,7 +107,10 @@ export const COMMAND_SCHEMA = z
     shell: z
       .string()
       .min(1)
-      .refine((value) => !!value.trim() && !value.includes("\0"))
+      .refine(
+        (value) => !!value.trim() && !value.includes("\0"),
+        "shell must not be blank or contain a NUL character",
+      )
       .describe(
         "Shell binary to launch for this command. Defaults to the instance's configured shell. Relative paths resolve from the command's working directory.",
       )
@@ -108,8 +128,8 @@ export const COMMAND_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      30_000,
-      "Wait before yielding output. Defaults to 10000 ms; range 0-30000. Commands that finish sooner return immediately.",
+      COMMAND_YIELD_TIME_MS.max,
+      `Wait before yielding output. Defaults to ${COMMAND_YIELD_TIME_MS.default} ms; range 0-${COMMAND_YIELD_TIME_MS.max}. Commands that finish sooner return immediately.`,
     ),
   })
   .strict();
@@ -132,8 +152,8 @@ export const STDIN_SCHEMA = z
       )
       .optional(),
     yield_time_ms: ms(
-      300_000,
-      "Output collection window. Non-empty writes default to 250 ms and clamp to 250-30000; empty reads default to 5000 and clamp to 5000-300000. Process exit returns sooner; new output does not end the window. Explicit 0 reads immediately.",
+      STDIN_YIELD_TIME_MS.read.max,
+      `Output collection window. Non-empty writes default to ${STDIN_YIELD_TIME_MS.default} ms and clamp to ${STDIN_YIELD_TIME_MS.write.min}-${STDIN_YIELD_TIME_MS.write.max}; empty reads default to ${STDIN_YIELD_TIME_MS.read.min} and clamp to ${STDIN_YIELD_TIME_MS.read.min}-${STDIN_YIELD_TIME_MS.read.max}. Process exit returns sooner; new output does not end the window. Explicit 0 reads immediately.`,
     ),
     cols: z
       .number()
@@ -159,7 +179,7 @@ export const STDIN_SCHEMA = z
   .strict()
   .refine(
     (value) => (value.cols === undefined) === (value.rows === undefined),
-    "cols 和 rows 必须同时提供",
+    "cols and rows must be supplied together",
   );
 export const IMAGE_SCHEMA = z
   .object({
@@ -199,8 +219,7 @@ const TERMINAL_OUTPUT = {
   properties: {
     output: {
       type: "string",
-      description:
-        "Unread terminal output, up to 4 MiB per call. Larger remaining output can be collected with the same session_id.",
+      description: `Unread terminal output, up to ${mib(TERMINAL_READ_BYTES)} per call. Larger remaining output can be collected with the same session_id.`,
     },
     wall_time_seconds: { type: "number" },
     session_id: {
@@ -211,7 +230,7 @@ const TERMINAL_OUTPUT = {
     exit_code: {
       type: "integer",
       description:
-        "Shell exit code, present once the process has exited and all output has been collected.",
+        "Shell exit code, present once the process has exited and all output has been collected. A process stopped by signal N reports 128+N.",
     },
     truncated: {
       type: "boolean",
@@ -253,47 +272,52 @@ change_line: ("+" | "-" | " ") /(.*)/ LF
 eof_line: "*** End of File" LF
 
 %import common.LF`;
-export interface NativeContract {
+export interface NativeContract<S extends z.ZodType = z.ZodType> {
   name: NativeToolName;
   description: string;
-  schema: z.ZodType;
+  schema: S;
   output?: Record<string, unknown>;
   freeform?: boolean;
 }
-const NATIVE_CONTRACTS: readonly NativeContract[] = [
-  {
+/** Keeps each contract's schema type, so handlers receive typed input. */
+function contract<N extends NativeToolName, S extends z.ZodType>(
+  value: NativeContract<S> & { name: N },
+): NativeContract<S> & { name: N } {
+  return value;
+}
+const NATIVE_CONTRACTS = {
+  list_skills: contract({
     name: "list_skills",
     schema: SKILL_SCHEMA,
     output: { type: "string" },
     description: `Lists available skill names, descriptions and resolved SKILL.md paths. Includes user-level skills and applicable project skills when a workdir is supplied. The full SKILL.md contains the workflow instructions. ${SKILL_INVOCATION_RULE}`,
-  },
-  {
+  }),
+  import_file: contract({
     name: "import_file",
     schema: IMPORT_FILE_SCHEMA,
     description:
       "Saves exec.files[index] to a local destination. Returns {path,size,sha256}; path is the local file for subsequent operations. Existing destinations are preserved unless overwrite=true; replacement follows a successful download and validation.",
-  },
-  {
+  }),
+  export_file: contract({
     name: "export_file",
     schema: EXPORT_FILE_SCHEMA,
-    description:
-      "Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to 32 MiB via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.",
-  },
-  {
+    description: `Exports an independent file snapshot for the user. Returns {id,name,mime_type,size,sha256,expires_at,uri}; exec/wait automatically attaches a resource_link. Default resource delivery supports up to ${mib(RESOURCE_FILE_BYTES)} via resources/read. URL delivery requires a configured HTTPS download endpoint; anyone with the link can download until expiry. The host determines attachment display or mounting.`,
+  }),
+  exec_command: contract({
     name: "exec_command",
     schema: COMMAND_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
       "Runs a shell command, returning output or a session ID for ongoing interaction. write_stdin continues the same terminal. A shell exit code does not describe the success of every command in a script.",
-  },
-  {
+  }),
+  write_stdin: contract({
     name: "write_stdin",
     schema: STDIN_SCHEMA,
     output: TERMINAL_OUTPUT,
     description:
       "Writes characters to an existing exec_command session and returns recent output. Can also resize a PTY, close pipe stdin or terminate the process. A collection timeout leaves the process running; the returned session_id remains usable.",
-  },
-  {
+  }),
+  apply_patch: contract({
     name: "apply_patch",
     schema: PATCH_SCHEMA,
     freeform: true,
@@ -308,14 +332,14 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
       additionalProperties: false,
     },
     description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
-  },
-  {
+  }),
+  view_image: contract({
     name: "view_image",
     schema: IMAGE_SCHEMA,
     description:
       "View a local image file from the filesystem when visual inspection is needed. Returns a CallToolResult containing an ImageContent block; image(result.content[0]) displays it.",
-  },
-  {
+  }),
+  request_user_input_async: contract({
     name: "request_user_input_async",
     schema: REQUEST_USER_INPUT_SCHEMA,
     output: {
@@ -329,8 +353,8 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Ask the user one or more questions during ongoing work. Submits questions to this conversation's Web UI and immediately returns accepted, without waiting for answers. Answers include the question, choice and optional note, delivered as user notes with subsequent exec/wait responses. Requires a running Web server and a host-provided conversation ID.",
-  },
-  {
+  }),
+  send_message_to_user_async: contract({
     name: "send_message_to_user_async",
     schema: SEND_MESSAGE_TO_USER_SCHEMA,
     output: {
@@ -341,8 +365,8 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Send a concise message that needs the user's attention during ongoing work. The message appears in this conversation's Web UI, and the tool returns immediately without ending the turn or waiting for a reply. Use this tool to report a critical blocker or a finding that may change the task's direction, or to answer a user question or status request received while work is still in progress. Use this tool when a message needs the user's immediate attention; use commentary for routine progress and intermediate context. It informs rather than asks: do not expect a reply, and use request_user_input_async when you need an answer. Requires a running Web server and a host-provided conversation ID.",
-  },
-  {
+  }),
+  set_conversation_title: contract({
     name: "set_conversation_title",
     schema: TITLE_SCHEMA,
     output: {
@@ -353,73 +377,157 @@ const NATIVE_CONTRACTS: readonly NativeContract[] = [
     },
     description:
       "Sets a title for this conversation so the user can easily find and manage it. Call once in your first exec with 3 to 8 words summarizing the user's task, in the user's language. Only the first title is kept.",
-  },
-  {
+  }),
+  list_mcp_resources: contract({
     name: "list_mcp_resources",
     schema: RESOURCE_LIST_SCHEMA,
     description:
       "Lists resources provided by MCP servers, such as files, database schemas or application-specific information. Returns {resources:[{server,uri,name,...}],server?,nextCursor?,errors?}. A specified server returns one page; omitting server aggregates enabled servers with failures in errors. Servers without resource support contribute an empty list. Resources are separate from the ALL_TOOLS method catalog.",
-  },
-  {
+  }),
+  list_mcp_resource_templates: contract({
     name: "list_mcp_resource_templates",
     schema: RESOURCE_LIST_SCHEMA,
     description:
       "Lists resource templates provided by MCP servers. Returns {resourceTemplates:[{server,uriTemplate,name,...}],server?,nextCursor?,errors?}. Expanding a uriTemplate produces a concrete URI for read_mcp_resource. Pagination, aggregation and errors follow list_mcp_resources.",
-  },
-  {
+  }),
+  read_mcp_resource: contract({
     name: "read_mcp_resource",
     schema: RESOURCE_READ_SCHEMA,
     description:
       "Read a specific resource from an MCP server given the server name and resource URI. Known URIs can be read directly. Returns {server,uri,contents:[{uri,mimeType?,text?,blob?}]}: text is plain text; blob is Base64. The URI is resolved by that server, not as a local path or a generic download URL. Failures throw an error.",
-  },
-];
+  }),
+} satisfies { [K in NativeToolName]: NativeContract & { name: K } };
+export type NativeContracts = typeof NATIVE_CONTRACTS;
+
+const jsonSchemas = new WeakMap<z.ZodType, Record<string, unknown>>();
+const descriptions = new WeakMap<NativeContract, string>();
+const definitions = new WeakMap<
+  NativeContract,
+  Omit<CodeModeToolDefinition, "call">
+>();
+
+/** JSON Schema for a zod schema, computed once per schema object. */
 export function jsonSchema(schema: z.ZodType): Record<string, unknown> {
-  const { $schema: _dialect, ...value } = z.toJSONSchema(schema, {
-    unrepresentable: "throw",
-  });
+  let value = jsonSchemas.get(schema);
+  if (value === undefined) {
+    const { $schema: _dialect, ...converted } = z.toJSONSchema(schema, {
+      unrepresentable: "throw",
+    });
+    value = converted;
+    jsonSchemas.set(schema, value);
+  }
   return value;
 }
 export function describeContract(contract: NativeContract): string {
-  return `${contract.description}\nCall: await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\nInput JSON Schema: ${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\nOutput JSON Schema: ${JSON.stringify(contract.output)}` : ""}`;
+  let value = descriptions.get(contract);
+  if (value === undefined) {
+    value = `${contract.description}\nCall: await tools.${contract.name}(${contract.freeform ? "patch" : "args"})\nInput JSON Schema: ${JSON.stringify(jsonSchema(contract.schema))}${contract.output ? `\nOutput JSON Schema: ${JSON.stringify(contract.output)}` : ""}`;
+    descriptions.set(contract, value);
+  }
+  return value;
 }
+/** The Code Mode definition of a contract, computed once per contract object. */
 export function nativeDefinition(
   contract: NativeContract,
 ): Omit<CodeModeToolDefinition, "call"> {
-  return {
-    name: contract.name,
-    description: describeContract(contract),
-    kind: contract.freeform ? "freeform" : "function",
-    ...(!contract.freeform ? { inputSchema: jsonSchema(contract.schema) } : {}),
-    ...(contract.output ? { outputSchema: contract.output } : {}),
-  };
+  let value = definitions.get(contract);
+  if (value === undefined) {
+    value = {
+      name: contract.name,
+      description: describeContract(contract),
+      kind: contract.freeform ? "freeform" : "function",
+      ...(!contract.freeform
+        ? { inputSchema: jsonSchema(contract.schema) }
+        : {}),
+      ...(contract.output ? { outputSchema: contract.output } : {}),
+    };
+    definitions.set(contract, value);
+  }
+  return value;
 }
-export function bindNative(
+/** Validates nested tool input against its contract before any side effect. */
+export function parseNativeInput<S extends z.ZodType>(
+  contract: NativeContract<S>,
+  raw: unknown,
+): z.output<S> {
+  const parsed = contract.schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  throw new Error(nativeInputError(contract, parsed.error.issues));
+}
+/**
+ * Names each wrong field with what was expected, so the next call can be fixed.
+ * zod messages describe types, allowed values and unknown key names; they do
+ * not repeat input values.
+ */
+function nativeInputError(
   contract: NativeContract,
-  call: CodeModeToolDefinition["call"],
-): CodeModeToolDefinition {
+  issues: readonly z.core.$ZodIssue[],
+): string {
+  const problems = issues.map((issue) => {
+    const field = fieldPath(issue.path);
+    if (
+      issue.code === "invalid_type" &&
+      issue.message.endsWith("received undefined")
+    )
+      return `${field}: required field is missing (expected ${issue.expected})`;
+    if (issue.code === "unrecognized_keys") {
+      const allowed = allowedFields(jsonSchema(contract.schema), issue.path);
+      return `${field}: ${issue.message}${allowed.length > 0 ? `. Allowed fields: ${allowed.join(", ")}` : ""}`;
+    }
+    return `${field}: ${issue.message}`;
+  });
+  const shape = contract.freeform
+    ? ` Pass the complete patch text as one string: await tools.${contract.name}(patch).`
+    : "";
+  return `tools.${contract.name} did not run because its input is invalid. ${problems.join("; ")}.${shape}`;
+}
+function fieldPath(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return "input";
+  return path
+    .map((segment, index) =>
+      typeof segment === "number"
+        ? `[${segment}]`
+        : `${index === 0 ? "" : "."}${String(segment)}`,
+    )
+    .join("");
+}
+/** Property names of the object schema at path, read from the JSON Schema. */
+function allowedFields(
+  schema: Record<string, unknown>,
+  path: readonly PropertyKey[],
+): string[] {
+  let node: unknown = schema;
+  for (const segment of path) {
+    const current = node as Record<string, unknown> | undefined;
+    node =
+      typeof segment === "number"
+        ? current?.items
+        : (current?.properties as Record<string, unknown> | undefined)?.[
+            String(segment)
+          ];
+  }
+  const properties = (node as { properties?: Record<string, unknown> })
+    ?.properties;
+  return properties === undefined ? [] : Object.keys(properties);
+}
+/** Contracts by name for one instance; exec_command describes the resolved shell. */
+export function nativeContractsByName(shell: CommandShell): NativeContracts {
   return {
-    ...nativeDefinition(contract),
-    call: async (raw, context) => {
-      const parsed = contract.schema.safeParse(raw);
-      if (!parsed.success)
-        throw new Error(
-          `工具 ${contract.name} 参数无效：${parsed.error.issues.map((issue) => `${issue.path.join(".") || "/"} ${issue.code}`).join(", ")}；尚未执行。`,
-        );
-      return call(parsed.data, context);
+    ...NATIVE_CONTRACTS,
+    exec_command: {
+      ...NATIVE_CONTRACTS.exec_command,
+      description:
+        NATIVE_CONTRACTS.exec_command.description +
+        "\n" +
+        shellDescription(shell),
     },
   };
 }
+/** Contracts in catalog order. */
 export function nativeContracts(
   shell: CommandShell,
 ): readonly NativeContract[] {
-  return NATIVE_CONTRACTS.map((contract) =>
-    contract.name === "exec_command"
-      ? {
-          ...contract,
-          description: contract.description + "\n" + shellDescription(shell),
-        }
-      : contract,
-  );
+  return Object.values(nativeContractsByName(shell));
 }
 
 export function execDescription(
@@ -454,12 +562,15 @@ The catalog is not automatically printed; changes appear in the next exec. list_
 ## Results and execution
 Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources.
 An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.
-Final response text is limited to 36,000 UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is 37,000 UTF-8 bytes.
-exec waits 10000 ms by default, at most 30000. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
+Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
+exec waits ${DEFAULT_EXEC_YIELD_TIME_MS} ms by default, at most ${MAX_EXEC_YIELD_TIME_MS}. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
 cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.
 
 ## Local tools
 ${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
 }
-export const WAIT_DESCRIPTION =
-  "Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to 110000 ms (also the maximum); longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to 36,000 UTF-8 bytes, or 37,000 with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.";
+const WAIT_DEFAULT =
+  DEFAULT_WAIT_YIELD_TIME_MS === MAX_WAIT_YIELD_TIME_MS
+    ? `${DEFAULT_WAIT_YIELD_TIME_MS} ms (also the maximum)`
+    : `${DEFAULT_WAIT_YIELD_TIME_MS} ms, at most ${MAX_WAIT_YIELD_TIME_MS}`;
+export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;

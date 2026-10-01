@@ -1,3 +1,4 @@
+import { abortError } from "../util.js";
 import type { CodeModeToolName } from "./types.js";
 
 export const NESTED_TOOL_ADMISSION_BUDGET_BYTES = 1024 * 1024 * 1024;
@@ -135,10 +136,4 @@ function assertPositiveSafeInteger(value: number, name: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive safe integer`);
   }
-}
-
-function abortError(message: string): Error {
-  const error = new Error(message);
-  error.name = "AbortError";
-  return error;
 }

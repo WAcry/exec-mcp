@@ -17,15 +17,18 @@ export function resolveUserPath(value: string, base = homedir()): string {
     return path.resolve(homedir(), value.slice(2));
   return path.resolve(base, value);
 }
+/** An Error named AbortError. Pass the signal's reason as cause when known. */
 export function abortError(
-  message = "操作已取消；已发生的副作用不会回滚。",
+  message = "The operation was cancelled. Side effects that already happened are not rolled back.",
+  options?: ErrorOptions,
 ): Error {
-  const error = new Error(message);
+  const error = new Error(message, options);
   error.name = "AbortError";
   return error;
 }
-export function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw abortError();
+export function throwIfAborted(signal?: AbortSignal, message?: string): void {
+  if (signal?.aborted === true)
+    throw abortError(message, { cause: signal.reason });
 }
 export class AsyncMutex {
   private tail: Promise<void> = Promise.resolve();

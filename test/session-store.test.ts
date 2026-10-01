@@ -241,8 +241,10 @@ describe("native session store/load", () => {
     const id = cellId(first);
     await expect(
       value.wait({ cellId: id, sessionScope: "conversation-b" }),
-    ).rejects.toThrow("其他");
-    await expect(value.wait({ cellId: id })).rejects.toThrow("其他");
+    ).rejects.toThrow("another ChatGPT conversation");
+    await expect(value.wait({ cellId: id })).rejects.toThrow(
+      "another ChatGPT conversation",
+    );
     expect(
       texts(
         await value.wait({ cellId: id, sessionScope: "conversation-a" }),
@@ -289,7 +291,7 @@ describe("native session store/load", () => {
     expect(jsonOutput(await run(value, 'text(load("keep"));'))).toBe(5);
   });
 
-  it("expires idle storage but never expires an unconsumed cell", async () => {
+  it("keeps storage while a yielded cell is observed, then expires it when idle", async () => {
     const value = service(250);
     await run(value, 'store("cached",7);');
     const pending = await value.exec({
@@ -297,12 +299,13 @@ describe("native session store/load", () => {
       tools: [],
       sessionScope: "conversation-a",
     });
-    await pause(550);
+    await pause(150);
     expect(jsonOutput(await run(value, 'text(load("cached"));'))).toBe(7);
-    await value.wait({
+    const final = await value.wait({
       cellId: cellId(pending),
       sessionScope: "conversation-a",
     });
+    expect(texts(final).join("\n")).toContain("final");
     await pause(550);
     expect(
       jsonOutput(await run(value, 'text(load("cached")===undefined);')),
@@ -354,8 +357,8 @@ describe("session lease ownership", () => {
     pools.push(pool);
     const first = pool.acquire("a"),
       second = pool.acquire("a");
-    const firstCheck = expect(first).rejects.toThrow("失效");
-    const secondCheck = expect(second).rejects.toThrow("失效");
+    const firstCheck = expect(first).rejects.toThrow("no longer usable");
+    const secondCheck = expect(second).rejects.toThrow("no longer usable");
     const closing = pool.close();
     finish({
       usable: true,
@@ -381,7 +384,7 @@ describe("session lease ownership", () => {
         }) as CodeModeSession,
     );
     pools.push(pool);
-    await expect(pool.acquire("a")).rejects.toThrow("失效");
+    await expect(pool.acquire("a")).rejects.toThrow("no longer usable");
     const next = await pool.acquire("a");
     expect(next.session.usable).toBe(true);
     next.release();

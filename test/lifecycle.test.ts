@@ -164,7 +164,9 @@ describe("real execution lifecycle boundaries", () => {
     });
     expect(calls).toBe(1);
     expect(result.isError).toBe(true);
-    expect(texts(result).join("\n")).toContain("未截断或落盘");
+    expect(texts(result).join("\n")).toContain(
+      "It was not truncated or written to a file",
+    );
   });
   it("serializes concurrent patches in one directory without losing changes", async () => {
     const dir = await directory();
@@ -208,7 +210,7 @@ describe("real execution lifecycle boundaries", () => {
         const end=Date.now()+5000;
         while(!failed&&Date.now()<end)await new Promise(r=>setTimeout(r,10));
         let message='';try{await service.wait({cellId:id,sessionScope:'scope'});}catch(error){message=error.message;}
-        if(!message.includes('结果不确定'))throw new Error(message);
+        if(!message.includes('The result is unknown'))throw new Error(message);
         const next=await service.exec({source:'text({recovered:load("cache")===undefined});',tools:[],sessionScope:'scope'});
         if(!JSON.stringify(next).includes('recovered')||!JSON.stringify(next).includes('true'))throw new Error('No recovery');
         console.log('host recovery ok');

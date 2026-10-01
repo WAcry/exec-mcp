@@ -72,7 +72,7 @@ describe.each([false, true])(
         max_output_tokens: 0,
       });
       expect(texts(first)).toHaveLength(1);
-      expect(texts(first)[0]).toContain("截断");
+      expect(texts(first)[0]).toContain("truncated");
       const finished = await call(connection.client, "wait", {
         cell_id: cellId(first),
       });
@@ -91,7 +91,7 @@ describe.each([false, true])(
         cell_id: cellId(pending),
         max_tokens: 1,
       });
-      expect(texts(limited)[0]).toContain("截断");
+      expect(texts(limited)[0]).toContain("truncated");
       expect(limited.structuredContent).toBeUndefined();
       const invalid = await call(connection.client, "exec", {
         source: 'store("should_not_run",true);',

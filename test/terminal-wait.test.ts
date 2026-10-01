@@ -357,7 +357,9 @@ describe.each([false, true])(
           },
         });
         expect(nested.isError).toBe(true);
-        expect(JSON.stringify(nested)).toContain("参数无效");
+        expect(JSON.stringify(nested)).toContain(
+          "did not run because its input is invalid",
+        );
       }
       {
         const f = await fixture();

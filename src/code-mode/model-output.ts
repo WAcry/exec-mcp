@@ -6,8 +6,7 @@ import { applyOutputBudget } from "./output-budget.js";
  * Nested tool results and native store/load never pass through this guard.
  */
 export const MODEL_TEXT_BYTES = 36_000;
-const NOTICE =
-  "返回文本已达 36,000 字节上限，保留首尾；中间内容不会由 wait 补发。可在 exec 内筛选结果，或先 store 再分段 load。";
+const NOTICE = `Response text reached the ${MODEL_TEXT_BYTES.toLocaleString("en-US")}-byte limit; the beginning and end are kept. Later wait calls do not return the omitted middle. Filter results inside exec, or store them and load parts in later calls.`;
 
 export function boundModelOutput(result: CallToolResult): CallToolResult {
   const texts = result.content.filter((item) => item.type === "text");

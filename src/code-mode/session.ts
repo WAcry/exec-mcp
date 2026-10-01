@@ -2,41 +2,50 @@ import crypto from "node:crypto";
 
 import type * as grpc from "@grpc/grpc-js";
 
-import { errorMessage } from "../util.js";
+import { abortError, errorMessage } from "../util.js";
+import { DEFAULT_EXEC_YIELD_TIME_MS } from "./exec-source.js";
 import {
-  CancellableMutex,
   nestedToolReservationBytes,
   WeightedAdmissionQueue,
 } from "./admission.js";
 import { prepareNestedToolResult } from "./result.js";
 import {
+  firstStreamMessage,
   grpcError,
+  monitorStreamFailure,
+  streamReady,
   type CodeModeHostClient,
   type ProtoMessage,
   unaryCall,
 } from "./protocol.js";
-import type {
-  CodeModeOutputItem,
-  CodeModeToolDefinition,
-  CodeModeToolName,
-} from "./types.js";
+import type { CodeModeToolDefinition } from "./types.js";
+import {
+  decodeOptionalJson,
+  decodeOutcome,
+  decodeToolName,
+  decodeWaitResponse,
+  encodeToolDefinition,
+  numberField,
+  optionalStringField,
+  recordField,
+  stringField,
+  toolKey,
+  toolMap,
+  validateIdentifier,
+  type RuntimeOutcome,
+} from "./wire.js";
 
-const MAX_IDENTIFIER_BYTES = 256;
-
-export type RuntimeOutcome =
-  | { cellId: string; items: CodeModeOutputItem[]; state: "yielded" }
-  | { cellId: string; items: CodeModeOutputItem[]; state: "terminated" }
-  | {
-      cellId: string;
-      errorText?: string;
-      items: CodeModeOutputItem[];
-      state: "completed";
-    };
+export type { RuntimeOutcome } from "./wire.js";
 
 interface ExecutionState {
+  /** Set by the caller's signal. New tool calls from this execution do not run. */
+  cancelled?: boolean;
   cellId?: string;
   tools: Map<string, CodeModeToolDefinition>;
 }
+
+/** Cancellations that arrive before their tool call. The host normally sends the call soon after. */
+const MAX_EARLY_CANCELLATIONS = 1024;
 
 interface CellState {
   finalSequence?: number;
@@ -56,10 +65,8 @@ export class CodeModeSession {
   readonly #onFailure:
     | ((session: CodeModeSession, error: Error) => void)
     | undefined;
-  readonly #scope: string | undefined;
   readonly #toolStream: grpc.ClientReadableStream<ProtoMessage>;
   readonly #transportTimeoutMs: number;
-  readonly #resultPreparation: CancellableMutex;
   readonly id: string;
   #cells = new Map<string, CellState>();
   #cancelledInvocations = new Set<string>();
@@ -78,8 +85,6 @@ export class CodeModeSession {
     eventStream: grpc.ClientReadableStream<ProtoMessage>;
     id: string;
     onFailure?: (session: CodeModeSession, error: Error) => void;
-    resultPreparation: CancellableMutex;
-    scope?: string;
     toolStream: grpc.ClientReadableStream<ProtoMessage>;
     transportTimeoutMs: number;
   }) {
@@ -88,8 +93,6 @@ export class CodeModeSession {
     this.#eventStream = options.eventStream;
     this.id = options.id;
     this.#onFailure = options.onFailure;
-    this.#resultPreparation = options.resultPreparation;
-    this.#scope = options.scope;
     this.#toolStream = options.toolStream;
     this.#transportTimeoutMs = options.transportTimeoutMs;
     this.#attachStreams();
@@ -114,8 +117,6 @@ export class CodeModeSession {
     maxHeapSizeBytes?: number;
     maxYieldTimeMs?: number;
     onFailure?: (session: CodeModeSession, error: Error) => void;
-    resultPreparation?: CancellableMutex;
-    scope?: string;
     startupTimeoutMs: number;
     transportTimeoutMs: number;
   }): Promise<CodeModeSession> {
@@ -177,8 +178,6 @@ export class CodeModeSession {
       ...(options.onFailure === undefined
         ? {}
         : { onFailure: options.onFailure }),
-      resultPreparation: options.resultPreparation ?? new CancellableMutex(),
-      ...(options.scope === undefined ? {} : { scope: options.scope }),
       toolStream,
       transportTimeoutMs: options.transportTimeoutMs,
     });
@@ -197,47 +196,55 @@ export class CodeModeSession {
     if (options.signal?.aborted === true) throw executionAbortError();
     this.#requireOpen();
     const executionId = crypto.randomUUID();
-    let dispatched = false;
+    const state: ExecutionState = { tools: toolMap(options.tools) };
+    const request: ProtoMessage = {
+      sessionId: this.id,
+      executionId,
+      toolCallId: options.toolCallId,
+      source: options.source,
+      enabledTools: options.tools.map(encodeToolDefinition),
+    };
+    if (options.yieldTimeMs !== undefined)
+      request.yieldTimeMs = options.yieldTimeMs;
+    this.#executions.set(executionId, state);
+    let stream: grpc.ClientReadableStream<ProtoMessage>;
     try {
-      const state: ExecutionState = { tools: toolMap(options.tools) };
-      this.#executions.set(executionId, state);
-
-      const request: ProtoMessage = {
-        sessionId: this.id,
-        executionId,
-        toolCallId: options.toolCallId,
-        source: options.source,
-        enabledTools: options.tools.map(encodeToolDefinition),
-      };
-      if (options.yieldTimeMs !== undefined)
-        request.yieldTimeMs = options.yieldTimeMs;
-      const stream = this.#client.execute(request, {
+      stream = this.#client.execute(request, {
         deadline:
           Date.now() +
-          (options.yieldTimeMs ?? 10_000) +
+          (options.yieldTimeMs ?? DEFAULT_EXEC_YIELD_TIME_MS) +
           this.#transportTimeoutMs +
           1_000,
       });
-      dispatched = true;
+    } catch (error) {
+      this.#executions.delete(executionId);
+      throw error;
+    }
+    try {
       return await this.#readExecutionStream(
         stream,
         executionId,
+        state,
         options.signal,
       );
     } catch (error) {
-      const cellId = this.#executions.get(executionId)?.cellId;
-      if (!dispatched) {
-        this.#executions.delete(executionId);
-        throw error;
-      }
+      // A cancellation before the host reported the cell is cleaned up by the
+      // stream reader once the cell ID arrives. It does not affect the session.
+      if (state.cancelled === true && state.cellId === undefined) throw error;
       try {
-        if (cellId !== undefined) await this.terminate(cellId);
+        if (state.cellId !== undefined) await this.terminate(state.cellId);
         else
           this.#fail(
-            new Error("执行连接中断且未取得 cell ID；会话结果不确定。"),
+            new Error(
+              "The execution stream failed before the host reported a cell ID. The session state is unknown.",
+            ),
           );
       } catch {
-        this.#fail(new Error("无法确认失败 cell 的终止；会话结果不确定。"));
+        this.#fail(
+          new Error(
+            "Could not confirm that the failed cell was terminated. The session state is unknown.",
+          ),
+        );
       }
       this.#executions.delete(executionId);
       throw error;
@@ -358,9 +365,10 @@ export class CodeModeSession {
     );
   }
 
-  async #readExecutionStream(
+  #readExecutionStream(
     stream: grpc.ClientReadableStream<ProtoMessage>,
     expectedExecutionId: string,
+    state: ExecutionState,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
     return new Promise((resolve, reject) => {
@@ -368,20 +376,51 @@ export class CodeModeSession {
       const session = this;
       let cellId: string | undefined;
       let settled = false;
-      const finish = (error?: Error, outcome?: RuntimeOutcome): void => {
-        if (settled) return;
-        settled = true;
+      // Set when the caller cancelled before the host reported the cell.
+      let startTimer: NodeJS.Timeout | undefined;
+      const detach = (): void => {
+        if (startTimer !== undefined) clearTimeout(startTimer);
         signal?.removeEventListener("abort", abort);
         stream.removeListener("data", onData);
         stream.removeListener("error", onError);
         stream.removeListener("end", onEnd);
+      };
+      const finish = (error?: Error, outcome?: RuntimeOutcome): void => {
+        if (settled) return;
+        settled = true;
+        detach();
         if (error !== undefined) reject(error);
         else resolve(outcome!);
       };
-      const abort = (): void => {
-        const error = executionAbortError();
-        finish(error);
+      /** After an early cancellation, the stream is read only to find and stop the cell. */
+      const failPendingStart = (error: Error): void => {
+        detach();
         stream.cancel();
+        session.#executions.delete(expectedExecutionId);
+        session.#fail(error);
+      };
+      const abort = (): void => {
+        state.cancelled = true;
+        if (state.cellId !== undefined) {
+          finish(executionAbortError());
+          stream.cancel();
+          return;
+        }
+        // Return the cancellation now, but keep reading until the host reports
+        // the cell ID, then terminate that cell. Only a missing report is unknown.
+        settled = true;
+        signal?.removeEventListener("abort", abort);
+        reject(executionAbortError());
+        startTimer = setTimeout(
+          () =>
+            failPendingStart(
+              new Error(
+                "The host did not report the cell of a cancelled exec. The session state is unknown.",
+              ),
+            ),
+          session.#transportTimeoutMs,
+        );
+        startTimer.unref();
       };
 
       if (signal?.aborted === true) {
@@ -411,20 +450,14 @@ export class CodeModeSession {
             }
             cellId = stringField(started, "cellId", "cell ID");
             validateIdentifier(cellId, "cell ID");
-            const execution = session.#executions.get(expectedExecutionId);
-            if (execution === undefined)
-              throw new Error("execution state is missing");
-            execution.cellId = cellId;
-            const cell = session.#cells.get(cellId) ?? {
-              highestSequence: 0,
-              pendingInvocations: new Set(),
-              ...(session.#earlyClosures.has(cellId)
-                ? { finalSequence: session.#earlyClosures.get(cellId)! }
-                : {}),
-            };
-            session.#earlyClosures.delete(cellId);
-            session.#cells.set(cellId, cell);
+            state.cellId = cellId;
+            const cell = session.#cellState(cellId);
             session.#maybeRetireCell(cellId, cell);
+            if (settled && state.cancelled === true) {
+              detach();
+              stream.cancel();
+              session.#terminateCancelledCell(expectedExecutionId, cellId);
+            }
             return;
           }
 
@@ -441,20 +474,55 @@ export class CodeModeSession {
           }
           finish(undefined, outcome);
         } catch (error) {
-          finish(error instanceof Error ? error : new Error(String(error)));
+          const failure =
+            error instanceof Error ? error : new Error(String(error));
+          if (settled) failPendingStart(failure);
+          else finish(failure);
         }
       }
       function onError(error: Error): void {
-        finish(grpcError(error, "execution"));
+        if (settled) failPendingStart(grpcError(error, "execution"));
+        else finish(grpcError(error, "execution"));
       }
       function onEnd(): void {
-        if (!settled)
-          finish(new Error("host ended execution before returning an outcome"));
+        const error = new Error(
+          "host ended execution before returning an outcome",
+        );
+        if (settled) failPendingStart(error);
+        else finish(error);
       }
       stream.on("data", onData);
       stream.on("error", onError);
       stream.on("end", onEnd);
     });
+  }
+
+  /** Stops a cell whose exec was cancelled before the host reported it. */
+  #terminateCancelledCell(executionId: string, cellId: string): void {
+    void this.terminate(cellId)
+      .catch(() => {
+        this.#fail(
+          new Error(
+            "Could not confirm that a cancelled cell was terminated. The session state is unknown.",
+          ),
+        );
+      })
+      .finally(() => this.#executions.delete(executionId));
+  }
+
+  /** Returns the cell's state, creating it and applying an early closure if needed. */
+  #cellState(cellId: string): CellState {
+    let cell = this.#cells.get(cellId);
+    if (cell !== undefined) return cell;
+    const finalSequence = this.#earlyClosures.get(cellId);
+    cell = {
+      highestSequence: 0,
+      pendingInvocations: new Set(),
+      ...(finalSequence === undefined ? {} : { finalSequence }),
+    };
+    this.#earlyClosures.delete(cellId);
+    this.#cells.set(cellId, cell);
+    return cell;
   }
 
   #handleSessionEvent(event: ProtoMessage): void {
@@ -471,8 +539,15 @@ export class CodeModeSession {
           "invocation ID",
         );
         const pending = this.#pendingInvocations.get(invocationId);
-        if (pending === undefined) this.#cancelledInvocations.add(invocationId);
-        else pending.abort.abort();
+        if (pending !== undefined) {
+          pending.abort.abort();
+          return;
+        }
+        if (this.#cancelledInvocations.size >= MAX_EARLY_CANCELLATIONS) {
+          const oldest = this.#cancelledInvocations.values().next().value;
+          if (oldest !== undefined) this.#cancelledInvocations.delete(oldest);
+        }
+        this.#cancelledInvocations.add(invocationId);
         return;
       }
       if (event.event === "notification") {
@@ -509,7 +584,15 @@ export class CodeModeSession {
               );
         const cell = this.#cells.get(cellId);
         if (cell === undefined) {
-          this.#earlyClosures.set(cellId, finalSequence);
+          // The start event uses another stream and can arrive later. Keep the
+          // closure only while its execution is still known to this session.
+          const executionId = optionalStringField(
+            closed,
+            "executionId",
+            "execution ID",
+          );
+          if (executionId !== undefined && this.#executions.has(executionId))
+            this.#earlyClosures.set(cellId, finalSequence);
           return;
         }
         cell.finalSequence = finalSequence;
@@ -555,19 +638,8 @@ export class CodeModeSession {
     const wireToolName = recordField(call, "toolName", "tool name");
     const toolName = decodeToolName(wireToolName);
     const execution = this.#executions.get(executionId);
-    let cell = this.#cells.get(cellId);
-    if (cell === undefined) {
-      cell = {
-        highestSequence: 0,
-        pendingInvocations: new Set(),
-        ...(this.#earlyClosures.has(cellId)
-          ? { finalSequence: this.#earlyClosures.get(cellId)! }
-          : {}),
-      };
-      this.#earlyClosures.delete(cellId);
-      this.#cells.set(cellId, cell);
-      if (execution !== undefined) execution.cellId = cellId;
-    }
+    if (execution !== undefined) execution.cellId ??= cellId;
+    const cell = this.#cellState(cellId);
     if (sequence <= cell.highestSequence) {
       throw new Error(
         `host reused tool-call sequence ${sequence} for cell ${cellId}`,
@@ -580,12 +652,21 @@ export class CodeModeSession {
       return;
     }
 
+    if (execution?.cancelled === true) {
+      await this.#completeToolCall(invocationId, {
+        failed: {
+          message:
+            "The exec request was cancelled, so this tool call did not run.",
+        },
+      });
+      this.#maybeRetireCell(cellId, cell);
+      return;
+    }
     const tool = execution?.tools.get(toolKey(toolName));
     if (tool === undefined) {
-      await this.#completeToolFailure(
-        invocationId,
-        `unknown or disabled tool ${toolKey(toolName)}`,
-      );
+      await this.#completeToolCall(invocationId, {
+        failed: { message: `unknown or disabled tool ${toolKey(toolName)}` },
+      });
       this.#maybeRetireCell(cellId, cell);
       return;
     }
@@ -607,21 +688,18 @@ export class CodeModeSession {
           cellId,
           invocationId,
           runtimeToolCallId,
-          ...(this.#scope === undefined ? {} : { sessionScope: this.#scope }),
           signal: abort.signal,
           toolName,
         });
         if (abort.signal.aborted) return;
-        outputJson = await this.#resultPreparation.run(
-          abort.signal,
-          async () => {
-            if (abort.signal.aborted) throw executionAbortError();
-            return prepareNestedToolResult(value);
-          },
-        );
+        outputJson = prepareNestedToolResult(value);
       } catch (error) {
         if (!abort.signal.aborted) {
-          await this.#completeToolFailure(invocationId, errorMessage(error));
+          await this.#completeToolCall(
+            invocationId,
+            { failed: { message: errorMessage(error) } },
+            abort.signal,
+          );
         }
         return;
       }
@@ -629,18 +707,9 @@ export class CodeModeSession {
 
       // A completion transport error is ambiguous. Do not send a second,
       // contradictory completion for a tool that may already have succeeded.
-      await unaryCall(
-        (options, callback) =>
-          this.#client.completeToolCall(
-            {
-              sessionId: this.id,
-              invocationId,
-              succeeded: { outputJson },
-            },
-            options,
-            callback,
-          ),
-        this.#transportTimeoutMs,
+      await this.#completeToolCall(
+        invocationId,
+        { succeeded: { outputJson } },
         abort.signal,
       );
     } finally {
@@ -651,23 +720,31 @@ export class CodeModeSession {
     }
   }
 
-  async #completeToolFailure(
+  /**
+   * Sends one completion. When the signal aborts, the host has cancelled the
+   * invocation or the session is closing; the host no longer needs this result,
+   * so the rejected call counts as a cancellation and does not fail the session.
+   */
+  async #completeToolCall(
     invocationId: string,
-    message: string,
+    result: ProtoMessage,
+    signal?: AbortSignal,
   ): Promise<void> {
-    await unaryCall(
-      (options, callback) =>
-        this.#client.completeToolCall(
-          {
-            sessionId: this.id,
-            invocationId,
-            failed: { message },
-          },
-          options,
-          callback,
-        ),
-      this.#transportTimeoutMs,
-    );
+    try {
+      await unaryCall(
+        (options, callback) =>
+          this.#client.completeToolCall(
+            { sessionId: this.id, invocationId, ...result },
+            options,
+            callback,
+          ),
+        this.#transportTimeoutMs,
+        signal,
+      );
+    } catch (error) {
+      if (signal?.aborted === true) return;
+      throw error;
+    }
   }
 
   async #cancelWait(waitId: string): Promise<void> {
@@ -720,330 +797,6 @@ export class CodeModeSession {
   }
 }
 
-function toolMap(
-  tools: readonly CodeModeToolDefinition[],
-): Map<string, CodeModeToolDefinition> {
-  const result = new Map<string, CodeModeToolDefinition>();
-  for (const tool of tools) {
-    const name = tool.toolName ?? { name: tool.name };
-    const key = toolKey(name);
-    if (result.has(key))
-      throw new Error(`duplicate Code Mode tool route ${key}`);
-    result.set(key, tool);
-  }
-  return result;
-}
-
-function encodeToolDefinition(tool: CodeModeToolDefinition): ProtoMessage {
-  const toolName = tool.toolName ?? { name: tool.name };
-  const result: ProtoMessage = {
-    name: tool.name,
-    toolName: {
-      name: toolName.name,
-      ...(toolName.namespace === undefined
-        ? {}
-        : { namespace: toolName.namespace }),
-    },
-    description: tool.description,
-    kind:
-      tool.kind === "freeform" ? "TOOL_KIND_FREEFORM" : "TOOL_KIND_FUNCTION",
-  };
-  if (tool.inputSchema !== undefined) {
-    result.inputSchemaJson = Buffer.from(
-      JSON.stringify(tool.inputSchema),
-      "utf8",
-    );
-  }
-  if (tool.outputSchema !== undefined) {
-    result.outputSchemaJson = Buffer.from(
-      JSON.stringify(tool.outputSchema),
-      "utf8",
-    );
-  }
-  return result;
-}
-
-function decodeWaitResponse(
-  response: ProtoMessage,
-  expectedCellId: string,
-): RuntimeOutcome {
-  const state = response.state;
-  if (state !== "liveCell" && state !== "missingCell") {
-    throw new Error("host returned an empty wait response");
-  }
-  const outcome = decodeOutcome(recordField(response, state, "wait outcome"));
-  if (outcome.cellId !== expectedCellId) {
-    throw new Error(
-      `host returned cell ${outcome.cellId} instead of ${expectedCellId}`,
-    );
-  }
-  return outcome;
-}
-
-function decodeOutcome(value: ProtoMessage): RuntimeOutcome {
-  const cellId = stringField(value, "cellId", "cell ID");
-  const rawItems = value.contentItems;
-  if (rawItems !== undefined && !Array.isArray(rawItems)) {
-    throw new Error("host returned invalid content items");
-  }
-  const items = (rawItems ?? []).map((item) =>
-    decodeOutputItem(asRecord(item, "content item")),
-  );
-  if (value.outcome === "yielded") return { cellId, items, state: "yielded" };
-  if (value.outcome === "terminated")
-    return { cellId, items, state: "terminated" };
-  if (value.outcome === "completed") {
-    const completed = recordField(value, "completed", "completed outcome");
-    const errorText = optionalStringField(
-      completed,
-      "errorText",
-      "script error",
-    );
-    return {
-      cellId,
-      ...(errorText === undefined ? {} : { errorText }),
-      items,
-      state: "completed",
-    };
-  }
-  throw new Error("host returned an execution without an outcome");
-}
-
-function decodeOutputItem(value: ProtoMessage): CodeModeOutputItem {
-  if (value.item === "text") {
-    return {
-      type: "text",
-      text: stringField(
-        recordField(value, "text", "text content"),
-        "text",
-        "text",
-      ),
-    };
-  }
-  if (value.item === "image") {
-    const image = recordField(value, "image", "image content");
-    const detail = decodeImageDetail(image.detail);
-    return {
-      type: "image",
-      imageUrl: stringField(image, "imageUrl", "image URL"),
-      ...(detail === undefined ? {} : { detail }),
-    };
-  }
-  if (value.item === "audio") {
-    return {
-      type: "audio",
-      audioUrl: stringField(
-        recordField(value, "audio", "audio content"),
-        "audioUrl",
-        "audio URL",
-      ),
-    };
-  }
-  throw new Error("host returned an empty content item");
-}
-
-function decodeImageDetail(
-  value: unknown,
-): "auto" | "low" | "high" | "original" | undefined {
-  switch (value) {
-    case undefined:
-      return undefined;
-    case "IMAGE_DETAIL_AUTO":
-      return "auto";
-    case "IMAGE_DETAIL_LOW":
-      return "low";
-    case "IMAGE_DETAIL_HIGH":
-      return "high";
-    case "IMAGE_DETAIL_ORIGINAL":
-      return "original";
-    default:
-      throw new Error(`host returned invalid image detail ${String(value)}`);
-  }
-}
-
-function decodeToolName(value: ProtoMessage): CodeModeToolName {
-  const name = stringField(value, "name", "tool name");
-  const namespace = optionalStringField(value, "namespace", "tool namespace");
-  return { name, ...(namespace === undefined ? {} : { namespace }) };
-}
-
-function decodeOptionalJson(value: unknown, field: string): unknown {
-  if (value === undefined) return undefined;
-  if (!Buffer.isBuffer(value) && !(value instanceof Uint8Array)) {
-    throw new Error(`host returned invalid ${field}`);
-  }
-  try {
-    return JSON.parse(Buffer.from(value).toString("utf8")) as unknown;
-  } catch (error) {
-    throw new Error(`host returned invalid ${field}: ${errorMessage(error)}`);
-  }
-}
-
-interface StreamFailureMonitor {
-  release(): void;
-  throwIfFailed(): void;
-}
-
-/**
- * Keeps a readable gRPC stream's error event handled across async handoffs.
- * grpc-js emits a non-OK error immediately before terminal status, including
- * after cancel() has already settled the operation that owned the stream.
- */
-function monitorStreamFailure(
-  stream: grpc.ClientReadableStream<ProtoMessage>,
-  operation: string,
-): StreamFailureMonitor {
-  let failure: Error | undefined;
-  let released = false;
-  const onError = (error: Error): void => {
-    failure ??= grpcError(error, operation);
-  };
-  const onEnd = (): void => {
-    failure ??= new Error(`Code Mode ${operation} stream ended unexpectedly`);
-  };
-  const onStatus = (): void => release();
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    stream.removeListener("error", onError);
-    stream.removeListener("end", onEnd);
-    stream.removeListener("status", onStatus);
-  };
-
-  stream.on("error", onError);
-  stream.on("end", onEnd);
-  stream.once("status", onStatus);
-  return {
-    release,
-    throwIfFailed(): void {
-      if (failure !== undefined) throw failure;
-    },
-  };
-}
-
-function firstStreamMessage(
-  stream: grpc.ClientReadableStream<ProtoMessage>,
-  timeoutMs: number,
-  operation: string,
-): Promise<ProtoMessage> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      cleanup();
-      stream.cancel();
-      reject(new Error(`Code Mode ${operation} timed out`));
-    }, timeoutMs);
-    const onData = (message: ProtoMessage): void => {
-      cleanup();
-      stream.pause();
-      resolve(message);
-    };
-    const onError = (error: Error): void => {
-      cleanup();
-      reject(grpcError(error, operation));
-    };
-    const onEnd = (): void => {
-      cleanup();
-      reject(new Error(`Code Mode ${operation} stream ended early`));
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      stream.removeListener("data", onData);
-      stream.removeListener("error", onError);
-      stream.removeListener("end", onEnd);
-    };
-    stream.once("data", onData);
-    stream.once("error", onError);
-    stream.once("end", onEnd);
-  });
-}
-
-function streamReady(
-  stream: grpc.ClientReadableStream<ProtoMessage>,
-  timeoutMs: number,
-  operation: string,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => finish(new Error(`Code Mode ${operation} timed out`)),
-      timeoutMs,
-    );
-    const finish = (error?: Error): void => {
-      clearTimeout(timer);
-      stream.removeListener("metadata", onMetadata);
-      stream.removeListener("error", onError);
-      stream.removeListener("end", onEnd);
-      if (error === undefined) resolve();
-      else reject(error);
-    };
-    const onMetadata = (): void => finish();
-    const onError = (error: Error): void => finish(grpcError(error, operation));
-    const onEnd = (): void =>
-      finish(new Error(`Code Mode ${operation} stream ended early`));
-    stream.once("metadata", onMetadata);
-    stream.once("error", onError);
-    stream.once("end", onEnd);
-  });
-}
-
 function executionAbortError(): Error {
-  const error = new Error("Code Mode execution was aborted");
-  error.name = "AbortError";
-  return error;
-}
-
-function toolKey(name: CodeModeToolName): string {
-  return name.namespace === undefined
-    ? name.name
-    : `${name.namespace}/${name.name}`;
-}
-
-function validateIdentifier(value: string, field: string): void {
-  if (value === "") throw new Error(`host returned an empty ${field}`);
-  if (Buffer.byteLength(value, "utf8") > MAX_IDENTIFIER_BYTES) {
-    throw new Error(
-      `host returned ${field} exceeding ${MAX_IDENTIFIER_BYTES} bytes`,
-    );
-  }
-}
-
-function recordField(
-  value: ProtoMessage,
-  key: string,
-  field: string,
-): ProtoMessage {
-  return asRecord(value[key], field);
-}
-
-function asRecord(value: unknown, field: string): ProtoMessage {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`host returned invalid ${field}`);
-  }
-  return value as ProtoMessage;
-}
-
-function stringField(value: ProtoMessage, key: string, field: string): string {
-  const result = value[key];
-  if (typeof result !== "string")
-    throw new Error(`host returned invalid ${field}`);
-  return result;
-}
-
-function optionalStringField(
-  value: ProtoMessage,
-  key: string,
-  field: string,
-): string | undefined {
-  const result = value[key];
-  if (result === undefined) return undefined;
-  if (typeof result !== "string")
-    throw new Error(`host returned invalid ${field}`);
-  return result;
-}
-
-function numberField(value: ProtoMessage, key: string, field: string): number {
-  const result = value[key];
-  if (!Number.isSafeInteger(result) || Number(result) < 0) {
-    throw new Error(`host returned invalid ${field}`);
-  }
-  return Number(result);
+  return abortError("Code Mode execution was aborted");
 }

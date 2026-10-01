@@ -100,7 +100,9 @@ describe("conservative model-bound text, separate from tool data", () => {
       source: 'text(load("raw").output);',
     });
     expect(total(oversized)).toBeLessThanOrEqual(MODEL_TEXT_BYTES);
-    expect(texts(oversized).join("\n")).toContain("保留首尾");
+    expect(texts(oversized).join("\n")).toContain(
+      "the beginning and end are kept",
+    );
     const later = await host.exec({
       sessionScope: "large-data",
       tools,

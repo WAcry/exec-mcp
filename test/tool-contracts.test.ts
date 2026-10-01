@@ -8,6 +8,8 @@ import {
   describeContract,
   execDescription,
   nativeContracts,
+  nativeContractsByName,
+  parseNativeInput,
   jsonSchema,
   EXEC_SCHEMA,
   WAIT_SCHEMA,
@@ -53,20 +55,28 @@ afterEach(async () => {
 });
 
 describe("self-contained model-visible contracts", () => {
-  it("omits retired user-input fields rather than accepting hidden acknowledgments", () => {
-    expect(EXEC_SCHEMA.safeParse({ source: "text(42)" }).success).toBe(true);
-    expect(WAIT_SCHEMA.safeParse({ cell_id: "existing-cell" }).success).toBe(
-      true,
+  it("names the field, the expected value and the allowed keys when local tool input is invalid", () => {
+    const contracts = nativeContractsByName(resolveShell());
+    expect(() =>
+      parseNativeInput(contracts.exec_command, { command: "ls" }),
+    ).toThrow(
+      'tools.exec_command did not run because its input is invalid. cmd: required field is missing (expected string); input: Unrecognized key: "command". Allowed fields: cmd, workdir, shell, login, tty, yield_time_ms.',
     );
-    for (const ack_user_input of [[], ["old-answer-event"]]) {
-      expect(
-        EXEC_SCHEMA.safeParse({ source: "text(42)", ack_user_input }).success,
-      ).toBe(false);
-      expect(
-        WAIT_SCHEMA.safeParse({ cell_id: "existing-cell", ack_user_input })
-          .success,
-      ).toBe(false);
-    }
+    expect(() =>
+      parseNativeInput(contracts.view_image, { path: "a.png", detail: "low" }),
+    ).toThrow('detail: Invalid option: expected one of "high"|"original"');
+    expect(() =>
+      parseNativeInput(contracts.request_user_input_async, {
+        questions: [{ title: "Which?", options: ["a", "b"], extra: 1 }],
+      }),
+    ).toThrow(
+      'questions[0]: Unrecognized key: "extra". Allowed fields: title, options.',
+    );
+    expect(() =>
+      parseNativeInput(contracts.apply_patch, { patch: "*** Begin Patch" }),
+    ).toThrow(
+      "Pass the complete patch text as one string: await tools.apply_patch(patch).",
+    );
   });
   it("includes skill selection once in exec's native contract and scopes result handling to downstream MCP", () => {
     const contracts = nativeContracts(resolveShell());
@@ -244,26 +254,23 @@ describe("self-contained model-visible contracts", () => {
 });
 
 describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
-  it("offers one asynchronous question function and no answer-polling tool", async () => {
+  it("offers one asynchronous question function", async () => {
     const connection = await connect(
       { web: { enabled: true, host: "127.0.0.1", port: 0 } },
       legacy,
     );
     connections.push(connection);
-    const listed = (await connection.client.listTools()).tools;
-    expect(JSON.stringify(listed)).not.toMatch(/get_user_input|ack_user_input/);
     const result = await connection.client.callTool({
       name: "exec",
       arguments: {
         source:
-          "text({create:typeof tools.request_user_input_async,read:typeof tools.get_user_input,names:ALL_TOOLS.map(t=>t.name)});",
+          "text({create:typeof tools.request_user_input_async,names:ALL_TOOLS.map(t=>t.name)});",
       },
       _meta: { "openai/session": "same-conversation-without-inbox" },
     });
     expect(result.isError).not.toBe(true);
     expect(jsonOutput(result)).toEqual({
       create: "function",
-      read: "undefined",
       names: nativeContracts(resolveShell()).map((tool) => tool.name),
     });
   });
@@ -428,7 +435,7 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     expect(result.isError).toBe(true);
     const message = texts(result).join("\n");
     expect(message).toContain("SyntaxError");
-    expect(message).toContain("解析阶段");
+    expect(message).toContain("JavaScript parse error");
     expect(message).toContain("```console");
     for (const filename of ["before.txt", "broken.md", "after.txt"])
       await expect(

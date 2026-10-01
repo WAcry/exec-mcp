@@ -24,7 +24,6 @@ export interface NestedToolCallContext {
   cellId: string;
   invocationId: string;
   runtimeToolCallId: string;
-  sessionScope?: string;
   signal: AbortSignal;
   toolName: CodeModeToolName;
 }
@@ -42,7 +41,7 @@ export interface CodeModeExecRequest {
   source: string;
   /** Correlate diagnostics with the Web call record; not supplied by the model. */
   requestId?: string;
-  /** 服务端原生附件出口，不是 V8 全局或模型提供的回调。 */
+  /** Server-side exit for native attachments; not a V8 global or a model-supplied callback. */
   takeAttachments?: () => CallToolResult["content"];
   tools: readonly CodeModeToolDefinition[];
   /** Opaque OpenAI conversation scope. It is correlation state, not auth. */

@@ -135,7 +135,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
           event.status === "connecting"
             ? `Downstream MCP ${JSON.stringify(event.server)}: connecting and reading all tools…`
             : event.status === "ready"
-              ? `Downstream MCP ${JSON.stringify(event.server)}: loaded ${event.tools} tools.`
+              ? `Downstream MCP ${JSON.stringify(event.server)}: loaded ${event.tools} ${event.tools === 1 ? "tool" : "tools"}.`
               : event.message,
         ),
     });

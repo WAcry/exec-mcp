@@ -63,6 +63,7 @@ Only descriptions of implicitly selectable Skills may be shortened; full names, 
 First extract common path prefixes at directory boundaries, and use aliases only when their definitions and explanation still save space.
 Distribute remaining description capacity character by character in round-robin order. Completed short descriptions yield their unused share; an ellipsis marks truncation.
 Return one catalog text without a raw JSON mirror.
+Its headings, policy text, and warnings are English like other model-visible text; Skill names, descriptions, and paths keep their original text.
 
 The catalog also adapts to the final model-response byte budget, shortening descriptions first to reduce outer head/tail truncation of Skills in the middle.
 If names, paths, and policies alone exceed the target, retain all entries and report the excess instead of paginating or hiding Skills.

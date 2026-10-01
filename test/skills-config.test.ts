@@ -288,9 +288,9 @@ describe("Skill enablement during discovery", () => {
       maxChars: 1000,
     });
     expect(text).not.toMatch(
-      /BAD_SKILL|NAMED_SKILL|INVALID_SECRET|skills.config|enabled|已禁用|禁用项/,
+      /BAD_SKILL|NAMED_SKILL|INVALID_SECRET|skills.config|enabled|disabled/,
     );
-    expect(text).toContain("0 项");
+    expect(text).toContain("0 skills");
   });
   it("does not turn an enabled explicit-only Skill into an implicitly callable one", async () => {
     const f = await setup();
@@ -304,7 +304,7 @@ describe("Skill enablement during discovery", () => {
     ]);
     const text = await listSkills({ homeDir: f.home, config: rules });
     expect(text).toContain('"manual"');
-    expect(text).toContain("仅用户明确要求");
+    expect(text).toContain("Read only when the user explicitly asks");
     expect(text).not.toContain("TRIGGER_manual");
   });
   it("keeps disabled entries out of the description budget rather than filtering the rendered output", async () => {

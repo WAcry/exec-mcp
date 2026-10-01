@@ -62,7 +62,7 @@ async function connection(legacy: boolean, maxChars?: number) {
 function directoryText(result: CallToolResult): string {
   expect(result.isError, JSON.stringify(result)).not.toBe(true);
   const matches = texts(result).filter((text) =>
-    text.startsWith("Skill 目录："),
+    text.startsWith("Skill catalog:"),
   );
   expect(matches).toHaveLength(1);
   expect(result.structuredContent).toBeUndefined();
@@ -138,14 +138,16 @@ enabled = true
           },
         }),
       );
-      expect(output).toContain("3 项");
+      expect(output).toContain("3 skills");
       expect(output).toContain("PROJECT_RELEASE_TRIGGER");
       expect(output).not.toMatch(
         /USER_RELEASE_TRIGGER|CODEX_RELEASE_TRIGGER|PRIVATE_MANUAL_TRIGGER|skills.config|enabled/,
       );
       expect(output).toContain('"general"');
       expect(output).toContain('"manual"');
-      expect(output).toContain("仅用户明确要求使用时才可读取");
+      expect(output).toContain(
+        "Read only when the user explicitly asks to use the skill",
+      );
       expect(characterCount(output)).toBeLessThanOrEqual(4000);
     });
     it("can explicitly enable a previously disabled name while unchanged instances retain their own settings", async () => {
@@ -171,7 +173,7 @@ enabled = true
         arguments: { source: "text(await tools.list_skills({}));" },
       };
       expect(directoryText(await disabled.client.callTool(call))).toContain(
-        "0 项",
+        "0 skills",
       );
       expect(directoryText(await enabled.client.callTool(call))).toContain(
         '"toggle"',
@@ -214,8 +216,8 @@ enabled = true
           arguments: { source: "text(await tools.list_skills({}));" },
         }),
       );
-      expect(output).toContain("0 项");
-      expect(output).not.toMatch(/HIDDEN_ALIAS|shared-hidden|enabled|禁用/);
+      expect(output).toContain("0 skills");
+      expect(output).not.toMatch(/HIDDEN_ALIAS|shared-hidden|enabled|disabled/);
     });
     it("returns the full default-budget directory above 10000 characters over the actual transport", async () => {
       const c = await connection(legacy);
@@ -352,7 +354,7 @@ enabled = true
       const text = directoryText(result);
       expect(characterCount(text)).toBeLessThanOrEqual(1800);
       for (let i = 0; i < 12; i++) expect(text).toContain(`"skill-${i}"`);
-      expect(text).toContain("描述按公平前缀压缩");
+      expect(text).toContain("Descriptions are shortened to fair prefixes");
       expect(text).not.toContain("PRIVATE_EXPLICIT");
       expect(texts(result)).toHaveLength(2); // Status plus the one explicitly emitted directory.
     });
@@ -385,7 +387,9 @@ enabled = true
       );
       expect(after).toContain('"live"');
       expect(after).not.toContain("trigger-before");
-      expect(after).toContain("仅用户明确要求使用时才可读取");
+      expect(after).toContain(
+        "Read only when the user explicitly asks to use the skill",
+      );
     });
     it("follows a directory link to real auxiliary files and leaves full reading to exec_command", async () => {
       const c = await connection(legacy);

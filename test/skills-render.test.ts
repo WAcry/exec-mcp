@@ -42,7 +42,8 @@ function decode(text: string) {
   for (const line of text.split("\n")) {
     const root = /^(r\d+) = (".*")$/.exec(line);
     if (root) roots.set(root[1]!, JSON.parse(root[2]!));
-    if (line.startsWith("仅用户明确要求")) implicit = false;
+    if (line.startsWith("Read only when the user explicitly asks"))
+      implicit = false;
     const match = row.exec(line);
     if (!match) continue;
     const alias = /^@(r\d+) \+ (".*")$/.exec(match[2]!);
@@ -67,7 +68,7 @@ describe("complete skill catalog with a presentation budget", () => {
     ];
     const text = render(skills);
     expect(decode(text)).toEqual(skills);
-    expect(text).not.toContain("描述按公平前缀压缩");
+    expect(text).not.toContain("Descriptions are shortened to fair prefixes");
     expect(text).not.toContain('"skills":');
     expect(text).toBe(render(skills));
   });
@@ -127,7 +128,7 @@ describe("complete skill catalog with a presentation budget", () => {
     }));
     const output = render(skills, 1);
     expect(characterCount(output)).toBeGreaterThan(1);
-    expect(output).toContain("超过 1 字符目标");
+    expect(output).toContain("larger than the 1-character target");
     expect(
       decode(output)
         .map((skill) => skill.path)
@@ -138,7 +139,9 @@ describe("complete skill catalog with a presentation budget", () => {
         .filter((skill) => !skill.implicit)
         .every((skill) => !Object.hasOwn(skill, "description")),
     ).toBe(true);
-    expect(output).toContain("仅用户明确要求使用时才可读取");
+    expect(output).toContain(
+      "Read only when the user explicitly asks to use the skill",
+    );
   });
   it("removes explicit-only trigger descriptions defensively at every budget", () => {
     const skills = [
@@ -155,13 +158,13 @@ describe("complete skill catalog with a presentation budget", () => {
         path: skills[1]!.path,
         implicit: false,
       });
-      expect(text).toContain("“不要使用”不算授权");
+      expect(text).toContain('"do not use" is not such a request');
     }
   });
   it("escapes metadata that could otherwise create fake section headings or path definitions", () => {
     const skills = [
       {
-        name: 'x\n可按任务匹配\n" | \\ r0',
+        name: 'x\nUse when the task matches\n" | \\ r0',
         path: '/tmp/space and "quote"/\nname/SKILL.md',
         description: "do a task\nnot a section\u202e",
         implicit: true,
@@ -177,9 +180,11 @@ describe("complete skill catalog with a presentation budget", () => {
     ).toHaveLength(1);
   });
   it("includes diagnostics in the budget and distinguishes warnings from an empty successful scan", () => {
-    const text = render([], undefined, ['"/bad/SKILL.md"：无法解析元数据']);
-    expect(text).toContain("未发现可用 Skill");
-    expect(text).toContain("范围可能不完整");
+    const text = render([], undefined, [
+      '"/bad/SKILL.md": cannot parse metadata',
+    ]);
+    expect(text).toContain("No skills found");
+    expect(text).toContain("can be incomplete");
     const skills = Array.from({ length: 20 }, (_, i) => item(i));
     const output = render(skills, 2500, ["scan warning".repeat(20)]);
     expect(characterCount(output)).toBeLessThanOrEqual(2500);
@@ -200,7 +205,7 @@ describe("complete skill catalog with a presentation budget", () => {
           catalog.skills.map((skill) => skill.path),
         );
         if (characterCount(text) > budget)
-          expect(text).toContain("保留全部条目");
+          expect(text).toContain("All entries are kept");
       }
     }
   });
@@ -218,8 +223,8 @@ describe("lossless common-prefix path display", () => {
       path: `${root}bundle-${i}${separator}SKILL.md`,
     }));
     const text = render(skills);
-    expect(text).toContain("路径前缀");
-    expect(text).toContain("不是 Shell 变量");
+    expect(text).toContain("Path prefixes");
+    expect(text).toContain("not a shell variable");
     expect(decode(text).map((skill) => skill.path)).toEqual(
       skills.map((skill) => skill.path),
     );
@@ -246,7 +251,7 @@ describe("lossless common-prefix path display", () => {
   });
   it("keeps simple paths when aliases plus their explanation would cost more", () => {
     const text = render([item(0, "x", "/a"), item(1, "x", "/a")]);
-    expect(text).not.toContain("路径前缀");
+    expect(text).not.toContain("Path prefixes");
     expect(decode(text)).toHaveLength(2);
   });
 });

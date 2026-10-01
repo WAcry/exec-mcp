@@ -158,14 +158,9 @@ export interface NativeSessionItem {
   isOldestActive: boolean;
 }
 
-export interface TerminalSessionItem {
-  id: string;
-  exitCode?: number | undefined;
-  touched: number;
-  observers: number;
-  kind: "pipe" | "pty";
-  pid?: number | undefined;
-  bufferBytes: number;
-  bufferCapacityBytes: number;
-  omittedBytes: number;
-}
+/** Change notices only: the browser reads content through the API. */
+export type ActivityEvent =
+  | { type: "call:start"; callId: string; sessionId: string }
+  | { type: "call:subcall"; callId: string; subcallId: string }
+  | { type: "call:finish"; callId: string; status: CallStatus }
+  | { type: "call:clear" };

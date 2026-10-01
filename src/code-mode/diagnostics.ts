@@ -11,7 +11,7 @@ export function syntaxDiagnostic(
 ): string | undefined {
   if (!/\bSyntaxError\b/.test(nativeError)) return undefined;
   const fingerprint = createHash("sha256").update(source).digest("hex");
-  const identity = `请求 ${requestId}；接收源码 SHA-256 ${fingerprint}`;
+  const identity = `Request ${requestId}; received source SHA-256 ${fingerprint}`;
   try {
     parse(source, {
       ecmaVersion: "latest",
@@ -35,8 +35,8 @@ export function syntaxDiagnostic(
         .slice(start, end)
         .replaceAll("\r", "")
         .replaceAll("\t", " ");
-      return `JavaScript 解析阶段定位：第 ${syntax.loc.line} 行，第 ${syntax.loc.column + 1} 列（UTF-16，均从 1 开始）。\n${identity}\n${start > 0 && source[start - 1] !== "\n" ? "…" : ""}${snippet}\n${" ".repeat(Math.min(100, syntax.pos - start))}^`;
+      return `JavaScript parse error at line ${syntax.loc.line}, column ${syntax.loc.column + 1} (UTF-16 code units, both counted from 1).\n${identity}\n${start > 0 && source[start - 1] !== "\n" ? "…" : ""}${snippet}\n${" ".repeat(Math.min(100, syntax.pos - start))}^`;
     }
   }
-  return `原生引擎返回 SyntaxError，接收源码的独立语法检查未能定位；${identity}。`;
+  return `The native engine reported a SyntaxError, but a separate parse of the received source could not locate it. ${identity}.`;
 }

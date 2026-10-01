@@ -6,11 +6,12 @@ export function encodePayload(
   limit = MAX_PAYLOAD_BYTES,
 ): Buffer {
   const json = JSON.stringify(value);
-  if (json === undefined) throw new Error("值不能编码为 JSON。");
+  if (json === undefined)
+    throw new Error("The value cannot be encoded as JSON.");
   const bytes = Buffer.byteLength(json);
   if (bytes > limit)
     throw new Error(
-      `编码载荷为 ${bytes} 字节，超过 ${limit} 字节的传输边界；未截断或落盘。`,
+      `The encoded payload is ${bytes} bytes, above the ${limit}-byte transport limit. It was not truncated or written to a file. Return less data, for example by filtering it inside exec or writing it to a file.`,
     );
   return Buffer.from(json);
 }

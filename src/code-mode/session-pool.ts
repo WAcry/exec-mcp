@@ -3,7 +3,7 @@ import { DEFAULT_IDLE_MS } from "../memory.js";
 
 export const SESSION_IDLE_MS = DEFAULT_IDLE_MS;
 export const MEMORY_RECLAIMED_TEXT =
-  "旧 Code Mode session 因内存压力已回收，旧 cell 和 store 不再可用；同一 ChatGPT 对话可用新的 exec 创建干净会话。工具副作用不会回滚，勿自动重跑旧命令。";
+  "The previous Code Mode session was reclaimed because of memory pressure. Its cells and stored values are gone. A new exec in this conversation starts a clean session. Tool side effects are not rolled back; do not rerun old commands automatically.";
 export type RetirementReason =
   | "memory"
   | "idle"
@@ -32,7 +32,7 @@ interface Entry {
   closing?: Promise<void>;
 }
 
-/** 按对话复用原生 session；租约持续到 cell 结果取完，而非 HTTP 请求结束。 */
+/** Reuses one native session per conversation. A lease lasts until the cell result is collected, not until the HTTP request ends. */
 export class SessionPool {
   readonly #shared = new Map<string, Entry>();
   readonly #entries = new Set<Entry>();
@@ -52,7 +52,9 @@ export class SessionPool {
     ) => void,
   ) {
     if (!Number.isSafeInteger(idleMs) || idleMs <= 0)
-      throw new Error("session 空闲保留时间必须是正整数毫秒。");
+      throw new Error(
+        "The session idle retention must be a positive integer number of milliseconds.",
+      );
     this.#timer = setInterval(() => this.#sweep(), Math.min(idleMs, 60_000));
     this.#timer.unref();
   }
@@ -107,7 +109,7 @@ export class SessionPool {
   }
 
   async acquire(scope: string | undefined): Promise<SessionLease> {
-    if (this.#closed) throw new Error("Code Mode session 池已关闭。");
+    if (this.#closed) throw new Error("The Code Mode session pool is closed.");
     this.#sweep();
     let entry = scope === undefined ? undefined : this.#shared.get(scope);
     if (entry === undefined) {
@@ -143,7 +145,7 @@ export class SessionPool {
         if (owner.retired === "memory") throw new Error(MEMORY_RECLAIMED_TEXT);
         if (this.#closed || owner.retired || !session.usable)
           throw new Error(
-            "Code Mode session 已失效；存储可能已丢失，同一对话可重新 exec。",
+            "The Code Mode session is no longer usable, and its stored values may be lost. Run exec again in this conversation to start a new session.",
           );
       };
       assertActive();
@@ -232,7 +234,7 @@ export class SessionPool {
     entry.closing = entry.opening
       .then((session) => session.close())
       .catch(() => {
-        /* 原始打开/会话故障由调用方报告；仍完成本地清理。 */
+        /* The caller reports the open or session failure; local cleanup still finishes. */
       })
       .finally(() => this.#entries.delete(entry));
     // Callback identity is the native session object, never the stable metadata scope.

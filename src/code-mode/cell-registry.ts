@@ -123,7 +123,9 @@ export class CellRegistry {
       assertMatchingScope(invalidated.scope, requestedScope);
       throw new Error(invalidated.message);
     }
-    throw new Error(`未知或已结束的 exec cell：${handle}`);
+    throw new Error(
+      `Unknown or finished exec cell ${handle}. Pass a cell_id from a "Script running" result that has not returned its final result yet.`,
+    );
   }
 
   /** Ends every cell of one native session and releases its leases. */
@@ -174,6 +176,6 @@ function assertMatchingScope(
   requestedScope: string | undefined,
 ): void {
   if (ownerScope !== undefined && ownerScope !== requestedScope) {
-    throw new Error("exec cell 属于其他 ChatGPT 会话");
+    throw new Error("This exec cell belongs to another ChatGPT conversation.");
   }
 }

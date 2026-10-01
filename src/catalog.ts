@@ -90,7 +90,10 @@ export const COMMAND_SCHEMA = z
     shell: z
       .string()
       .min(1)
-      .refine((value) => !!value.trim() && !value.includes("\0"))
+      .refine(
+        (value) => !!value.trim() && !value.includes("\0"),
+        "shell must not be blank or contain a NUL character",
+      )
       .describe(
         "Shell binary to launch for this command. Defaults to the instance's configured shell. Relative paths resolve from the command's working directory.",
       )
@@ -159,7 +162,7 @@ export const STDIN_SCHEMA = z
   .strict()
   .refine(
     (value) => (value.cols === undefined) === (value.rows === undefined),
-    "cols 和 rows 必须同时提供",
+    "cols and rows must be supplied together",
   );
 export const IMAGE_SCHEMA = z
   .object({
@@ -433,11 +436,64 @@ export function parseNativeInput<S extends z.ZodType>(
   raw: unknown,
 ): z.output<S> {
   const parsed = contract.schema.safeParse(raw);
-  if (!parsed.success)
-    throw new Error(
-      `工具 ${contract.name} 参数无效：${parsed.error.issues.map((issue) => `${issue.path.join(".") || "/"} ${issue.code}`).join(", ")}；尚未执行。`,
-    );
-  return parsed.data;
+  if (parsed.success) return parsed.data;
+  throw new Error(nativeInputError(contract, parsed.error.issues));
+}
+/**
+ * Names each wrong field with what was expected, so the next call can be fixed.
+ * zod messages describe types, allowed values and unknown key names; they do
+ * not repeat input values.
+ */
+function nativeInputError(
+  contract: NativeContract,
+  issues: readonly z.core.$ZodIssue[],
+): string {
+  const problems = issues.map((issue) => {
+    const field = fieldPath(issue.path);
+    if (
+      issue.code === "invalid_type" &&
+      issue.message.endsWith("received undefined")
+    )
+      return `${field}: required field is missing (expected ${issue.expected})`;
+    if (issue.code === "unrecognized_keys") {
+      const allowed = allowedFields(jsonSchema(contract.schema), issue.path);
+      return `${field}: ${issue.message}${allowed.length > 0 ? `. Allowed fields: ${allowed.join(", ")}` : ""}`;
+    }
+    return `${field}: ${issue.message}`;
+  });
+  const shape = contract.freeform
+    ? ` Pass the complete patch text as one string: await tools.${contract.name}(patch).`
+    : "";
+  return `tools.${contract.name} did not run because its input is invalid. ${problems.join("; ")}.${shape}`;
+}
+function fieldPath(path: readonly PropertyKey[]): string {
+  if (path.length === 0) return "input";
+  return path
+    .map((segment, index) =>
+      typeof segment === "number"
+        ? `[${segment}]`
+        : `${index === 0 ? "" : "."}${String(segment)}`,
+    )
+    .join("");
+}
+/** Property names of the object schema at path, read from the JSON Schema. */
+function allowedFields(
+  schema: Record<string, unknown>,
+  path: readonly PropertyKey[],
+): string[] {
+  let node: unknown = schema;
+  for (const segment of path) {
+    const current = node as Record<string, unknown> | undefined;
+    node =
+      typeof segment === "number"
+        ? current?.items
+        : (current?.properties as Record<string, unknown> | undefined)?.[
+            String(segment)
+          ];
+  }
+  const properties = (node as { properties?: Record<string, unknown> })
+    ?.properties;
+  return properties === undefined ? [] : Object.keys(properties);
 }
 /** Contracts by name for one instance; exec_command describes the resolved shell. */
 export function nativeContractsByName(shell: CommandShell): NativeContracts {

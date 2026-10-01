@@ -67,7 +67,7 @@ describe("explicit output budgets", () => {
     expect(Buffer.byteLength(texts(result).join("\n\n"))).toBeLessThanOrEqual(
       36000,
     );
-    expect(texts(result)[0]).toContain("保留首尾");
+    expect(texts(result)[0]).toContain("the beginning and end are kept");
   });
   it("rejects invalid budgets before invoking any tool", async () => {
     const value = service();
@@ -82,11 +82,11 @@ describe("explicit output budgets", () => {
           tools,
           maxOutputTokens,
         }),
-      ).rejects.toThrow("预算");
+      ).rejects.toThrow("must be a non-negative safe integer");
     }
     await expect(
       value.wait({ cellId: "missing", maxTokens: -1 }),
-    ).rejects.toThrow("预算");
+    ).rejects.toThrow("must be a non-negative safe integer");
     expect(called).toBe(0);
   });
   it("accepts the Codex pragma and lets top-level options override it, including zero", async () => {
@@ -102,7 +102,7 @@ describe("explicit output budgets", () => {
       maxOutputTokens: 2,
     });
     expect(texts(result).at(-1)).toBe("abcdefgh");
-    expect(texts(result)[0]).not.toContain("截断");
+    expect(texts(result)[0]).not.toContain("truncated");
     const zero = await value.exec({
       source: '// @exec: {"max_output_tokens":5}\ntext("body");',
       tools: [],
@@ -115,7 +115,7 @@ describe("explicit output budgets", () => {
         '// @exec: {"max_output_tokens":2}\ntext("HEAD"+"x".repeat(100)+"TAIL");',
       tools: [],
     });
-    expect(texts(pragma)[0]).toContain("截断");
+    expect(texts(pragma)[0]).toContain("truncated");
     expect(texts(pragma).at(-1)).toBe("HEAD\n…\nTAIL");
   });
   it("limits final presentation, not nested data or store/load", async () => {
@@ -132,7 +132,7 @@ describe("explicit output budgets", () => {
       sessionScope: "a",
       maxOutputTokens: 2,
     });
-    expect(texts(result)[0]).toContain("截断");
+    expect(texts(result)[0]).toContain("truncated");
     expect(
       jsonOutput(
         await value.exec({
@@ -154,7 +154,7 @@ describe("explicit output budgets", () => {
     const id = cellId(begun);
     const next = await value.wait({ cellId: id, maxTokens: 1 });
     expect(cellId(next)).toBe(id);
-    expect(texts(next)[0]).toContain("截断");
+    expect(texts(next)[0]).toContain("truncated");
     const final = await value.wait({ cellId: id });
     expect(texts(final).at(-1)).toBe("third".repeat(1000));
     expect(texts(final).join("\n")).not.toContain("first");

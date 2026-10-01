@@ -205,7 +205,9 @@ describe.each([false, true])(
       });
       const preview = await t.exec("text(load('log'));");
       expect(modelTextBytes(preview)).toBeLessThanOrEqual(36000);
-      expect(texts(preview).join("\n")).toContain("保留首尾");
+      expect(texts(preview).join("\n")).toContain(
+        "the beginning and end are kept",
+      );
       expect(jsonOutput(await t.exec("text(load('log').output.length);"))).toBe(
         100024,
       );

@@ -235,7 +235,8 @@ export class ExecRuntime {
   }
   initialize(...args: Parameters<ToolDiscovery["initialize"]>): Promise<void> {
     this.initialization ??= this.discovery.initialize(...args).then(() => {
-      if (this.closing) throw new Error("服务正在关闭。");
+      if (this.closing)
+        throw new Error("The exec-mcp service is shutting down.");
       this.initialized = true;
     });
     return this.initialization;
@@ -262,7 +263,7 @@ export class ExecRuntime {
         const file = ctx.files?.[input.index];
         if (!file)
           throw new Error(
-            "本次 exec.files 没有该索引；请通过顶层 files 传入原生文件引用。",
+            `exec.files has no file at index ${input.index}; this exec has ${ctx.files?.length ?? 0}. Pass ChatGPT file references in the top-level files argument of exec, then use a zero-based index.`,
           );
         return this.artifacts.importFile(
           file,
@@ -275,7 +276,7 @@ export class ExecRuntime {
       export_file: defineNative(c.export_file, async (input, ctx) => {
         if (ctx.attachments.bytes + 4096 > 1024 * 1024)
           throw new Error(
-            "本次待返回的文件链接元数据过大；先 yield_control，再继续导出。",
+            "The file links waiting for this response are too large. Call yield_control() to deliver them, then export more files.",
           );
         const exported = await this.artifacts.exportFile(
           input.path,
@@ -288,7 +289,9 @@ export class ExecRuntime {
         const bytes = Buffer.byteLength(JSON.stringify(exported.content));
         if (ctx.attachments.bytes + bytes > 1024 * 1024) {
           await this.artifacts.revoke(exported.info.id, ctx.scope);
-          throw new Error("文件链接元数据超出单次响应预算；本次导出已撤销。");
+          throw new Error(
+            "This file link does not fit in the response, so the export was revoked. Call yield_control() to deliver earlier links, then export this file again.",
+          );
         }
         ctx.attachments.items.push({
           id: exported.info.id,
@@ -345,7 +348,7 @@ export class ExecRuntime {
   private async workdir(value?: string): Promise<string> {
     const cwd = await realpath(resolveUserPath(value ?? homedir()));
     if (!(await stat(cwd)).isDirectory())
-      throw new Error("workdir 必须是目录。");
+      throw new Error(`workdir must be a directory: ${cwd}`);
     return cwd;
   }
   /**
@@ -441,7 +444,8 @@ export class ExecRuntime {
             files: args.files?.map(fileAuditMetadata),
           },
           async (call) => {
-            if (!this.ready) throw new Error("服务正在关闭。");
+            if (!this.ready)
+              throw new Error("The exec-mcp service is shutting down.");
             const signal = context.mcpReq.signal;
             throwIfAborted(signal);
             const cwd = await this.workdir(args.workdir);
@@ -568,7 +572,10 @@ export class ExecRuntime {
       ]);
       const errors = results.filter((result) => result.status === "rejected");
       if (errors.length)
-        throw new AggregateError(errors, "服务关闭时部分清理失败。");
+        throw new AggregateError(
+          errors,
+          "Some cleanup steps failed while the service was shutting down.",
+        );
     })();
     return this.closing;
   }

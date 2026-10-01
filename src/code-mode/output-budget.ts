@@ -1,6 +1,6 @@
 import type { CodeModeOutputItem } from "./types.js";
 
-/** 与 Codex 的轻量估算一致，不引入模型专属 tokenizer。只约束显式文本，媒体不切片。 */
+/** Uses Codex's light estimate of 4 bytes per token, with no model tokenizer. Only explicit text is limited; media is never sliced. */
 export function applyOutputBudget(
   items: readonly CodeModeOutputItem[],
   maxTokens: number | undefined,
@@ -57,10 +57,11 @@ function utf8Slice(bytes: Buffer, start: number, end: number): string {
 
 export function validateOutputBudget(
   value: unknown,
+  name = "max_output_tokens",
 ): asserts value is number | undefined {
   if (
     value !== undefined &&
     (!Number.isSafeInteger(value) || Number(value) < 0)
   )
-    throw new Error("输出 token 预算必须是非负安全整数。");
+    throw new Error(`${name} must be a non-negative safe integer.`);
 }

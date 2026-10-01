@@ -8,7 +8,7 @@ export const MAX_WAIT_YIELD_TIME_MS = 110_000;
 // Unsupported helpers must fail explicitly; retain the native ALL_TOOLS catalog.
 const CODE_MODE_SOURCE_PRELUDE = "delete globalThis.notify;";
 const UNSCOPED_STORE_PRELUDE =
-  'globalThis.store = globalThis.load = () => { throw new Error("store/load 需要宿主提供 openai/session 对话标识；本次不可跨 exec 存储。"); };';
+  'globalThis.store = globalThis.load = () => { throw new Error("store and load need an openai/session conversation ID from the host. This call has none, so values cannot be kept across exec calls."); };';
 
 export interface ParsedExecSource {
   code: string;
@@ -59,7 +59,7 @@ export function parseExecSource(input: string): ParsedExecSource {
     "yield_time_ms",
   );
   const maxOutputTokens = object.max_output_tokens;
-  validateOutputBudget(maxOutputTokens);
+  validateOutputBudget(maxOutputTokens, "max_output_tokens");
   return {
     code,
     ...(yieldTimeMs === undefined ? {} : { yieldTimeMs }),

@@ -50,7 +50,7 @@ export {
 } from "./exec-source.js";
 export { INVALIDATED_CELL_RETENTION_MS } from "./cell-registry.js";
 export const INDETERMINATE_CELL_TEXT =
-  "Code Mode host 在执行期间退出；结果不确定，工具副作用可能已发生，请先检查状态，勿自动重试。";
+  "The Code Mode host stopped during execution. The result is unknown, and tool side effects may have happened. Check the current state before you run the work again; do not retry automatically.";
 
 /** Host failures and memory restarts go to the service's stderr by default. */
 function logError(error: Error): void {
@@ -120,7 +120,7 @@ export class CodeModeService {
       memoryCheckIntervalMs: memoryInterval,
     }))
       if (!Number.isSafeInteger(value) || value <= 0)
-        throw new Error(`${name} 必须是正安全整数。`);
+        throw new Error(`${name} must be a positive safe integer.`);
 
     this.#pool = new SessionPool(
       () => this.#openSession(),
@@ -181,10 +181,9 @@ export class CodeModeService {
     const parsed = parseExecSource(request.source);
     const yieldTimeMs =
       request.yieldTimeMs ?? parsed.yieldTimeMs ?? this.#defaultExecYieldTimeMs;
-    validateYieldTime(yieldTimeMs, "yield-time_ms", MAX_EXEC_YIELD_TIME_MS);
+    validateYieldTime(yieldTimeMs, "yield_time_ms", MAX_EXEC_YIELD_TIME_MS);
     const maxOutputTokens = request.maxOutputTokens ?? parsed.maxOutputTokens;
-    validateOutputBudget(request.maxOutputTokens);
-    validateOutputBudget(maxOutputTokens);
+    validateOutputBudget(maxOutputTokens, "max_output_tokens");
     // A host-wide emergency reset has a short barrier. It never replays a command
     // already sent to an old session, and it never requires a new metadata scope.
     await this.#memory.restarting;
@@ -230,7 +229,7 @@ export class CodeModeService {
         maxOutputTokens,
         request.takeAttachments,
         lease.newSession && scope !== undefined
-          ? "新建原生执行会话；本次开始时 store 为空。\n"
+          ? "New native session: store was empty when this exec started.\n"
           : undefined,
       );
     } catch (error) {
@@ -241,9 +240,9 @@ export class CodeModeService {
 
   async wait(request: CodeModeWaitRequest): Promise<CodeModeToolResult> {
     this.#requireRunning();
-    validateOutputBudget(request.maxTokens);
+    validateOutputBudget(request.maxTokens, "max_tokens");
     const yieldTimeMs = request.yieldTimeMs ?? this.#defaultWaitYieldTimeMs;
-    validateYieldTime(yieldTimeMs, "yield-time_ms", MAX_WAIT_YIELD_TIME_MS);
+    validateYieldTime(yieldTimeMs, "yield_time_ms", MAX_WAIT_YIELD_TIME_MS);
     const scope = sessionScopeKey(request.sessionScope);
     const owner = this.#cells.owner(request.cellId, scope);
     const endObservation = this.#cells.observe(owner);

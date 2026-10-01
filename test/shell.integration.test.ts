@@ -406,7 +406,9 @@ describe.each([false, true])(
           },
         });
         expect(result.isError).toBe(true);
-        expect(texts(result).join("\n")).toContain("尚未执行");
+        expect(texts(result).join("\n")).toContain(
+          "did not run because its input is invalid",
+        );
       }
       await expect(readFile(path.join(root, "marker"))).rejects.toMatchObject({
         code: "ENOENT",

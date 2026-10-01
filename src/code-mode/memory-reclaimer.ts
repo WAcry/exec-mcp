@@ -126,7 +126,7 @@ export class MemoryReclaimer {
           this.#report(
             error instanceof Error
               ? error
-              : new Error("Code Mode 内存检查失败。"),
+              : new Error("The Code Mode memory check failed."),
           );
         }
       })
@@ -181,7 +181,8 @@ export class MemoryReclaimer {
           closing,
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(
-              () => reject(new Error("Code Mode 会话关闭超时。")),
+              () =>
+                reject(new Error("A Code Mode session did not close in time.")),
               this.#closeTimeoutMs,
             );
             timeout.unref();
@@ -213,7 +214,9 @@ export class MemoryReclaimer {
   async #read(host: HostIdentity): Promise<number> {
     const bytes = await this.#reader(host.pid);
     if (!Number.isSafeInteger(bytes) || bytes <= 0)
-      throw new Error("Code Mode 内存采样无效；不据此回收会话。");
+      throw new Error(
+        `The Code Mode host memory sample is not valid (${String(bytes)}), so no session was reclaimed.`,
+      );
     return bytes;
   }
 

@@ -26,7 +26,7 @@ export function renderModelResult(
     statusHeader(outcome, wallTimeSeconds) +
     (notice ?? "") +
     (budgeted.truncated
-      ? `文本已按 ${maxTokens} token 预算截断；后续 wait 不补发被省略内容。\n`
+      ? `Text was truncated to the ${maxTokens}-token budget. Later wait calls do not return the omitted text.\n`
       : "");
   const result = outputItemsToCallToolResult(
     [{ type: "text", text: status }, ...budgeted.items],
@@ -46,7 +46,7 @@ export function undeliverableResult(
     content: [
       {
         type: "text",
-        text: `结果不可交付；操作可能已生效，请勿自动重试。${error instanceof Error ? error.message : String(error)}`,
+        text: `The result cannot be delivered. Its operations may have taken effect, so do not retry them automatically. ${error instanceof Error ? error.message : String(error)}`,
       },
       ...attachments,
     ],

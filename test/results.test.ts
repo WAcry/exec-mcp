@@ -72,7 +72,7 @@ describe("lossless result boundary", () => {
   });
   it("rejects an actual byte boundary rather than truncating", () => {
     expect(encodePayload("x", 3).toString()).toBe('"x"');
-    expect(() => encodePayload("x", 2)).toThrow("传输边界");
+    expect(() => encodePayload("x", 2)).toThrow("transport limit");
   });
   it("emits media as native blocks", () => {
     expect(

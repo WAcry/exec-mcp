@@ -41,7 +41,7 @@ export function toolError(error: unknown): CallToolResult {
     content: [
       {
         type: "text",
-        text: `执行失败：${error instanceof Error ? error.message : String(error)}`,
+        text: `Execution failed: ${error instanceof Error ? error.message : String(error)}`,
       },
     ],
     isError: true,

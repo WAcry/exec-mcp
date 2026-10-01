@@ -28,7 +28,7 @@ describe("recoverable native host stop barrier", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const stopping = host.stop();
-      const rejection = expect(stopping).rejects.toThrow("终止尚未确认");
+      const rejection = expect(stopping).rejects.toThrow("Could not confirm");
       await vi.advanceTimersByTimeAsync(3100);
       await rejection;
       expect(host.identity).toBe(old);

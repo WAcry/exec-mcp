@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 
+import { abortError } from "../util.js";
+
 export const HOST_GRPC_FRAME_BYTES = 64 * 1024 * 1024;
 
 export type ProtoMessage = Record<string, unknown>;
@@ -121,11 +123,11 @@ export function unaryCall(
     };
     const abort = (): void => {
       call?.cancel();
-      finish(abortError());
+      finish(abortError("Code Mode operation was aborted"));
     };
 
     if (signal?.aborted === true) {
-      finish(abortError());
+      finish(abortError("Code Mode operation was aborted"));
       return;
     }
     signal?.addEventListener("abort", abort, { once: true });
@@ -283,12 +285,6 @@ function resolveProtoPath(): string {
     directory = parent;
   }
   throw new Error("cannot locate pinned proto/codex.code_mode.v1.proto");
-}
-
-function abortError(): Error {
-  const error = new Error("Code Mode operation was aborted");
-  error.name = "AbortError";
-  return error;
 }
 
 function trimGrpcError(error: grpc.ServiceError): string {

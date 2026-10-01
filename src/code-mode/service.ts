@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import { encodePayload } from "../limits.js";
-import { randomHandle } from "../util.js";
-import { CancellableMutex, WeightedAdmissionQueue } from "./admission.js";
+import { randomHandle, throwIfAborted } from "../util.js";
+import { WeightedAdmissionQueue } from "./admission.js";
 import { CellRegistry, type CellOwner } from "./cell-registry.js";
 import {
   DEFAULT_EXEC_YIELD_TIME_MS,
@@ -69,7 +69,6 @@ export class CodeModeService {
   readonly #maxYieldTimeMs: number | undefined;
   readonly #memory: MemoryReclaimer;
   readonly #pool: SessionPool;
-  readonly #resultPreparation = new CancellableMutex();
   readonly #startupTimeoutMs: number;
   readonly #transportTimeoutMs: number;
   #closePromise: Promise<void> | undefined;
@@ -124,7 +123,7 @@ export class CodeModeService {
         throw new Error(`${name} 必须是正安全整数。`);
 
     this.#pool = new SessionPool(
-      (scope) => this.#openSession(scope),
+      () => this.#openSession(),
       options.sessionIdleMs,
       (session, reason) =>
         this.#cells.retireSession(
@@ -329,12 +328,11 @@ export class CodeModeService {
     await this.#memory.stop();
     this.#cells.clear();
     await this.#pool.close();
-    this.#resultPreparation.close();
     this.#admission.close();
     await this.#host.stop();
   }
 
-  async #openSession(scope: string | undefined): Promise<CodeModeSession> {
+  async #openSession(): Promise<CodeModeSession> {
     const client = await this.#host.start();
     this.#requireRunning();
     const session = await CodeModeSession.open({
@@ -349,8 +347,6 @@ export class CodeModeService {
       onFailure: (failedSession) => {
         this.#invalidateSession(failedSession);
       },
-      resultPreparation: this.#resultPreparation,
-      ...(scope === undefined ? {} : { scope }),
       startupTimeoutMs: this.#startupTimeoutMs,
       transportTimeoutMs: this.#transportTimeoutMs,
     });
@@ -477,16 +473,6 @@ function notifyState(
   } catch {
     /* Web observability must never change execution semantics. */
   }
-}
-
-function throwIfAborted(
-  signal: AbortSignal | undefined,
-  message: string,
-): void {
-  if (signal?.aborted !== true) return;
-  const error = new Error(message, { cause: signal.reason });
-  error.name = "AbortError";
-  throw error;
 }
 
 export function sessionScopeKey(scope: string | undefined): string | undefined {

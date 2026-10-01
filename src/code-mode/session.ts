@@ -2,9 +2,8 @@ import crypto from "node:crypto";
 
 import type * as grpc from "@grpc/grpc-js";
 
-import { errorMessage } from "../util.js";
+import { abortError, errorMessage } from "../util.js";
 import {
-  CancellableMutex,
   nestedToolReservationBytes,
   WeightedAdmissionQueue,
 } from "./admission.js";
@@ -65,10 +64,8 @@ export class CodeModeSession {
   readonly #onFailure:
     | ((session: CodeModeSession, error: Error) => void)
     | undefined;
-  readonly #scope: string | undefined;
   readonly #toolStream: grpc.ClientReadableStream<ProtoMessage>;
   readonly #transportTimeoutMs: number;
-  readonly #resultPreparation: CancellableMutex;
   readonly id: string;
   #cells = new Map<string, CellState>();
   #cancelledInvocations = new Set<string>();
@@ -87,8 +84,6 @@ export class CodeModeSession {
     eventStream: grpc.ClientReadableStream<ProtoMessage>;
     id: string;
     onFailure?: (session: CodeModeSession, error: Error) => void;
-    resultPreparation: CancellableMutex;
-    scope?: string;
     toolStream: grpc.ClientReadableStream<ProtoMessage>;
     transportTimeoutMs: number;
   }) {
@@ -97,8 +92,6 @@ export class CodeModeSession {
     this.#eventStream = options.eventStream;
     this.id = options.id;
     this.#onFailure = options.onFailure;
-    this.#resultPreparation = options.resultPreparation;
-    this.#scope = options.scope;
     this.#toolStream = options.toolStream;
     this.#transportTimeoutMs = options.transportTimeoutMs;
     this.#attachStreams();
@@ -123,8 +116,6 @@ export class CodeModeSession {
     maxHeapSizeBytes?: number;
     maxYieldTimeMs?: number;
     onFailure?: (session: CodeModeSession, error: Error) => void;
-    resultPreparation?: CancellableMutex;
-    scope?: string;
     startupTimeoutMs: number;
     transportTimeoutMs: number;
   }): Promise<CodeModeSession> {
@@ -186,8 +177,6 @@ export class CodeModeSession {
       ...(options.onFailure === undefined
         ? {}
         : { onFailure: options.onFailure }),
-      resultPreparation: options.resultPreparation ?? new CancellableMutex(),
-      ...(options.scope === undefined ? {} : { scope: options.scope }),
       toolStream,
       transportTimeoutMs: options.transportTimeoutMs,
     });
@@ -698,18 +687,11 @@ export class CodeModeSession {
           cellId,
           invocationId,
           runtimeToolCallId,
-          ...(this.#scope === undefined ? {} : { sessionScope: this.#scope }),
           signal: abort.signal,
           toolName,
         });
         if (abort.signal.aborted) return;
-        outputJson = await this.#resultPreparation.run(
-          abort.signal,
-          async () => {
-            if (abort.signal.aborted) throw executionAbortError();
-            return prepareNestedToolResult(value);
-          },
-        );
+        outputJson = prepareNestedToolResult(value);
       } catch (error) {
         if (!abort.signal.aborted) {
           await this.#completeToolCall(
@@ -815,7 +797,5 @@ export class CodeModeSession {
 }
 
 function executionAbortError(): Error {
-  const error = new Error("Code Mode execution was aborted");
-  error.name = "AbortError";
-  return error;
+  return abortError("Code Mode execution was aborted");
 }

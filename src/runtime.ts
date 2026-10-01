@@ -443,8 +443,9 @@ export class ExecRuntime {
               codeModeState = state;
             },
           });
+          // The Code Mode service already bounded this result.
           const result = this.notes.attach(
-            boundModelOutput(execResult),
+            execResult,
             sessionScopeKey(scope),
             callTracker.id,
             context.mcpReq.signal,
@@ -529,7 +530,7 @@ export class ExecRuntime {
             },
           });
           const result = this.notes.attach(
-            boundModelOutput(waitResult),
+            waitResult,
             sessionScopeKey(scope),
             callTracker.id,
             context.mcpReq.signal,

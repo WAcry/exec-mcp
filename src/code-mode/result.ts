@@ -3,7 +3,7 @@ import { encodePayload } from "../limits.js";
 import { normalizeResult } from "../results.js";
 import type { CodeModeOutputItem } from "./types.js";
 
-export async function prepareNestedToolResult(value: unknown): Promise<Buffer> {
+export function prepareNestedToolResult(value: unknown): Buffer {
   try {
     return encodePayload(normalizeResult(value));
   } catch (error) {
@@ -30,10 +30,8 @@ export function outputItemsToCallToolResult(
         : {}),
     };
   });
-  const result: CallToolResult = {
+  return {
     content,
     ...(isError ? { isError: true } : {}),
   };
-  encodePayload(result);
-  return result;
 }

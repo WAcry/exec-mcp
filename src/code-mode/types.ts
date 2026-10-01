@@ -24,7 +24,6 @@ export interface NestedToolCallContext {
   cellId: string;
   invocationId: string;
   runtimeToolCallId: string;
-  sessionScope?: string;
   signal: AbortSignal;
   toolName: CodeModeToolName;
 }

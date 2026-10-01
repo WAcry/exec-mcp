@@ -77,7 +77,6 @@ describe("cancellation does not fail the native session", () => {
     let failure: Error | undefined;
     const session = await CodeModeSession.open({
       client,
-      scope: "cancel-before-start",
       startupTimeoutMs: 10_000,
       transportTimeoutMs: 10_000,
       onFailure: (_session, error) => {

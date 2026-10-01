@@ -26,6 +26,7 @@ import {
   decodeWaitResponse,
   encodeToolDefinition,
   numberField,
+  optionalStringField,
   recordField,
   stringField,
   toolKey,
@@ -37,9 +38,14 @@ import {
 export type { RuntimeOutcome } from "./wire.js";
 
 interface ExecutionState {
+  /** Set by the caller's signal. New tool calls from this execution do not run. */
+  cancelled?: boolean;
   cellId?: string;
   tools: Map<string, CodeModeToolDefinition>;
 }
+
+/** Cancellations that arrive before their tool call. The host normally sends the call soon after. */
+const MAX_EARLY_CANCELLATIONS = 1024;
 
 interface CellState {
   finalSequence?: number;
@@ -200,47 +206,55 @@ export class CodeModeSession {
     if (options.signal?.aborted === true) throw executionAbortError();
     this.#requireOpen();
     const executionId = crypto.randomUUID();
-    let dispatched = false;
+    const state: ExecutionState = { tools: toolMap(options.tools) };
+    const request: ProtoMessage = {
+      sessionId: this.id,
+      executionId,
+      toolCallId: options.toolCallId,
+      source: options.source,
+      enabledTools: options.tools.map(encodeToolDefinition),
+    };
+    if (options.yieldTimeMs !== undefined)
+      request.yieldTimeMs = options.yieldTimeMs;
+    this.#executions.set(executionId, state);
+    let stream: grpc.ClientReadableStream<ProtoMessage>;
     try {
-      const state: ExecutionState = { tools: toolMap(options.tools) };
-      this.#executions.set(executionId, state);
-
-      const request: ProtoMessage = {
-        sessionId: this.id,
-        executionId,
-        toolCallId: options.toolCallId,
-        source: options.source,
-        enabledTools: options.tools.map(encodeToolDefinition),
-      };
-      if (options.yieldTimeMs !== undefined)
-        request.yieldTimeMs = options.yieldTimeMs;
-      const stream = this.#client.execute(request, {
+      stream = this.#client.execute(request, {
         deadline:
           Date.now() +
           (options.yieldTimeMs ?? 10_000) +
           this.#transportTimeoutMs +
           1_000,
       });
-      dispatched = true;
+    } catch (error) {
+      this.#executions.delete(executionId);
+      throw error;
+    }
+    try {
       return await this.#readExecutionStream(
         stream,
         executionId,
+        state,
         options.signal,
       );
     } catch (error) {
-      const cellId = this.#executions.get(executionId)?.cellId;
-      if (!dispatched) {
-        this.#executions.delete(executionId);
-        throw error;
-      }
+      // A cancellation before the host reported the cell is cleaned up by the
+      // stream reader once the cell ID arrives. It does not affect the session.
+      if (state.cancelled === true && state.cellId === undefined) throw error;
       try {
-        if (cellId !== undefined) await this.terminate(cellId);
+        if (state.cellId !== undefined) await this.terminate(state.cellId);
         else
           this.#fail(
-            new Error("执行连接中断且未取得 cell ID；会话结果不确定。"),
+            new Error(
+              "The execution stream failed before the host reported a cell ID. The session state is unknown.",
+            ),
           );
       } catch {
-        this.#fail(new Error("无法确认失败 cell 的终止；会话结果不确定。"));
+        this.#fail(
+          new Error(
+            "Could not confirm that the failed cell was terminated. The session state is unknown.",
+          ),
+        );
       }
       this.#executions.delete(executionId);
       throw error;
@@ -361,9 +375,10 @@ export class CodeModeSession {
     );
   }
 
-  async #readExecutionStream(
+  #readExecutionStream(
     stream: grpc.ClientReadableStream<ProtoMessage>,
     expectedExecutionId: string,
+    state: ExecutionState,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
     return new Promise((resolve, reject) => {
@@ -371,20 +386,51 @@ export class CodeModeSession {
       const session = this;
       let cellId: string | undefined;
       let settled = false;
-      const finish = (error?: Error, outcome?: RuntimeOutcome): void => {
-        if (settled) return;
-        settled = true;
+      // Set when the caller cancelled before the host reported the cell.
+      let startTimer: NodeJS.Timeout | undefined;
+      const detach = (): void => {
+        if (startTimer !== undefined) clearTimeout(startTimer);
         signal?.removeEventListener("abort", abort);
         stream.removeListener("data", onData);
         stream.removeListener("error", onError);
         stream.removeListener("end", onEnd);
+      };
+      const finish = (error?: Error, outcome?: RuntimeOutcome): void => {
+        if (settled) return;
+        settled = true;
+        detach();
         if (error !== undefined) reject(error);
         else resolve(outcome!);
       };
-      const abort = (): void => {
-        const error = executionAbortError();
-        finish(error);
+      /** After an early cancellation, the stream is read only to find and stop the cell. */
+      const failPendingStart = (error: Error): void => {
+        detach();
         stream.cancel();
+        session.#executions.delete(expectedExecutionId);
+        session.#fail(error);
+      };
+      const abort = (): void => {
+        state.cancelled = true;
+        if (state.cellId !== undefined) {
+          finish(executionAbortError());
+          stream.cancel();
+          return;
+        }
+        // Return the cancellation now, but keep reading until the host reports
+        // the cell ID, then terminate that cell. Only a missing report is unknown.
+        settled = true;
+        signal?.removeEventListener("abort", abort);
+        reject(executionAbortError());
+        startTimer = setTimeout(
+          () =>
+            failPendingStart(
+              new Error(
+                "The host did not report the cell of a cancelled exec. The session state is unknown.",
+              ),
+            ),
+          session.#transportTimeoutMs,
+        );
+        startTimer.unref();
       };
 
       if (signal?.aborted === true) {
@@ -414,20 +460,14 @@ export class CodeModeSession {
             }
             cellId = stringField(started, "cellId", "cell ID");
             validateIdentifier(cellId, "cell ID");
-            const execution = session.#executions.get(expectedExecutionId);
-            if (execution === undefined)
-              throw new Error("execution state is missing");
-            execution.cellId = cellId;
-            const cell = session.#cells.get(cellId) ?? {
-              highestSequence: 0,
-              pendingInvocations: new Set(),
-              ...(session.#earlyClosures.has(cellId)
-                ? { finalSequence: session.#earlyClosures.get(cellId)! }
-                : {}),
-            };
-            session.#earlyClosures.delete(cellId);
-            session.#cells.set(cellId, cell);
+            state.cellId = cellId;
+            const cell = session.#cellState(cellId);
             session.#maybeRetireCell(cellId, cell);
+            if (settled && state.cancelled === true) {
+              detach();
+              stream.cancel();
+              session.#terminateCancelledCell(expectedExecutionId, cellId);
+            }
             return;
           }
 
@@ -444,20 +484,55 @@ export class CodeModeSession {
           }
           finish(undefined, outcome);
         } catch (error) {
-          finish(error instanceof Error ? error : new Error(String(error)));
+          const failure =
+            error instanceof Error ? error : new Error(String(error));
+          if (settled) failPendingStart(failure);
+          else finish(failure);
         }
       }
       function onError(error: Error): void {
-        finish(grpcError(error, "execution"));
+        if (settled) failPendingStart(grpcError(error, "execution"));
+        else finish(grpcError(error, "execution"));
       }
       function onEnd(): void {
-        if (!settled)
-          finish(new Error("host ended execution before returning an outcome"));
+        const error = new Error(
+          "host ended execution before returning an outcome",
+        );
+        if (settled) failPendingStart(error);
+        else finish(error);
       }
       stream.on("data", onData);
       stream.on("error", onError);
       stream.on("end", onEnd);
     });
+  }
+
+  /** Stops a cell whose exec was cancelled before the host reported it. */
+  #terminateCancelledCell(executionId: string, cellId: string): void {
+    void this.terminate(cellId)
+      .catch(() => {
+        this.#fail(
+          new Error(
+            "Could not confirm that a cancelled cell was terminated. The session state is unknown.",
+          ),
+        );
+      })
+      .finally(() => this.#executions.delete(executionId));
+  }
+
+  /** Returns the cell's state, creating it and applying an early closure if needed. */
+  #cellState(cellId: string): CellState {
+    let cell = this.#cells.get(cellId);
+    if (cell !== undefined) return cell;
+    const finalSequence = this.#earlyClosures.get(cellId);
+    cell = {
+      highestSequence: 0,
+      pendingInvocations: new Set(),
+      ...(finalSequence === undefined ? {} : { finalSequence }),
+    };
+    this.#earlyClosures.delete(cellId);
+    this.#cells.set(cellId, cell);
+    return cell;
   }
 
   #handleSessionEvent(event: ProtoMessage): void {
@@ -474,8 +549,15 @@ export class CodeModeSession {
           "invocation ID",
         );
         const pending = this.#pendingInvocations.get(invocationId);
-        if (pending === undefined) this.#cancelledInvocations.add(invocationId);
-        else pending.abort.abort();
+        if (pending !== undefined) {
+          pending.abort.abort();
+          return;
+        }
+        if (this.#cancelledInvocations.size >= MAX_EARLY_CANCELLATIONS) {
+          const oldest = this.#cancelledInvocations.values().next().value;
+          if (oldest !== undefined) this.#cancelledInvocations.delete(oldest);
+        }
+        this.#cancelledInvocations.add(invocationId);
         return;
       }
       if (event.event === "notification") {
@@ -512,7 +594,15 @@ export class CodeModeSession {
               );
         const cell = this.#cells.get(cellId);
         if (cell === undefined) {
-          this.#earlyClosures.set(cellId, finalSequence);
+          // The start event uses another stream and can arrive later. Keep the
+          // closure only while its execution is still known to this session.
+          const executionId = optionalStringField(
+            closed,
+            "executionId",
+            "execution ID",
+          );
+          if (executionId !== undefined && this.#executions.has(executionId))
+            this.#earlyClosures.set(cellId, finalSequence);
           return;
         }
         cell.finalSequence = finalSequence;
@@ -558,19 +648,8 @@ export class CodeModeSession {
     const wireToolName = recordField(call, "toolName", "tool name");
     const toolName = decodeToolName(wireToolName);
     const execution = this.#executions.get(executionId);
-    let cell = this.#cells.get(cellId);
-    if (cell === undefined) {
-      cell = {
-        highestSequence: 0,
-        pendingInvocations: new Set(),
-        ...(this.#earlyClosures.has(cellId)
-          ? { finalSequence: this.#earlyClosures.get(cellId)! }
-          : {}),
-      };
-      this.#earlyClosures.delete(cellId);
-      this.#cells.set(cellId, cell);
-      if (execution !== undefined) execution.cellId = cellId;
-    }
+    if (execution !== undefined) execution.cellId ??= cellId;
+    const cell = this.#cellState(cellId);
     if (sequence <= cell.highestSequence) {
       throw new Error(
         `host reused tool-call sequence ${sequence} for cell ${cellId}`,
@@ -583,12 +662,21 @@ export class CodeModeSession {
       return;
     }
 
+    if (execution?.cancelled === true) {
+      await this.#completeToolCall(invocationId, {
+        failed: {
+          message:
+            "The exec request was cancelled, so this tool call did not run.",
+        },
+      });
+      this.#maybeRetireCell(cellId, cell);
+      return;
+    }
     const tool = execution?.tools.get(toolKey(toolName));
     if (tool === undefined) {
-      await this.#completeToolFailure(
-        invocationId,
-        `unknown or disabled tool ${toolKey(toolName)}`,
-      );
+      await this.#completeToolCall(invocationId, {
+        failed: { message: `unknown or disabled tool ${toolKey(toolName)}` },
+      });
       this.#maybeRetireCell(cellId, cell);
       return;
     }
@@ -624,7 +712,11 @@ export class CodeModeSession {
         );
       } catch (error) {
         if (!abort.signal.aborted) {
-          await this.#completeToolFailure(invocationId, errorMessage(error));
+          await this.#completeToolCall(
+            invocationId,
+            { failed: { message: errorMessage(error) } },
+            abort.signal,
+          );
         }
         return;
       }
@@ -632,18 +724,9 @@ export class CodeModeSession {
 
       // A completion transport error is ambiguous. Do not send a second,
       // contradictory completion for a tool that may already have succeeded.
-      await unaryCall(
-        (options, callback) =>
-          this.#client.completeToolCall(
-            {
-              sessionId: this.id,
-              invocationId,
-              succeeded: { outputJson },
-            },
-            options,
-            callback,
-          ),
-        this.#transportTimeoutMs,
+      await this.#completeToolCall(
+        invocationId,
+        { succeeded: { outputJson } },
         abort.signal,
       );
     } finally {
@@ -654,23 +737,31 @@ export class CodeModeSession {
     }
   }
 
-  async #completeToolFailure(
+  /**
+   * Sends one completion. When the signal aborts, the host has cancelled the
+   * invocation or the session is closing; the host no longer needs this result,
+   * so the rejected call counts as a cancellation and does not fail the session.
+   */
+  async #completeToolCall(
     invocationId: string,
-    message: string,
+    result: ProtoMessage,
+    signal?: AbortSignal,
   ): Promise<void> {
-    await unaryCall(
-      (options, callback) =>
-        this.#client.completeToolCall(
-          {
-            sessionId: this.id,
-            invocationId,
-            failed: { message },
-          },
-          options,
-          callback,
-        ),
-      this.#transportTimeoutMs,
-    );
+    try {
+      await unaryCall(
+        (options, callback) =>
+          this.#client.completeToolCall(
+            { sessionId: this.id, invocationId, ...result },
+            options,
+            callback,
+          ),
+        this.#transportTimeoutMs,
+        signal,
+      );
+    } catch (error) {
+      if (signal?.aborted === true) return;
+      throw error;
+    }
   }
 
   async #cancelWait(waitId: string): Promise<void> {

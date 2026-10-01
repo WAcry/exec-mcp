@@ -123,7 +123,7 @@ describe("proxy settings across actual execution paths", () => {
     );
     const output = JSON.parse(run.stdout);
     expect(output.files).toEqual([]);
-    expect(output.error).toContain("导入失败");
+    expect(output.error).toContain("The file import failed");
     expect(output.error).not.toContain("PRIVATE_TEST");
     expect(proxy.calls).toHaveLength(1);
     expect(directHits).toBe(0);

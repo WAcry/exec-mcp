@@ -79,11 +79,13 @@ describe("host file transfer transport", () => {
       { address: "8.8.8.8", family: 4 },
       { address: "192.168.1.1", family: 4 },
     ]);
-    await expect(resolvePublic(true)).rejects.toThrow("私网");
+    await expect(resolvePublic(true)).rejects.toThrow("private network");
     network.lookup.mockRejectedValue(
       new Error("INTERNAL_ERROR_WITH_PRIVATE_DATA"),
     );
-    await expect(resolvePublic(true)).rejects.toThrow("无法解析宿主文件地址");
+    await expect(resolvePublic(true)).rejects.toThrow(
+      "Cannot resolve the host of the download_url",
+    );
   });
   it("bounds stalled DNS lookups and ignores a late answer", async () => {
     vi.useFakeTimers();
@@ -98,7 +100,7 @@ describe("host file transfer transport", () => {
     publicLookup("stalled.example.test", { all: true }, callback);
     await vi.advanceTimersByTimeAsync(5000);
     expect(callback).toHaveBeenCalledTimes(1);
-    expect(callback.mock.calls[0]![0].message).toContain("超时");
+    expect(callback.mock.calls[0]![0].message).toContain("timed out");
     complete([{ address: "8.8.8.8", family: 4 }]);
     await Promise.resolve();
     expect(callback).toHaveBeenCalledTimes(1);
@@ -138,7 +140,7 @@ describe("host file transfer transport", () => {
     } catch (error) {
       message = String(error);
     }
-    expect(message).toContain("代理凭据未回显");
+    expect(message).toContain("proxy credentials are not shown");
     expect(message).not.toMatch(/PRIVATE_PROXY_PASSWORD|PRIVATE_SIGNED_URL/);
     expect(network.close).toHaveBeenCalled();
   });
@@ -154,7 +156,7 @@ describe("host file transfer transport", () => {
         "https://files.example.test/file",
         new AbortController().signal,
       ),
-    ).rejects.toThrow("下载被拒绝");
+    ).rejects.toThrow("Content-Encoding");
     expect(body.destroyed).toBe(true);
     network.get.mockImplementation(async () => ({
       statusCode: 200,

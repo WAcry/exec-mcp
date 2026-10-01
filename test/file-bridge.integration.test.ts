@@ -298,7 +298,9 @@ describe("isolated downloadable files endpoint", () => {
       'await tools.export_file({path:"file",delivery:"url"});',
     );
     expect(result.isError).toBe(true);
-    expect(texts(result).join("\n")).toContain("未配置");
+    expect(texts(result).join("\n")).toContain(
+      "No download endpoint is configured",
+    );
     expect(links(result)).toEqual([]);
     expect(t.server.downloadAddress).toBeUndefined();
   });

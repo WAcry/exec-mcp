@@ -171,7 +171,17 @@ export async function startWebServer(
     );
   let actualPort = web.port;
 
-  const server = createServer(async (req, res) => {
+  const server = createServer((req, res) => {
+    void handleRequest(req, res).catch((error: unknown) => {
+      // Last guard: an unexpected error ends this request, never the process.
+      if (!res.headersSent) respondError(res, error);
+      else res.destroy();
+    });
+  });
+  const handleRequest = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
     applyWebSecurityHeaders(res, isTrustedLoopbackRequest(req));
     if (!requestOriginAllowed(req)) {
       fail(
@@ -289,7 +299,7 @@ export async function startWebServer(
       if (!res.headersSent) respondError(res, error);
       else res.destroy();
     }
-  });
+  };
 
   try {
     actualPort = await listen(server, web.port, web.host);

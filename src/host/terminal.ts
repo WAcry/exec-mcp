@@ -355,13 +355,11 @@ export class TerminalManager {
     session.terminating ??= (async () => {
       if (session.exitCode !== undefined) return;
       const pid = session.backend.process.pid;
-      if (pid !== undefined) {
-        await terminateProcessTree(pid);
-        if ((await waitUntil(session.done, 750)) === undefined)
-          await terminateProcessTree(pid, true);
-      }
-      if ((await waitUntil(session.done, 3000)) === undefined)
-        throw new Error("进程树终止未确认。");
+      const stopped =
+        pid !== undefined
+          ? await terminateProcessTree(pid, session.done)
+          : (await waitUntil(session.done, 3000)) !== undefined;
+      if (!stopped) throw new Error("进程树终止未确认。");
     })();
     return session.terminating;
   }

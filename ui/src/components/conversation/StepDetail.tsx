@@ -3,10 +3,16 @@ import { useEffect, useRef, useState } from "react";
 import { useLiveEvents } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorFeedback } from "../../lib/errors";
 import { callInput, hasSubcalls } from "../../lib/call-presentation";
 import { coalesced } from "../../lib/coalesce";
 import { formatDuration, fullTime } from "../../lib/format";
-import { plural, type Translate } from "../../lib/locale";
+import {
+  feedback,
+  plural,
+  type Feedback,
+  type Translate,
+} from "../../lib/locale";
 import { parseToolResult } from "../../lib/results";
 import type { CallRecord } from "../../types";
 import { CopyButton } from "../ui/CopyButton";
@@ -17,7 +23,7 @@ import { NestedCall } from "./NestedCall";
 
 function useCallDetail(id: string, live: boolean) {
   const [call, setCall] = useState<CallRecord | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Feedback>("");
   const loader = useRef<ReturnType<typeof coalesced> | null>(null);
   useEffect(() => {
     let disposed = false;
@@ -30,7 +36,7 @@ function useCallDetail(id: string, live: boolean) {
         setCall(value);
         setError("");
       } catch (caught) {
-        if (!disposed) setError(String(caught));
+        if (!disposed) setError(errorFeedback(caught));
       }
     }, 150);
     loader.current = load;
@@ -87,7 +93,7 @@ export function StepDetail({ id, running }: { id: string; running: boolean }) {
   if (!call)
     return error ? (
       <div className="flex items-center gap-3 px-4 py-3 text-sm text-err">
-        {t("detail.loadFailed", error)}
+        {t("detail.loadFailed", feedback(error, t))}
         <Button size="sm" onClick={reload}>
           <RotateCw className="h-3.5 w-3.5" />
           {t("common.retry")}

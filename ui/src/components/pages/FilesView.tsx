@@ -1,12 +1,18 @@
 import { FileOutput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLive, useLiveEvents } from "../../context/LiveContext";
+import {
+  useLive,
+  useLiveEvents,
+  usePollWhileOffline,
+} from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorFeedback } from "../../lib/errors";
+import { feedback, message, type Feedback } from "../../lib/locale";
 import { formatBytes, formatElapsed } from "../../lib/format";
 import { routeHref, type Navigate } from "../../lib/router";
 import { useNow } from "../../lib/use-now";
-import type { ArtifactItem } from "../../types";
+import type { ArtifactItem, ArtifactsResponse } from "../../types";
 import { ConfirmButton, EmptyState, Loading } from "../ui/Controls";
 import { CopyButton } from "../ui/CopyButton";
 import { Sigil } from "../ui/Sigil";
@@ -37,22 +43,19 @@ export function FilesView({
   const { t, locale } = useLocale();
   const live = useLive();
   const [items, setItems] = useState<ArtifactItem[] | null>(null);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Feedback>("");
   const load = useCallback(async () => {
     try {
-      const value = await apiFetch<{ artifacts: ArtifactItem[] }>(
-        "/api/artifacts",
-      );
+      const value = await apiFetch<ArtifactsResponse>("/api/artifacts");
       setItems(value.artifacts);
     } catch (caught) {
-      setError(String(caught));
+      setError(errorFeedback(caught));
     }
   }, []);
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 10_000);
-    return () => window.clearInterval(timer);
   }, [load]);
+  usePollWhileOffline(() => void load(), 10_000);
   useLiveEvents((event) => {
     if (event.type === "call:finish") void load();
   });
@@ -69,7 +72,7 @@ export function FilesView({
         body: JSON.stringify({ id }),
       });
     } catch (caught) {
-      setError(t("files.revokeFailed", String(caught)));
+      setError(message("files.revokeFailed", errorFeedback(caught)));
     }
     await load();
   };
@@ -80,7 +83,7 @@ export function FilesView({
       navigate={navigate}
       wide={wide}
     >
-      {error && <p className="mb-3 text-sm text-err">{error}</p>}
+      {error && <p className="mb-3 text-sm text-err">{feedback(error, t)}</p>}
       {!items ? (
         <Loading />
       ) : items.length === 0 ? (

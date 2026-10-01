@@ -24,15 +24,15 @@ import { useRoute, type Navigate, type Route } from "./lib/router";
 export function App() {
   const [route, navigate] = useRoute();
   return (
-    <ManagementProvider>
-      <DraftsProvider>
-        <LiveProvider
-          onOpenQuestion={(id) => navigate({ name: "conversation", id })}
-        >
+    <LiveProvider
+      onOpenQuestion={(id) => navigate({ name: "conversation", id })}
+    >
+      <ManagementProvider>
+        <DraftsProvider>
           <Gate route={route} navigate={navigate} />
-        </LiveProvider>
-      </DraftsProvider>
-    </ManagementProvider>
+        </DraftsProvider>
+      </ManagementProvider>
+    </LiveProvider>
   );
 }
 

@@ -7,6 +7,7 @@ import {
 import { newNoteDraft, useDrafts } from "../../context/DraftsContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorFeedback } from "../../lib/errors";
 import { utf8Bytes } from "../../lib/format";
 import { feedback, message, type Feedback } from "../../lib/locale";
 import { isTyping } from "../../lib/use-media";
@@ -75,7 +76,7 @@ export function Composer({
         setNotice(message("notes.alreadyWithdrawn"));
       if (from) onSent(saved, from);
     } catch (caught) {
-      setError(message("notes.sendFailed", String(caught)));
+      setError(message("notes.sendFailed", errorFeedback(caught)));
     } finally {
       inFlight.current = false;
       setSending(false);

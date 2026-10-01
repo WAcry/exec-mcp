@@ -2,15 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   SessionNote,
   AgentMessage,
-  SessionNotesPage,
 } from "../../../src/session-notes-types";
-import type {
-  UserQuestionsPage,
-  UserQuestionView,
-} from "../../../src/user-questions-types";
-import { useLiveEvents } from "../context/LiveContext";
-import { apiFetch } from "./api";
+import type { UserQuestionView } from "../../../src/user-questions-types";
+import { useLiveEvents, usePollWhileOffline } from "../context/LiveContext";
+import type { NotesResponse, QuestionsResponse } from "../types";
+import { apiFetch, isApiError } from "./api";
 import { coalesced } from "./coalesce";
+import { errorFeedback } from "./errors";
+import type { Feedback } from "./locale";
 
 export interface ConversationMessages {
   loaded: boolean;
@@ -24,7 +23,7 @@ export interface ConversationMessages {
   pendingQuestions: number;
   maxMessageBytes: number;
   retentionHours: number;
-  error: string;
+  error: Feedback;
 }
 
 const initial: ConversationMessages = {
@@ -65,10 +64,10 @@ export function useMessages(sessionId: string | undefined) {
         const [noteResults, questions] = await Promise.all([
           Promise.all(
             notePageNumbers.map((page) =>
-              apiFetch<SessionNotesPage>(`${base}/notes?page=${page}`),
+              apiFetch<NotesResponse>(`${base}/notes?page=${page}`),
             ),
           ),
-          apiFetch<UserQuestionsPage>(`${base}/questions?page=1`),
+          apiFetch<QuestionsResponse>(`${base}/questions?page=1`),
         ]);
         if (disposed) return;
         const first = noteResults[0]!;
@@ -98,26 +97,26 @@ export function useMessages(sessionId: string | undefined) {
         moreNotes.current = first.totalPages > pages.current;
       } catch (error) {
         if (disposed) return;
-        const message = String(error);
-        // 404: this conversation has no identity recorded for messages yet.
+        // Only an unknown conversation has no messages; other failures keep what is shown.
+        const unknown = isApiError(error, "conversation_not_found");
         setState((previous) => ({
           ...previous,
           loaded: true,
-          available: false,
-          error: message,
+          available: unknown ? false : previous.available,
+          error: errorFeedback(error),
         }));
       }
     }, 150);
     loader.current = load;
     load.now();
-    const poll = window.setInterval(load.schedule, 15_000);
     return () => {
       disposed = true;
       loader.current = null;
       load.dispose();
-      window.clearInterval(poll);
     };
   }, [sessionId]);
+
+  usePollWhileOffline(() => loader.current?.schedule(), 15_000);
 
   useEffect(() => {
     if (notePages > 1) loader.current?.now();

@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { SessionNote } from "../../../../src/session-notes-types";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { clockTime, fullTime } from "../../lib/format";
 import { CopyButton } from "../ui/CopyButton";
 
@@ -78,7 +79,7 @@ export function NoteEntry({
         { method: "DELETE" },
       );
     } catch (caught) {
-      setError(String(caught));
+      setError(errorText(caught, t));
     } finally {
       setBusy(false);
       onChanged();

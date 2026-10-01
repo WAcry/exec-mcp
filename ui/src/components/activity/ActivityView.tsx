@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useLive } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorText } from "../../lib/errors";
 import { dayKey, dayLabel } from "../../lib/format";
 import type { Navigate, Route } from "../../lib/router";
 import { useCalls } from "../../lib/use-calls";
@@ -101,7 +102,7 @@ export function ActivityView({
       await refreshStatus();
       live.refresh();
     } catch (caught) {
-      setError(t("activity.clearFailed", String(caught)));
+      setError(t("activity.clearFailed", errorText(caught, t)));
     }
   };
 

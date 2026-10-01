@@ -15,6 +15,7 @@ import type {
 import { useLive } from "../../context/LiveContext";
 import { useLocale } from "../../context/LocaleContext";
 import { apiFetch } from "../../lib/api";
+import { errorFeedback } from "../../lib/errors";
 import {
   conversationState,
   RECENT_ACTIVITY_MS,
@@ -337,7 +338,9 @@ export function ConversationView({
           for (const item of ids) next.delete(item);
           return next;
         });
-        setToast(feedbackMessage("agentMessage.readFailed", String(error)));
+        setToast(
+          feedbackMessage("agentMessage.readFailed", errorFeedback(error)),
+        );
       }
       changed();
     },

@@ -6,7 +6,10 @@ export type Locale = "en" | "zh-CN";
 export type MessageKey = keyof typeof messages;
 type Value = string | number;
 export type Translate = (key: MessageKey, ...values: Value[]) => string;
-export type Feedback = string | { key: MessageKey; values: Value[] };
+/** A value can itself be feedback, such as a translated error inside a failure message. */
+export type Feedback =
+  | string
+  | { key: MessageKey; values: (Value | Feedback)[] };
 
 export function languagePreference(value: unknown): LanguagePreference {
   return value === "en" || value === "zh" ? value : "auto";
@@ -59,9 +62,18 @@ export function plural(
 }
 
 /** Keep UI feedback translatable after a language switch; raw diagnostics stay raw. */
-export function message(key: MessageKey, ...values: Value[]): Feedback {
+export function message(
+  key: MessageKey,
+  ...values: (Value | Feedback)[]
+): Feedback {
   return { key, values };
 }
 export function feedback(value: Feedback, t: Translate): string {
-  return typeof value === "string" ? value : t(value.key, ...value.values);
+  if (typeof value === "string") return value;
+  return t(
+    value.key,
+    ...value.values.map((item) =>
+      typeof item === "object" ? feedback(item, t) : item,
+    ),
+  );
 }

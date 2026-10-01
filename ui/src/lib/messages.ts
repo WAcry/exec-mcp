@@ -787,6 +787,7 @@ export const messages = {
   "tools.cwd": { en: "Directory", zh: "目录" },
   "tools.env": { en: "Environment", zh: "环境变量" },
   "tools.headers": { en: "Headers", zh: "请求头" },
+  "tools.tokenEnv": { en: "Bearer token from", zh: "Bearer 令牌来自" },
   "tools.selected": { en: "Selected tools:", zh: "指定工具：" },
   "tools.catalog": { en: "Loaded tools ({0})", zh: "已加载的工具（{0}）" },
   "tools.catalogHelp": {
@@ -878,8 +879,8 @@ export const messages = {
   },
   "settings.history": { en: "Call history", zh: "调用记录" },
   "settings.historyHelp": {
-    en: "Audit records live in memory only. Clearing them does not undo anything that ran, and keeps messages, questions and names.",
-    zh: "审计记录只保存在内存中。清空不会撤销已经执行的操作，也会保留消息、问题和对话名称。",
+    en: "Audit records live in memory only. A restart from this console keeps them; stopping the process removes them. Clearing them does not undo anything that ran, and keeps messages, questions and names.",
+    zh: "审计记录只保存在内存中。在控制台中重启会保留它们，停止进程后会消失。清空不会撤销已经执行的操作，也会保留消息、问题和对话名称。",
   },
   "settings.cleared": {
     en: "Call history cleared. Messages, questions and names were kept.",
@@ -891,6 +892,20 @@ export const messages = {
   "settings.platform": { en: "Platform", zh: "平台" },
   "settings.endpoint": { en: "MCP endpoint", zh: "MCP 地址" },
   "settings.uptime": { en: "Uptime", zh: "运行时长" },
+  "settings.protocol": { en: "MCP protocol use", zh: "MCP 协议使用" },
+  "settings.protocolModern": {
+    en: "Current protocol: {0} requests",
+    zh: "当前协议：{0} 次请求",
+  },
+  "settings.protocolLegacy": {
+    en: "2025 protocol: {0} requests in {1} sessions, {2} open",
+    zh: "2025 版协议：{1} 个会话共 {0} 次请求，{2} 个仍打开",
+  },
+  "settings.protocolLast": { en: "last {0}", zh: "最近 {0}" },
+  "settings.protocolSince": {
+    en: "Counted since {0}, when this process started.",
+    zh: "从 {0} 进程启动时开始统计。",
+  },
   "config.login": { en: "Login shell by default", zh: "默认使用登录 Shell" },
   "config.loginHelp": {
     en: "Commands load shell profiles (or the PowerShell profile). Individual calls can still override it.",
@@ -929,4 +944,126 @@ export const messages = {
     zh: "当前运行实例加载的配置，凭据值和命令参数已隐藏。",
   },
   "config.openFolder": { en: "Show in folder", zh: "在文件夹中显示" },
+  "error.network": {
+    en: "Cannot reach the server.",
+    zh: "无法连接服务器。",
+  },
+  "error.unauthorized": {
+    en: "Sign in again to continue.",
+    zh: "请重新登录后继续。",
+  },
+  "error.invalidToken": {
+    en: "The access token is not correct.",
+    zh: "访问密钥不正确。",
+  },
+  "error.forbiddenOrigin": {
+    en: "The request came from another site, so the server blocked it.",
+    zh: "请求来自其他网站，已被服务器拦截。",
+  },
+  "error.missingActionHeader": {
+    en: "The request did not come from this console, so the server blocked it.",
+    zh: "请求不是由本控制台发出，已被服务器拦截。",
+  },
+  "error.loopbackOnly": {
+    en: "Only a browser on the server machine can do this.",
+    zh: "只有服务器本机的浏览器可以执行此操作。",
+  },
+  "error.invalidRequest": {
+    en: "The server did not accept the request. Reload the page and try again.",
+    zh: "服务器未接受该请求，请刷新页面后重试。",
+  },
+  "error.bodyTooLarge": {
+    en: "The request is too large.",
+    zh: "请求内容过大。",
+  },
+  "error.notFound": {
+    en: "The server does not have this page or action. Reload the console.",
+    zh: "服务器没有这个页面或操作，请刷新控制台。",
+  },
+  "error.callNotFound": {
+    en: "This call is no longer in the audit.",
+    zh: "审计中已没有这次调用。",
+  },
+  "error.mediaNotFound": {
+    en: "This image is no longer kept.",
+    zh: "这张图片已不再保留。",
+  },
+  "error.conversationNotFound": {
+    en: "This conversation is not known yet, or its records expired.",
+    zh: "尚未识别这个对话，或其记录已过期。",
+  },
+  "error.questionNotFound": {
+    en: "This question no longer exists.",
+    zh: "这个问题已不存在。",
+  },
+  "error.noteNotFound": {
+    en: "This message no longer exists.",
+    zh: "这条消息已不存在。",
+  },
+  "error.noteEmpty": { en: "The message is empty.", zh: "消息为空。" },
+  "error.tooLong": { en: "The text is too long.", zh: "文本过长。" },
+  "error.noteChanged": {
+    en: "A message with this ID already has different text.",
+    zh: "相同 ID 的消息已有不同内容。",
+  },
+  "error.noteAttached": {
+    en: "ChatGPT already received this message, so you cannot withdraw it.",
+    zh: "ChatGPT 已收到这条消息，无法撤回。",
+  },
+  "error.invalidOption": {
+    en: "The selected option does not exist.",
+    zh: "所选选项不存在。",
+  },
+  "error.answerRequired": {
+    en: "Choose an option or write a note.",
+    zh: "请选择一个选项或填写补充说明。",
+  },
+  "error.answerChanged": {
+    en: "This question already has a different answer.",
+    zh: "这个问题已有不同的回答。",
+  },
+  "error.questionAnswered": {
+    en: "This question already has an answer.",
+    zh: "这个问题已经回答过了。",
+  },
+  "error.notesFull": {
+    en: "Message storage is full. Old records leave after 72 hours.",
+    zh: "消息存储已满，旧记录会在 72 小时后清除。",
+  },
+  "error.webUnavailable": {
+    en: "The Web console is not running.",
+    zh: "Web 控制台未运行。",
+  },
+  "error.managementUnavailable": {
+    en: "This instance cannot change its configuration from the console.",
+    zh: "当前实例不能在控制台中修改配置。",
+  },
+  "error.restartInProgress": {
+    en: "A restart is in progress. Try again when it finishes.",
+    zh: "正在重启，请在完成后重试。",
+  },
+  "error.configConflict": {
+    en: "Another change updated the configuration. Try again.",
+    zh: "配置已被其他修改更新，请重试。",
+  },
+  "error.configUnreadable": {
+    en: "Fix the configuration file, then try again. {0}",
+    zh: "请修正配置文件后重试。{0}",
+  },
+  "error.configEntryMissing": {
+    en: "This entry is no longer in the configuration. Refresh the list.",
+    zh: "配置中已没有这一项，请刷新列表。",
+  },
+  "error.configUnsafeEdit": {
+    en: "The console cannot change this entry safely. Edit the configuration file in a terminal.",
+    zh: "控制台无法安全修改这一项，请在终端中编辑配置文件。",
+  },
+  "error.tooManyEventClients": {
+    en: "Too many console tabs are open. Close some, then reload.",
+    zh: "打开的控制台标签页过多，请关闭部分后刷新。",
+  },
+  "error.internal": {
+    en: "The server had an internal error. Check the service log.",
+    zh: "服务器内部出错，请查看服务日志。",
+  },
 } as const;

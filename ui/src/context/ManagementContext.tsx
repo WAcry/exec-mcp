@@ -8,62 +8,61 @@ import {
   type ReactNode,
 } from "react";
 import { apiFetch } from "../lib/api";
+import { errorFeedback } from "../lib/errors";
+import type { Feedback } from "../lib/locale";
+import type { ConfigToggleRequest, ManagementResponse } from "../types";
 import { useAuth } from "./AuthContext";
+import { useLive, useLiveEvents } from "./LiveContext";
 
-export interface ManagementState {
-  available: boolean;
-  revision?: string;
-  pending?: boolean;
-  state?: "ready" | "restarting" | "error" | "stopped";
-  generation?: number;
-  error?: string;
-  servers?: { name: string; enabled: boolean; active: boolean }[];
-  settings?: { login: boolean; web: boolean };
-}
-type Toggle =
-  | { kind: "mcp"; name: string; enabled: boolean }
-  | { kind: "skill"; path: string; workdir?: string; enabled: boolean }
-  | {
-      kind: "setting";
-      name: "execution.login" | "web.enabled";
-      enabled: boolean;
-    };
+export type ManagementState = ManagementResponse;
+/** The provider adds the revision it last read. */
+type WithoutRevision<T> = T extends unknown ? Omit<T, "revision"> : never;
+type Toggle = WithoutRevision<ConfigToggleRequest>;
 const Context = createContext<{
   data: ManagementState | null;
   busy: boolean;
-  error: string;
+  error: Feedback;
   toggle(change: Toggle): Promise<void>;
   restart(): Promise<void>;
 } | null>(null);
 
 export function ManagementProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, refreshStatus } = useAuth();
+  const { connection } = useLive();
   const [data, setData] = useState<ManagementState | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<Feedback>("");
   const active = useRef(false);
   const refresh = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
-      setData(await apiFetch<ManagementState>("/api/management"));
+      setData(await apiFetch<ManagementResponse>("/api/management"));
     } catch (caught) {
-      setError(String(caught));
+      setError(errorFeedback(caught));
     }
   }, [isAuthenticated]);
+  // A restart sends runtime events; poll fast only when the stream cannot deliver them.
+  const fast = data?.state === "restarting" && connection !== "live";
   useEffect(() => {
     if (!isAuthenticated) {
       setData(null);
       return;
     }
     void refresh();
+    // The configuration file can change on disk without any event.
     const timer = window.setInterval(
       () => {
         void refresh();
       },
-      data?.state === "restarting" ? 1000 : 15000,
+      fast ? 1000 : 15000,
     );
     return () => clearInterval(timer);
-  }, [isAuthenticated, data?.state, refresh]);
+  }, [isAuthenticated, fast, refresh]);
+  useLiveEvents((event) => {
+    if (event.type !== "runtime") return;
+    void refresh();
+    void refreshStatus();
+  });
 
   const action = async (operation: () => Promise<void>) => {
     if (active.current) return;
@@ -73,7 +72,7 @@ export function ManagementProvider({ children }: { children: ReactNode }) {
     try {
       await operation();
     } catch (caught) {
-      setError(String(caught));
+      setError(errorFeedback(caught));
       await refresh();
     } finally {
       active.current = false;
@@ -83,7 +82,7 @@ export function ManagementProvider({ children }: { children: ReactNode }) {
   const toggle = (change: Toggle) =>
     action(async () => {
       setData(
-        await apiFetch<ManagementState>("/api/config/toggle", {
+        await apiFetch<ManagementResponse>("/api/config/toggle", {
           method: "POST",
           body: JSON.stringify({ ...change, revision: data?.revision }),
         }),

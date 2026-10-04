@@ -50,7 +50,7 @@ describe("real rolling terminal output, not output files", () => {
       );
       expect(first.session_id).toBeDefined();
       const owned = value["sessions"].get(first.session_id!)!;
-      await owned.done; // Intentionally leave the entire log unread until the writer exits.
+      await owned.done; // Leave the remaining log unread until the writer exits.
       expect(owned.buffer.bytes).toBeLessThanOrEqual(4096);
       expect(owned.buffer.allocatedBytes).toBeLessThan(4096 + 2 * 16384);
       const result = await value.writeStdin({
@@ -60,8 +60,11 @@ describe("real rolling terminal output, not output files", () => {
       const output = plain(first.output + result.output);
       expect(output).toContain("BEGIN_LOG");
       expect(output).toContain("END_LOG");
-      expect(result.truncated).toBe(true);
-      expect(result.omitted_bytes).toBeGreaterThan(200_000);
+      expect(first.truncated || result.truncated).toBe(true);
+      // The initial response may already have consumed a batch, including omissions.
+      expect(
+        (first.omitted_bytes ?? 0) + (result.omitted_bytes ?? 0),
+      ).toBeGreaterThan(200_000);
       expect(result.exit_code).toBe(0);
       expect(result.session_id).toBeUndefined();
       expect(output).not.toContain("\ufffd");

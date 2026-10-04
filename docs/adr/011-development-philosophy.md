@@ -78,7 +78,7 @@ those decisions remain active and own the detailed behavior of their topics. Thi
     as specified in [ADR-002](002-tool-discovery.md); execution cancellation and recovery follow [ADR-003](003-results-lifecycle.md).
 
 16. **Cross-platform operation is a product requirement.** Windows, Linux, and macOS receive real execution and installation validation.
-    Process, shell, PTY, and installation changes require the three-platform CI matrix with supported Node versions, currently 20/22/24.
+    Process, shell, PTY, and installation changes require the three-platform CI matrix with supported Node versions, currently 20/22/24/25.
     Report platform evidence separately rather than inferring Windows behavior from Linux. Native shell defaults remain in [ADR-007](007-command-shell.md).
 
 17. **Document decisions that code cannot explain.** README serves users, ADRs preserve reasons, constraints, and accepted costs, and AGENTS gives development rules and reading entry points.

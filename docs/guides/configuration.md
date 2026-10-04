@@ -121,7 +121,7 @@ The service does not proactively print the environment or prevent trusted comman
 HTTP MCP, resource requests, attachment downloads, and JWT public-key fetches initiated by the service respect HTTP_PROXY, HTTPS_PROXY, and NO_PROXY,
 including lowercase names, which take precedence. HTTPS_PROXY falls back to HTTP_PROXY when absent. HTTP and HTTPS proxies are supported, without silent direct fallback.
 NO_PROXY accepts hosts, domain suffixes, ports, and *, such as `localhost,127.0.0.1,[::1],.internal.example`.
-Node 20/22/24 need no NODE_USE_ENV_PROXY setting. Private CAs use NODE_EXTRA_CA_CERTS.
+Node 20/22/24/25 need no NODE_USE_ENV_PROXY setting. Private CAs use NODE_EXTRA_CA_CERTS.
 
 Set proxy variables before startup and restart after changes. Child processes and tunnel clients inherit them but decide whether to honor them through their own network stacks.
 Use system networking when you need consistent routing for browsers, user scripts, or UDP.

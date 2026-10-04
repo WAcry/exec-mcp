@@ -2,7 +2,7 @@
 
 [English](008-environment-and-proxy.md) | 简体中文
 
-当前生效，2026-09-22 更新。
+当前生效，2026-10-04 更新。
 
 ## 完整继承环境
 
@@ -24,6 +24,11 @@ HTTPS_PROXY 缺失时继承 HTTP_PROXY，NO_PROXY 支持主机、域名后缀、
 
 代理只用于本服务的请求，不全局替换 fetch/HTTP agent 或注入 NODE_OPTIONS。
 TLS 证书和主机名校验保持开启，私有 CA 通过 NODE_EXTRA_CA_CERTS 配置。
+
+Node 25 拒绝把 IP 字面量用作 TLS SNI。Undici 7 会把代理主机名传入 SNI，因此使用 IP 的 HTTPS 代理
+通过其公开 clientFactory 接口做小范围适配：省略 IP SNI，保留原连接主机与证书校验，域名 SNI 保持原样。
+这样继续共用兼容 Node 20 的传输，不增加全局补丁、较弱的 TLS 设置或按版本分支的执行路径。
+
 代理凭据仅发给代理，目标服务及错误提示均不接收它。代理失败就返回错误，不直连重放请求，
 以免重复产生副作用；取消调用或关闭服务时释放连接。
 
@@ -46,7 +51,7 @@ OpenAI tunnel-client 由用户独立运行，也可通过 with-token 显式启�
 
 ## Node 20 兼容
 
-支持 Node 20.19+，与 Node 22/24 共用实现。代理采用兼容 Node 20 的 Undici 7，
+支持 Node 20.19+，与 Node 22/24/25 共用实现。代理采用兼容 Node 20 的 Undici 7，
 文件类型识别采用 file-type 21。类型检查和真实二进制测试共同验证兼容性。
 Node 20 已结束上游维护，本项目保留兼容，新部署应选择仍受维护的版本。
 固定 Codex 组件、Shell 行为和资源限制保持原样，当前不增加代理管理工具或 UI。

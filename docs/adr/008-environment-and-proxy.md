@@ -2,7 +2,7 @@
 
 English | [简体中文](008-environment-and-proxy.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-10-04.
 
 ## Full environment inheritance
 
@@ -24,6 +24,11 @@ The policy is the same across Node versions and does not need NODE_USE_ENV_PROXY
 
 Proxies apply to this service's requests only. The service does not globally replace fetch/HTTP agents or inject NODE_OPTIONS.
 TLS certificate and hostname checks remain enabled; private CAs use NODE_EXTRA_CA_CERTS.
+
+Node 25 rejects an IP literal as TLS SNI. Undici 7 supplies the proxy hostname as SNI, so HTTPS proxies addressed by IP need a small adapter
+through its public clientFactory option. Omit IP SNI while keeping the original connection host and certificate verification; DNS-name SNI stays intact.
+This keeps the common Node 20-compatible transport without a global patch, weaker TLS settings, or a version-specific execution path.
+
 Proxy credentials go only to the proxy, not to target services or diagnostics. Proxy failures return errors without replaying directly,
 which could repeat side effects. Cancellation and shutdown release connections.
 
@@ -46,7 +51,7 @@ File-download responses return over incoming connections and do not open another
 
 ## Node 20 compatibility
 
-Node 20.19+ shares the implementation with Node 22/24. Proxies use Node 20-compatible Undici 7, and file identification uses file-type 21.
+Node 20.19+ shares the implementation with Node 22/24/25. Proxies use Node 20-compatible Undici 7, and file identification uses file-type 21.
 Type checking and real binary tests jointly validate compatibility.
 Node 20 has reached upstream end of life. Compatibility remains, while new deployments should use a maintained release.
 Pinned Codex components, shell behavior, and resource limits remain unchanged. There are no additional proxy-management tools or UI.

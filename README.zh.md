@@ -22,7 +22,7 @@ JavaScript 编排环境不直接提供文件和网络 API，但通过工具访�
 
 ## 安装与启动
 
-支持 Linux、Windows、macOS，CI 覆盖 Node.js 20、22、24 的真实执行和独立安装。
+支持 Linux、Windows、macOS，CI 覆盖 Node.js 20、22、24、25 的真实执行和独立安装。
 需要 Git、npm 和 Node.js。20.x 最低为 20.19，22.x 最低为 22.19；新环境建议使用 22 或 24。
 [Node 20 已结束上游维护](https://nodejs.org/en/about/previous-releases)，本项目继续兼容，但该版本已无上游安全维护。
 Windows 需要 PowerShell 7 或 Windows PowerShell，不要求 WSL；安装依赖时需要联网。

@@ -22,7 +22,7 @@ The JavaScript orchestration environment has no direct filesystem or network API
 
 ## Install and start
 
-Linux, Windows, and macOS are supported. CI covers actual execution and isolated installation on Node.js 20, 22, and 24.
+Linux, Windows, and macOS are supported. CI covers actual execution and isolated installation on Node.js 20, 22, 24, and 25.
 Install Git, npm, and Node.js. The minimums are 20.19 for 20.x and 22.19 for 22.x; use 22 or 24 for a new setup.
 [Node 20 has reached end of life](https://nodejs.org/en/about/previous-releases). This project retains compatibility, but Node 20 no longer receives upstream security maintenance.
 Windows needs PowerShell 7 or Windows PowerShell; WSL is not required. Dependency installation needs network access.

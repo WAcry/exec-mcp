@@ -1,10 +1,12 @@
 import {
   EnvHttpProxyAgent,
+  Pool,
   request,
   type Dispatcher,
   type Agent,
+  type buildConnector,
 } from "undici";
-import type { LookupFunction } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
 
 export type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -28,6 +30,7 @@ export class EnvironmentHttpClient {
         httpsProxy: env.https_proxy ?? env.HTTPS_PROXY ?? "",
         noProxy: env.no_proxy ?? env.NO_PROXY ?? "",
         connect,
+        clientFactory: proxyClient,
         // SSE and downloads use their caller's AbortSignal, not a socket idle timeout.
         bodyTimeout: 0,
       });
@@ -70,4 +73,21 @@ export class EnvironmentHttpClient {
     this.#closing ??= this.#agent.destroy();
     return this.#closing;
   }
+}
+
+/** Undici supplies the proxy hostname as SNI, including IP literals rejected by Node 25. */
+function proxyClient(origin: URL, options: object): Dispatcher {
+  const connect = (options as Pool.Options).connect;
+  if (typeof connect !== "function") return new Pool(origin, options);
+  const proxyConnect: buildConnector.connector = (options, callback) => {
+    const servername = options.servername;
+    connect(
+      servername && isIP(servername.replace(/^\[|\]$/g, ""))
+        ? { ...options, servername: "" }
+        : options,
+      callback,
+    );
+  };
+  // The host and TLS verification stay intact; DNS names retain their SNI.
+  return new Pool(origin, { ...options, connect: proxyConnect });
 }

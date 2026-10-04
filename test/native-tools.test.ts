@@ -309,7 +309,7 @@ describe.each([false, true])(
         {
           name: "exec",
           arguments: {
-            source: `text(await tools.exec_command({cmd:${JSON.stringify(nodeCommand("setInterval(()=>{},1000);"))},yield_time_ms:30000}));`,
+            source: `text(await tools.exec_command({cmd:${JSON.stringify(nodeCommand("console.log('cancel-ready');setInterval(()=>{},1000);"))},yield_time_ms:30000}));`,
             yield_time_ms: 30000,
           },
         },
@@ -317,8 +317,12 @@ describe.each([false, true])(
       );
       const observed = pending.catch((error) => error);
       await vi.waitFor(
-        () =>
-          expect(t.server.runtime.terminal.getActiveSessions()).toHaveLength(1),
+        () => {
+          const sessions = t.server.runtime.terminal.getActiveSessions();
+          expect(sessions).toHaveLength(1);
+          // Wait for the child to start, rather than cancelling during shell startup.
+          expect(sessions[0]?.bufferBytes).toBeGreaterThan(0);
+        },
         { timeout: 10000 },
       );
       abort.abort();

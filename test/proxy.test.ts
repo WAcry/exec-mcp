@@ -171,9 +171,13 @@ describe("HTTP proxy environment without version-dependent global Node flags", (
 });
 
 describe("real TLS through environment proxies", () => {
-  it.each([false, true])(
-    "supports an HTTPS destination through a proxy (TLS proxy=%s), preserving TLS validation",
-    async (tls) => {
+  it.each([
+    [false, "127.0.0.1"],
+    [true, "127.0.0.1"],
+    [true, "localhost"],
+  ] as const)(
+    "supports an HTTPS destination through a proxy (TLS proxy=%s, host=%s), preserving TLS validation",
+    async (tls, hostname) => {
       const origin = await fixtures.server(
         (_request, response) => response.end("secure fixture"),
         true,
@@ -186,6 +190,12 @@ describe("real TLS through environment proxies", () => {
         },
         { tls },
       );
+      const servernames: string[] = [];
+      proxy.server.on("secureConnection", (socket) => {
+        servernames.push(
+          (socket as { servername?: string | false }).servername || "",
+        );
+      });
       const run = await fixtures.child(
         `
       import {EnvironmentHttpClient} from './src/network/http.ts';
@@ -193,7 +203,10 @@ describe("real TLS through environment proxies", () => {
       try { const result = await client.fetch('https://files.example.test/data');console.log(JSON.stringify({status:result.status,body:await result.text()})); }
       finally { await client.close(); }
     `,
-        { HTTP_PROXY: unused.url, HTTPS_PROXY: proxy.url },
+        {
+          HTTP_PROXY: unused.url,
+          HTTPS_PROXY: proxy.url.replace("127.0.0.1", hostname),
+        },
       );
       expect(JSON.parse(run.stdout)).toEqual({
         status: 200,
@@ -201,8 +214,26 @@ describe("real TLS through environment proxies", () => {
       });
       expect(proxy.calls).toHaveLength(1);
       expect(unused.calls).toHaveLength(0);
+      if (tls)
+        expect(servernames).toEqual([hostname === "localhost" ? hostname : ""]);
     },
   );
+  it("rejects an untrusted HTTPS proxy certificate when the proxy uses an IP address", async () => {
+    const origin = await fixtures.server((_request, response) =>
+      response.end("unreachable"),
+    );
+    const proxy = await fixtures.proxy(() => origin.port, { tls: true });
+    const run = await fixtures.child(
+      `
+      import {EnvironmentHttpClient} from './src/network/http.ts';const client=new EnvironmentHttpClient();
+      try{await client.fetch('http://files.example.test/');console.log('unexpected');}
+      catch{console.log('certificate-rejected');}finally{await client.close();}
+    `,
+      { HTTP_PROXY: proxy.url, NODE_EXTRA_CA_CERTS: "" },
+    );
+    expect(run.stdout.trim()).toBe("certificate-rejected");
+    expect(proxy.calls).toHaveLength(0);
+  });
   it("uses HTTP_PROXY for HTTPS when HTTPS_PROXY is absent, and respects no_proxy for TLS", async () => {
     const origin = await fixtures.server(
       (_request, response) => response.end("secure"),

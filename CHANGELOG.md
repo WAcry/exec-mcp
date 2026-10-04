@@ -13,6 +13,7 @@ HTTP downstream services can read credentials from environment variables (bearer
 The Web console supports English and Simplified Chinese, call auditing, and conversation notes, questions, and messages from ChatGPT with browser notifications. ChatGPT can name each conversation on its first call.
 Conversation notes, questions, messages, and titles survive a process restart, and restarting execution from the console also keeps call history.
 MCP clients that display server icons show the Exec MCP mark.
-OpenAI Secure MCP Tunnel, Cloudflare Named Tunnel, and Tailscale Funnel are supported. CI covers Linux, Windows, and macOS on Node.js 20, 22, and 24.
+OpenAI Secure MCP Tunnel, Cloudflare Named Tunnel, and Tailscale Funnel are supported. CI covers Linux, Windows, and macOS on Node.js 20, 22, 24, and 25.
+HTTPS proxies addressed by IP work on Node 25 while retaining certificate checks and DNS-name SNI.
 
 exec-mcp is licensed under Apache-2.0. Installation uses the source tree. Public npm distribution remains planned; this entry does not announce an npm package or GitHub Release.

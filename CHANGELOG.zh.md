@@ -13,6 +13,7 @@ HTTP 下游服务可以从环境变量读取凭据（bearer_token_env_var、env_
 Web 控制台支持英语和简体中文，可查看调用审计、发送会话补充、回答问题、查看 ChatGPT 发来的消息并接收浏览器通知。ChatGPT 可以在首次调用时为对话命名。
 会话补充、问题、消息和标题在进程重启后保留；在控制台重启执行服务时，调用审计也会保留。
 支持显示服务器图标的 MCP 客户端会显示 Exec MCP 标志。
-支持 OpenAI Secure MCP Tunnel、Cloudflare Named Tunnel 和 Tailscale Funnel。CI 覆盖 Linux、Windows、macOS 与 Node.js 20、22、24。
+支持 OpenAI Secure MCP Tunnel、Cloudflare Named Tunnel 和 Tailscale Funnel。CI 覆盖 Linux、Windows、macOS 与 Node.js 20、22、24、25。
+使用 IP 地址的 HTTPS 代理兼容 Node 25，仍保留证书校验与域名 SNI。
 
 exec-mcp 采用 Apache-2.0 许可证。当前通过源码安装，公共 npm 分发仍在计划中；此记录不表示已发布 npm 包或 GitHub Release。

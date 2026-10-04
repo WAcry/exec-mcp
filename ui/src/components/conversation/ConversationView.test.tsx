@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { Storage } from "happy-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../../App";
 import { AuthProvider } from "../../context/AuthContext";
@@ -182,7 +183,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   requests = [];
   FakeEventSource.all = [];
-  localStorage.setItem(LANGUAGE_KEY, "en");
+  vi.stubGlobal("localStorage", new Storage());
+  window.localStorage.setItem(LANGUAGE_KEY, "en");
   window.location.hash = "#/c/" + SESSION;
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.stubGlobal(

@@ -78,7 +78,7 @@
     具体按 [ADR-002](002-tool-discovery.zh.md) 执行；执行取消与恢复按 [ADR-003](003-results-lifecycle.zh.md) 执行。
 
 16. **跨平台是正式产品要求。** Windows、Linux、macOS 都要通过真实执行和安装验证。
-    进程、Shell、PTY 和安装改动须通过三平台 CI 与受支持的 Node 版本矩阵，当前为 20/22/24。
+    进程、Shell、PTY 和安装改动须通过三平台 CI 与受支持的 Node 版本矩阵，当前为 20/22/24/25。
     各平台证据分别报告，不从 Linux 推断 Windows 行为。原生 Shell 默认规则见 [ADR-007](007-command-shell.zh.md)。
 
 17. **文档记录代码看不出来的决定。** README 面向用户，ADR 保留理由、约束和接受的代价，AGENTS 提供开发规则与阅读入口。

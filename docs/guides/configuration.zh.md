@@ -120,7 +120,7 @@ Shell、PTY 和下游子进程完整继承服务的环境，包括凭据与代�
 本服务的 HTTP MCP、资源请求、附件下载和 JWT 公钥获取尊重 `HTTP_PROXY / HTTPS_PROXY / NO_PROXY`，
 也支持小写名称，小写优先。HTTPS_PROXY 缺失时继承 HTTP_PROXY；支持 HTTP/HTTPS 代理，代理失败不偷偷直连。
 NO_PROXY 支持主机、域名后缀、端口和 `*`，例如 `localhost,127.0.0.1,[::1],.internal.example`。
-Node 20/22/24 不需要额外设置 `NODE_USE_ENV_PROXY`；私有 CA 使用 `NODE_EXTRA_CA_CERTS`。
+Node 20/22/24/25 不需要额外设置 `NODE_USE_ENV_PROXY`；私有 CA 使用 `NODE_EXTRA_CA_CERTS`。
 
 代理变量在启动前设置，修改后重启。子进程和 Tunnel 客户端会取得这些变量，
 是否采用由各自网络栈决定。需要统一路由浏览器、用户脚本或 UDP 等流量时，应另行设置系统网络。

@@ -154,6 +154,7 @@ npm run test:package
 Checks cover types, lint, tests, builds, and formatting. The isolated installation check packs a temporary copy of the source and installs it in a temporary directory.
 It leaves the checkout's dist unchanged and does not publish to npm.
 Developers can read the [architecture](docs/architecture.md); coding agents should start with [AGENTS.md](AGENTS.md).
+The [development philosophy](docs/adr/011-development-philosophy.md) guides feature selection and design tradeoffs.
 See [Code Mode examples](docs/guides/code-mode-examples.md) for usage.
 
 Unshipped plans are in the [Backlog](docs/backlog.md).

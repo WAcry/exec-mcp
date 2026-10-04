@@ -4,6 +4,7 @@ English | [简体中文](architecture.zh.md)
 
 This document covers lasting responsibilities. Users can start with the [README](../README.md); development rules are in [AGENTS.md](../AGENTS.md).
 See the [configuration](guides/configuration.md) and [connection](guides/connections.md) guides for operational steps.
+Feature selection and design review follow [ADR-011 Development philosophy](adr/011-development-philosophy.md).
 
 ## Responsibilities
 

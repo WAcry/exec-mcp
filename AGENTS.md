@@ -5,6 +5,14 @@ English | [简体中文](AGENTS.zh.md)
 Read this file when developing the project. Use the README and code for current behavior, and the ADRs below for lasting decisions.
 Mark decisions that have not been implemented.
 
+## Development philosophy
+
+Read [ADR-011 Development philosophy](docs/adr/011-development-philosophy.md) when selecting features, implementing changes, or reviewing design.
+Keep the execution layer small and powerful, follow familiar Codex contracts, trust capable models and the operator,
+and let real dogfooding justify complexity. Use existing parameters and mechanisms where they meet the task.
+Keep tool descriptions truthful and sufficient for a fresh agent; leave workflow choices to the model and avoid prohibitions for isolated recoverable mistakes.
+Topic ADRs own the detailed rules. A change to philosophy does not authorize implementing deferred features.
+
 ## Working practices
 
 Check the repository, branch, and worktree state before editing. Read applicable instructions and preserve unrelated or concurrent changes.
@@ -57,6 +65,7 @@ ADR-002 requires complete downstream loading at startup. Preserve both decisions
 
 | Task | Active decision |
 | --- | --- |
+| Feature selection, development philosophy, design review | [ADR-011 Development philosophy](docs/adr/011-development-philosophy.md) |
 | Tool entry points, directories, patches, Codex reuse, platforms | [ADR-001 Runtime and product scope](docs/adr/001-exec-runtime.md) |
 | ALL_TOOLS, contract discovery, English model descriptions, downstream MCP | [ADR-002 Tool discovery and contracts](docs/adr/002-tool-discovery.md) |
 | JSON deduplication, output budgets, store/load, media, cells and processes | [ADR-003 Results and execution lifecycle](docs/adr/003-results-lifecycle.md) |
@@ -80,6 +89,7 @@ Preserve upstream licenses and attribution. Reference repositories must not beco
 
 Choose validation based on risk. For tool contracts, check actual MCP responses and argument validation, and verify that a fresh agent has enough information to call correctly.
 For platform changes, exercise real processes and installation paths, and report platform results separately.
+Process, shell, PTY, and installation changes require real Windows, Linux, and macOS CI with the supported Node version matrix.
 Before pushing to main, run npm run check and npm run test:package and confirm both pass.
 The build replaces dist, so run them in a worktree, not in a checkout that serves a running instance.
 Change the version only when the user explicitly requests it. Routine changes, commits, and pushes retain the current version.

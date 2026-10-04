@@ -5,6 +5,13 @@
 本文件供 Agent 开发时查阅。当前功能看 README 和代码，长期取舍看下列生效 ADR。
 尚未实现的决定要注明状态。
 
+## 开发哲学
+
+功能取舍、实现改动或设计评审时，阅读 [ADR-011 长期开发哲学](docs/adr/011-development-philosophy.zh.md)。
+执行层保持小而强，沿用熟悉的 Codex 契约，相信具备能力的模型与操作者，用真实 dogfood 判断复杂度是否值得。
+现有参数和机制能完成任务时优先复用。工具描述真实且足够让新 Agent 正确调用，工作方式交给模型选择，
+不因孤立、可恢复的错误增加永久禁止规则。详细规定仍由各主题 ADR 维护，开发哲学变化不授权实现延期功能。
+
 ## 工作方式
 
 先核对目标仓库、分支和工作区变化，阅读适用的指令，保留无关及并发改动。
@@ -58,6 +65,7 @@ ADR 正文保持当前有效，同一主题通常原地更新，历史由 Git �
 
 | 任务 | 生效决定 |
 | --- | --- |
+| 功能取舍、开发哲学与设计评审 | [ADR-011 长期开发哲学](docs/adr/011-development-philosophy.zh.md) |
 | 工具入口、工作目录、补丁、Codex 复用、跨平台 | [ADR-001 执行内核与产品边界](docs/adr/001-exec-runtime.zh.md) |
 | ALL_TOOLS、契约发现、英文模型描述、下游 MCP | [ADR-002 工具发现与契约](docs/adr/002-tool-discovery.zh.md) |
 | JSON 去重、显式预算、store/load、媒体、cell/进程 | [ADR-003 结果与执行生命周期](docs/adr/003-results-lifecycle.zh.md) |
@@ -81,6 +89,7 @@ ALL_TOOLS 条目和 tools.* 绑定。ALL_TOOLS 保留本次已绑定的全部本
 
 按风险选择验证范围。工具契约要检查真实 MCP 返回与参数校验，并确认新 Agent 能从描述中读懂用法。
 跨平台改动要验证对应平台的真实进程和安装路径，分别报告各平台结果。
+进程、Shell、PTY 和安装改动须通过真实 Windows、Linux、macOS CI 与受支持的 Node 版本矩阵。
 推送到 main 前运行 npm run check 和 npm run test:package，确认两者都通过；
 构建会替换 dist，应在 worktree 中运行，不要在正在服务实例的检出目录中运行。
 版本号只在用户明确要求时更新，日常修改和提交推送保持原版本。

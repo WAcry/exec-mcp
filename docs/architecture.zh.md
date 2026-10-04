@@ -4,6 +4,7 @@
 
 本文说明长期职责划分。用户从 [README](../README.zh.md) 开始，开发规则见 [AGENTS.md](../AGENTS.zh.md)。
 配置与连接步骤分别见[配置指南](guides/configuration.zh.md)和[连接指南](guides/connections.zh.md)。
+功能取舍和设计评审遵循 [ADR-011 长期开发哲学](adr/011-development-philosophy.zh.md)。
 
 ## 谁负责什么
 

@@ -2,7 +2,7 @@
 
 English | [简体中文](003-results-lifecycle.zh.md)
 
-Active, updated 2026-10-01.
+Active, updated 2026-10-09.
 
 ## Deduplication and presentation
 
@@ -13,6 +13,10 @@ Structured data still requires checking isError, and missing fields remain disti
 
 Local methods return their values to JS; downstream methods retain CallToolResult. Scripts explicitly output through text/image/audio/generatedImage.
 Export links are attached separately under [ADR-005](005-file-transfer.md). Explicit output is sent once, without compatibility mirrors that have no actual consumer.
+
+as_settled and stream_settled use the native host implementation to process Promise outcomes as they settle.
+They leave output selection to the script. text records output; yield_control or an observation deadline returns it through exec/wait.
+This fits ordinary MCP responses without asynchronous model-message injection or changes to result budgets.
 
 Agents filter large results in Code Mode or store them for later partial reads through load. Persistent content can be explicitly written to files.
 The service does not spill generic results automatically, avoiding extra rereading, path resolution, and cleanup steps.
@@ -60,7 +64,7 @@ Longer waits do not increase buffer or output capacity.
 
 Nested tools may outlast an outer wait window. exec returns cell_id first, and wait retrieves subsequent output.
 Outer wait defaults to and is capped at 110 seconds, based on an engineering assumption that the target connector timeout is at least 120 seconds,
-leaving transport margin. The task can keep running; completion, an explicit yield, or termination returns sooner.
+leaving transport margin. Completion, an explicit yield, or termination returns sooner; new user input can also end an observation early under [ADR-010](010-session-notes.md).
 There is no standalone sleep tool, background model polling, or persistent task scheduler.
 
 Cancelling one wait stops observation only. Terminating a cell requests cancellation of unfinished nested calls.

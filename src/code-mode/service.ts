@@ -202,6 +202,9 @@ export class CodeModeService {
       const requestId = request.requestId ?? randomHandle("exec");
       const hostOutcome = await session.execute({
         ...(request.signal === undefined ? {} : { signal: request.signal }),
+        ...(request.yieldSignal === undefined
+          ? {}
+          : { yieldSignal: request.yieldSignal }),
         source: hostSource(parsed.code, scope !== undefined),
         toolCallId: requestId,
         tools: request.tools,
@@ -262,6 +265,9 @@ export class CodeModeService {
             ? await owner.session.terminate(owner.hostCellId, request.signal)
             : await owner.session.wait({
                 cellId: owner.hostCellId,
+                ...(request.yieldSignal === undefined
+                  ? {}
+                  : { yieldSignal: request.yieldSignal }),
                 ...(request.signal === undefined
                   ? {}
                   : { signal: request.signal }),

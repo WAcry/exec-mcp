@@ -1,5 +1,5 @@
 // Tool descriptions and patch grammar adapted from OpenAI Codex (Apache-2.0),
-// rust-v0.155.1 and 6149914a0e59363b6777080b3e953b05d592dbac; see proto/LICENSE.
+// rust-v0.162.0 and 6149914a0e59363b6777080b3e953b05d592dbac; see proto/LICENSE.
 import { z } from "zod/v4";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import { SESSION_IDLE_MS } from "./code-mode/session-pool.js";
@@ -84,7 +84,7 @@ export const WAIT_SCHEMA = z
       ),
     yield_time_ms: ms(
       MAX_WAIT_YIELD_TIME_MS,
-      `Time before yielding again. Defaults to ${DEFAULT_WAIT_YIELD_TIME_MS} ms; range 0-${MAX_WAIT_YIELD_TIME_MS}. Completion or yield_control returns sooner.`,
+      `Time before yielding again. Defaults to ${DEFAULT_WAIT_YIELD_TIME_MS} ms; range 0-${MAX_WAIT_YIELD_TIME_MS}. Completion, yield_control or new Web user input can return sooner.`,
     ),
     terminate: z
       .boolean()
@@ -331,7 +331,7 @@ const NATIVE_CONTRACTS = {
       required: ["success", "exit_code", "output"],
       additionalProperties: false,
     },
-    description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
+    description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Updates preserve LF/CRLF line endings and ensure a final newline. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
   }),
   view_image: contract({
     name: "view_image",
@@ -557,6 +557,8 @@ The catalog is not automatically printed; changes appear in the next exec. list_
 - store(key, value): Stores a serializable value under a string key for later exec calls in the same ChatGPT conversation; requires a host-provided conversation ID. load(key) returns a copy, or undefined if missing. Cells read a starting snapshot and merge writes when they finish, including on script error; concurrent same-key writes are not transactional. Changes to a loaded copy require another store. Storage may be cleared after ${idleHours} idle hours, memory recovery or restart.
 - exit(): Immediately ends the current script successfully.
 - yield_control(): Yields accumulated output to the model immediately while the script keeps running.
+- as_settled(promises): Async iterator yielding {index, status: "fulfilled", value} or {index, status: "rejected", reason} in settlement order. Accepts an iterable or Map; index is the input position or Map key. Breaking iteration does not cancel inputs.
+- stream_settled(promises, emit): Awaits emit(result) sequentially for each settlement. Neither settlement helper outputs or yields by itself; output helpers and yield_control control delivery.
 - setTimeout(callback, delayMs?) / clearTimeout(id?): Schedules/cancels a callback. Pending timeouts do not keep exec alive by themselves; an awaited promise can wait for one.
 
 ## Results and execution
@@ -565,6 +567,7 @@ An outer host may wrap exec/wait results in its own shape; the nested return typ
 Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
 exec waits ${DEFAULT_EXEC_YIELD_TIME_MS} ms by default, at most ${MAX_EXEC_YIELD_TIME_MS}. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
 cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.
+New Web user notes or answers can yield an in-flight exec/wait early. The cell and nested calls continue; wait collects their later output.
 
 ## Local tools
 ${contracts.map((contract) => `### ${contract.name}\n${describeContract(contract)}`).join("\n\n")}`;
@@ -578,4 +581,4 @@ const WAIT_DEFAULT = waitDefault(
   DEFAULT_WAIT_YIELD_TIME_MS,
   MAX_WAIT_YIELD_TIME_MS,
 );
-export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; longer waits reduce polling, while completion or yield_control returns sooner. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;
+export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; completion, yield_control or new Web user input can return sooner while the cell keeps running. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;

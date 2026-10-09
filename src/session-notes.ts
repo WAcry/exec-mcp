@@ -116,6 +116,8 @@ export class SessionNotes {
   private bytes = 0;
   private webUsers = 0;
   private listeners = new Set<(event: SessionNotesEvent) => void>();
+  /** One-shot signals for in-flight MCP observations, independent of Web subscriptions. */
+  readonly #observers = new Map<string, Set<AbortController>>();
   readonly #file: string | undefined;
   readonly #log: (line: string) => void;
   readonly #delays: Record<Urgency, number>;
@@ -237,6 +239,32 @@ export class SessionNotes {
     };
   }
 
+  /** Watch new submissions only. Old queued notes cannot cause repeated immediate yields. */
+  watchUserNotes(id: string | undefined): {
+    signal: AbortSignal;
+    dispose(): void;
+  } {
+    const controller = new AbortController();
+    if (!id) return { signal: controller.signal, dispose() {} };
+    const group = this.#observers.get(id) ?? new Set<AbortController>();
+    group.add(controller);
+    this.#observers.set(id, group);
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        group.delete(controller);
+        if (!group.size && this.#observers.get(id) === group)
+          this.#observers.delete(id);
+      },
+    };
+  }
+
+  private yieldObservers(id: string): void {
+    const group = this.#observers.get(id);
+    this.#observers.delete(id);
+    for (const controller of group ?? []) controller.abort();
+  }
+
   observe(id: string | undefined): void {
     if (!id || !this.webUsers) return;
     this.sweep();
@@ -317,8 +345,10 @@ export class SessionNotes {
 
   enqueue(id: string, messageId: string, text: string): SessionNote {
     const conversation = this.require(id);
+    const sequence = conversation.sequence;
     const note = this.insertNote(conversation, messageId, text);
     this.#changed("soon");
+    if (conversation.sequence !== sequence) this.yieldObservers(id);
     this.emit(id);
     return { ...note };
   }
@@ -592,6 +622,7 @@ export class SessionNotes {
     request.touched = replacement.touched;
     this.bytes += delta;
     this.#changed("soon");
+    this.yieldObservers(id);
     this.emit(id);
     return note;
   }

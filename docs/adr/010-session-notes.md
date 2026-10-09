@@ -2,12 +2,12 @@
 
 English | [简体中文](010-session-notes.zh.md)
 
-Active, updated 2026-10-01.
+Active, updated 2026-10-09.
 
 ## Conversation ownership and delivery
 
 Operators can send text from a conversation's composer or answer questions submitted by the agent.
-Both use the User Note queue and attach to the same conversation's next naturally returning tool response.
+Both use the User Note queue and attach to the same conversation's next tool response.
 Inside exec, the model can inform the operator with tools.send_message_to_user_async, ask with choices through tools.request_user_input_async, and title the conversation once with tools.set_conversation_title. It has no answer-query or send-user-note tool.
 The service does not wait synchronously for a person and adds no acknowledgment parameters or question database.
 
@@ -21,7 +21,14 @@ Actual calls carrying that identifier establish recipients. Unidentified groups 
 Successful, running, and ordinary execution-error responses from exec/wait can all carry notes.
 Nested tool values remain unchanged. MCP tools/list, resources/read, and Web reads do not consume messages.
 Messages are selected at return time, so a note submitted during a wait can accompany that response.
-Notes do not wake waits or modify running scripts. Stopping an operation still requires its termination method.
+New user notes and accepted answers request YieldObservation for in-flight exec/wait calls in the same conversation.
+The native host returns the ordinary outcome early, with unread output intact, while the cell and nested calls continue.
+The observation is never abandoned or cancelled to deliver a note. Stopping work still requires its termination method.
+
+Only a new submission triggers the one-shot signal. Retries, titles, agent messages, read state, withdrawals, and delivery updates do not.
+Notes queued before a call wait for its normal return, so a head that cannot fit does not cause repeated immediate yields.
+Concurrent observers may yield together; the existing FIFO still attaches each note once. If the control RPC fails, normal waiting continues.
+No new MCP parameter, polling method, or output allowance is added. This cannot start a ChatGPT turn or undo side effects.
 
 ## Agent messages
 
@@ -68,7 +75,7 @@ exec/wait results are textual; a structured envelope keeps only its result and n
 ## Asynchronous questions and answers
 
 The design follows [request_user_input_async](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
-in pinned Codex rust-v0.155.1, retaining questions/title/options string arrays and the accepted response shape.
+as originally adopted from Codex rust-v0.155.1, retaining questions/title/options string arrays and the accepted response shape.
 await waits for submission only, allowing the agent to continue other work. Codex can inject a new user message;
 exec-mcp returns the answer through a subsequent ordinary tool response.
 

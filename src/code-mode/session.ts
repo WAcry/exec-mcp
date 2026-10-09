@@ -188,6 +188,7 @@ export class CodeModeSession {
 
   async execute(options: {
     signal?: AbortSignal;
+    yieldSignal?: AbortSignal;
     source: string;
     toolCallId: string;
     tools: readonly CodeModeToolDefinition[];
@@ -220,6 +221,7 @@ export class CodeModeSession {
       this.#executions.delete(executionId);
       throw error;
     }
+    const unwatch = this.#watchYield(options.yieldSignal, { executionId });
     try {
       return await this.#readExecutionStream(
         stream,
@@ -248,12 +250,15 @@ export class CodeModeSession {
       }
       this.#executions.delete(executionId);
       throw error;
+    } finally {
+      unwatch();
     }
   }
 
   async wait(options: {
     cellId: string;
     signal?: AbortSignal;
+    yieldSignal?: AbortSignal;
     yieldTimeMs: number;
   }): Promise<RuntimeOutcome> {
     this.#requireOpen();
@@ -264,6 +269,7 @@ export class CodeModeSession {
     }
     this.#waits.add(options.cellId);
     const waitId = crypto.randomUUID();
+    const unwatch = this.#watchYield(options.yieldSignal, { waitId });
     try {
       const response = await unaryCall(
         (callOptions, callback) =>
@@ -287,8 +293,43 @@ export class CodeModeSession {
       }
       throw error;
     } finally {
+      unwatch();
       this.#waits.delete(options.cellId);
     }
+  }
+
+  /** The ordinary response still owns the output. Never cancel or abandon it to yield. */
+  #watchYield(
+    signal: AbortSignal | undefined,
+    observation: { executionId: string } | { waitId: string },
+  ): () => void {
+    if (!signal) return () => {};
+    const lifetime = new AbortController();
+    const send = () => {
+      void unaryCall(
+        (options, callback) =>
+          this.#client.yieldObservation(
+            { sessionId: this.id, ...observation },
+            options,
+            callback,
+          ),
+        this.#transportTimeoutMs,
+        lifetime.signal,
+      ).catch((error: unknown) => {
+        // This is optional latency improvement, not an execution failure.
+        if (!lifetime.signal.aborted)
+          console.error(
+            "Could not yield the Code Mode observation early; its normal wait continues:",
+            errorMessage(error),
+          );
+      });
+    };
+    if (signal.aborted) send();
+    else signal.addEventListener("abort", send, { once: true });
+    return () => {
+      signal.removeEventListener("abort", send);
+      lifetime.abort();
+    };
   }
 
   async terminate(

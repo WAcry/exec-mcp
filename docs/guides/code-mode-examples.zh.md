@@ -37,6 +37,27 @@ text({
 超过缓冲后中间日志会丢弃并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
 确需完整原始日志时由调用方显式重定向文件；服务不替所有工具自动落盘。
 
+## 逐项处理已完成的结果
+
+as_settled 接收 Promise 可迭代集合或 Map，按完成顺序交回结果。
+每条记录带有输入索引或 Map 键，以及成功值或失败原因。
+stream_settled 对每条记录调用回调，等回调完成后再处理下一条。
+
+```js
+const jobs = new Map([
+  ["status", tools.exec_command({ cmd: "git status --short" })],
+  ["changes", tools.exec_command({ cmd: "git diff --stat" })]
+]);
+await stream_settled(jobs, result => {
+  text(result);
+  yield_control();
+});
+```
+
+示例通过现有 exec/wait 返回部分结果，省略 yield_control 时按正常收集窗口返回。
+也可用异步循环直接检查 as_settled 的各条记录。两个助手等待已经传入的操作，不负责调度或取消这些操作。
+命令退出码与 MCP isError 仍在成功返回的 value 中，保持各工具原有的含义。
+
 ## 终端收集窗口与外层等待
 
 `tools.write_stdin` 省略 `chars` 或传空字符串时只收集未读输出，默认 5 秒；非空输入默认 250 毫秒。
@@ -53,6 +74,9 @@ text(result);
 exec 本身仍可能先交回 `cell_id`，此后由外层 `wait` 续取。内层终端收集窗口不受外层 110 秒窗口截断，
 外层 wait 超时也不重启或重放内层调用。不要重新执行原命令来续取结果。
 等待不扩大日志或模型输出预算；已退出但剩余输出超过单次读取上限时，同样需要继续读取。
+
+新提交的 Web 补充或答案可让外层观察提前返回。内层收集与 cell 继续运行，用返回的 cell_id 继续 wait 可收取后续输出。
+已排队的旧补充不会反复触发后续 wait 提前返回。
 
 ## 判断脚本与命令结果
 

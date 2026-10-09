@@ -480,7 +480,7 @@ describe.each([false, true])(
       expect(jsonOutput(offline)).toEqual({ set: false });
     });
 
-    it("accepts Web answers during a long terminal wait without waking it or leaking answers into another conversation", async () => {
+    it("delivers a Web answer early while the terminal keeps running", async () => {
       const f = await fixture(legacy);
       await f.call("request_user_input_async", {
         questions: [
@@ -501,12 +501,7 @@ describe.each([false, true])(
           yield_time_ms: 0,
         }),
       );
-      let completed = false;
-      const pending = f
-        .call("write_stdin", { session_id: first.session_id })
-        .finally(() => {
-          completed = true;
-        });
+      const pending = f.call("write_stdin", { session_id: first.session_id });
       await vi.waitFor(
         () =>
           expect(
@@ -524,16 +519,24 @@ describe.each([false, true])(
           )
         ).status,
       ).toBe(200);
-      expect(completed).toBe(false);
-      await writeFile(gate, "done");
       const result = await pending;
-      expect(jsonOutput(result)).toMatchObject({ exit_code: 0 });
+      expect(texts(result)[0]).toContain("Script running");
+      expect(
+        f.server.runtime.terminal["sessions"].get(first.session_id)!.exitCode,
+      ).toBeUndefined();
       expect(noteBlocks(result)).toEqual([
         {
           type: "text",
           text: "用户额外补充：\nQuestion: Keep compatibility?\nSelected: Keep\nNote: Node 20 too.",
         },
       ]);
+      expect(
+        noteBlocks(await f.call("exec", { source: "text('other');" }, scopeB)),
+      ).toEqual([]);
+      await writeFile(gate, "done");
+      const final = await f.call("wait", { cell_id: cellId(result) });
+      expect(jsonOutput(final)).toMatchObject({ exit_code: 0 });
+      expect(noteBlocks(final)).toEqual([]);
     });
 
     it("delivers notes via exec/wait with every nested capability, preserving files/media", async () => {
@@ -760,7 +763,7 @@ describe.each([false, true])(
       expect(noteBlocks(syntax)).toHaveLength(1);
     });
 
-    it("picks up notes submitted during write_stdin and wait without waking the running task", async () => {
+    it("yields exec and wait on a note while their nested terminal collection continues", async () => {
       const f = await fixture(legacy);
       for (const nested of [false, true]) {
         const gate = path.join(f.root, `gate-${nested}`);
@@ -781,12 +784,15 @@ describe.each([false, true])(
               }),
             )
           : undefined;
-        let settled = false;
-        const pending = (
-          nested ? f.call("wait", { cell_id: id }) : f.call("write_stdin", args)
-        ).finally(() => {
-          settled = true;
-        });
+        const observed = vi.spyOn(
+          f.server.runtime.codeMode,
+          nested ? "wait" : "exec",
+        );
+        const pending = nested
+          ? f.call("wait", { cell_id: id })
+          : f.call("write_stdin", args);
+        await vi.waitFor(() => expect(observed).toHaveBeenCalled());
+        observed.mockRestore();
         const session = f.server.runtime.terminal["sessions"].get(
           first.session_id,
         )!;
@@ -795,13 +801,90 @@ describe.each([false, true])(
           { timeout: 10_000 },
         );
         await f.send(`during-${nested}`, "supplement during long operation");
-        expect(settled).toBe(false);
-        expect((await f.page()).pendingCount).toBe(1);
-        await writeFile(gate, "done");
         const response = await pending;
         expect(noteBlocks(response)).toHaveLength(1);
         expect(response.isError).not.toBe(true);
+        expect(texts(response)[0]).toContain("Script running");
+        if (nested) expect(cellId(response)).toBe(id);
+        expect(session.exitCode).toBeUndefined();
+        expect(session.observers).toBe(1);
+        expect((await f.page()).pendingCount).toBe(0);
+        await writeFile(gate, "done");
+        const final = await f.call("wait", { cell_id: cellId(response) });
+        expect(jsonOutput(final)).toMatchObject({ exit_code: 0 });
+        expect(noteBlocks(final)).toEqual([]);
       }
+    });
+
+    it("only yields observers in the addressed conversation and delivers once across concurrent calls", async () => {
+      const f = await fixture(legacy);
+      const a = await f.call("exec", {
+        source: "await new Promise(()=>{});",
+        yield_time_ms: 0,
+      });
+      const b = await f.call(
+        "exec",
+        { source: "await new Promise(()=>{});", yield_time_ms: 0 },
+        scopeB,
+      );
+      const observed = vi.spyOn(f.server.runtime.codeMode, "wait");
+      const first = f.call("wait", { cell_id: cellId(a) });
+      const queued = f.call("wait", { cell_id: cellId(a) });
+      const other = f.call("wait", { cell_id: cellId(b) }, scopeB);
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledTimes(3));
+      const otherSignal = observed.mock.calls.find(
+        ([request]) => request.sessionScope === scopeB,
+      )![0].yieldSignal!;
+      await f.send("only-a", "For conversation A");
+      const delivered = await Promise.all([first, queued]);
+      expect(delivered.flatMap(noteBlocks)).toEqual([
+        { type: "text", text: "用户额外补充：\nFor conversation A" },
+      ]);
+      expect(
+        delivered.every((response) => cellId(response) === cellId(a)),
+      ).toBe(true);
+      expect(otherSignal.aborted).toBe(false);
+      await f.send("only-b", "For conversation B", sessionScopeKey(scopeB)!);
+      expect(noteBlocks(await other)).toEqual([
+        { type: "text", text: "用户额外补充：\nFor conversation B" },
+      ]);
+      observed.mockRestore();
+      await f.call("wait", { cell_id: cellId(a), terminate: true });
+      await f.call("wait", { cell_id: cellId(b), terminate: true }, scopeB);
+    });
+
+    it("leaves an oversized head queued after an early yield without repeatedly waking later waits", async () => {
+      const f = await fixture(legacy);
+      const running = f.call("exec", {
+        source:
+          'text("x".repeat(50000));await tools.set_conversation_title({title:"Output ready"});await new Promise(()=>{});',
+        yield_time_ms: 30000,
+      });
+      await vi.waitFor(async () =>
+        expect((await f.page()).label).toBe("Output ready"),
+      );
+      const long = "L".repeat(5000);
+      await f.send("large-head", long);
+      const first = await running;
+      expect(first.isError).not.toBe(true);
+      expect(noteBlocks(first)).toEqual([]);
+      expect(modelTextBytes(first)).toBeLessThanOrEqual(36_000);
+      expect(texts(first).join("\n")).toContain("x".repeat(1000));
+      expect((await f.page()).pendingCount).toBe(1);
+      const observed = vi.spyOn(f.server.runtime.codeMode, "wait");
+      const waiting = f.call("wait", { cell_id: cellId(first), max_tokens: 0 });
+      await vi.waitFor(() => expect(observed).toHaveBeenCalledTimes(1));
+      expect(observed.mock.calls[0]![0].yieldSignal!.aborted).toBe(false);
+      // Only another genuine submission yields this observer; the old head does not.
+      await f.send("next", "Next note");
+      const response = await waiting;
+      expect(noteBlocks(response)).toEqual([
+        { type: "text", text: "用户额外补充：\n" + long },
+        { type: "text", text: "用户额外补充：\nNext note" },
+      ]);
+      expect(modelTextBytes(response)).toBeLessThanOrEqual(37_000);
+      observed.mockRestore();
+      await f.call("wait", { cell_id: cellId(first), terminate: true });
     });
 
     it("does not consume a pending note when an in-flight terminal observer is cancelled", async () => {
@@ -836,12 +919,14 @@ describe.each([false, true])(
       await vi.waitFor(() => expect(session.exitReady).toBeTypeOf("function"), {
         timeout: 10_000,
       });
-      await f.send("cancelled-observer", "still queued");
       controller.abort();
       await rejected;
       await vi.waitFor(() => expect(session.observers).toBe(0), {
         timeout: 10_000,
       });
+      // Wait for cancellation to reach the server before submitting. An answer
+      // already attached before cancellation is allowed to have been delivered.
+      await f.send("cancelled-observer", "still queued");
       expect((await f.page()).pendingCount).toBe(1);
       expect(session.exitCode).toBeUndefined();
       const next = await f.call("write_stdin", {

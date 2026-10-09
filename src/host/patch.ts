@@ -25,7 +25,8 @@ export class PatchRunner {
       if (this.closed) throw new Error("The patch runner is closed.");
       throwIfAborted(signal);
       if (
-        !patch.startsWith("*** Begin Patch\n") ||
+        (!patch.startsWith("*** Begin Patch\n") &&
+          !patch.startsWith("*** Begin Patch\r\n")) ||
         !patch.trimEnd().endsWith("*** End Patch")
       )
         throw new Error(

@@ -2,7 +2,7 @@
 
 [English](002-tool-discovery.md) | 简体中文
 
-当前生效，2026-10-01 更新。
+当前生效，2026-10-09 更新。
 
 ## 工具入口与契约来源
 
@@ -95,12 +95,12 @@ Skill 的 explicit-only 来自用户元数据；压缩后的目录自行说明�
 
 ## Codex 参考与适配
 
-参考固定 rust-v0.155.1，以及已核对的
+运行时和补丁语法固定为 rust-v0.162.0。较早的提示词参考包括 rust-v0.155.1，以及已核对的
 [6149914 Code Mode prompt](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/code-mode-protocol/src/description.rs)、
 [Shell 定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/shell_spec.rs)、
 [资源定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)，
 并查阅同快照的系统提示、图片和异步问题定义。运行组件另行固定，查阅源码不会触发升级。
-Codex 的 Code Mode Only 使用 ALL_TOOLS；其他模型模式仍可能提供搜索工具。
+Codex 0.162.0 在 Code Mode 中还提供可选的排名搜索路径。本实例继续使用 ALL_TOOLS，升级 host 不会注册上游应用层工具。
 
 | 保留的差异 | 原因 |
 | --- | --- |

@@ -2,7 +2,7 @@
 
 English | [简体中文](002-tool-discovery.zh.md)
 
-Active, updated 2026-10-01.
+Active, updated 2026-10-09.
 
 ## Entry points and contract sources
 
@@ -94,12 +94,12 @@ A fresh model can correct its next call from this error alone.
 
 ## Codex references and adaptation
 
-References include pinned rust-v0.155.1 and the reviewed
+Runtime and grammar follow pinned rust-v0.162.0. Earlier prompt references include rust-v0.155.1 and the reviewed
 [6149914 Code Mode prompt](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/code-mode-protocol/src/description.rs),
 [shell definitions](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/shell_spec.rs), and
 [resource definitions](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs).
 System prompts, image tools, and asynchronous question definitions were checked at the same snapshot. Reviewing source does not upgrade the separately pinned runtime.
-Codex Code Mode Only uses ALL_TOOLS; other model modes may still expose search tools.
+Codex 0.162.0 also has an optional ranked-search path in Code Mode. This instance retains ALL_TOOLS; upgrading the host does not register upstream application tools.
 
 | Retained difference | Reason |
 | --- | --- |

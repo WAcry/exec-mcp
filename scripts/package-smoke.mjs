@@ -672,6 +672,26 @@ enabled = true
     assert.equal(part.exit_code, 0);
     assert.match(output, /PROCESS_REPLY:smoke/);
   }
+  const settled = await scopedCall(
+    'const values=[];await stream_settled(new Map([["probe",Promise.resolve(42)]]),item=>values.push(item));text({values,iterator:typeof as_settled,notify:typeof notify});',
+  );
+  assert.ok(!settled.isError, JSON.stringify(settled));
+  assert.deepEqual(valueOf(settled), {
+    values: [{ index: "probe", status: "fulfilled", value: 42 }],
+    iterator: "function",
+    notify: "undefined",
+  });
+  await writeFile(path.join(project, "crlf.txt"), "old\r\nkeep\r\n");
+  const crlf = await runNative(
+    "apply_patch",
+    "*** Begin Patch\r\n*** Update File: crlf.txt\r\n@@\r\n-old\r\n+new\r\n*** End Patch\r\n",
+    project,
+  );
+  assert.equal(valueOf(crlf).success, true);
+  assert.equal(
+    await readFile(path.join(project, "crlf.txt"), "utf8"),
+    "new\r\nkeep\r\n",
+  );
   const undefinedStore = await scopedCall(
     'store("nullable",null);try{store("nullable",undefined)}catch(error){text(String(error));}text({value:load("nullable")});',
   );

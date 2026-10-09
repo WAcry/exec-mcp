@@ -363,6 +363,7 @@ export class ExecRuntime {
     args: Record<string, unknown>,
     run: (
       call: ActiveCallController,
+      yieldSignal: AbortSignal,
     ) => Promise<{ result: CallToolResult; state: CodeModeState | undefined }>,
     onError?: (result: CallToolResult) => void,
   ): Promise<CallToolResult> {
@@ -375,9 +376,10 @@ export class ExecRuntime {
     });
     const attachNotes = (result: CallToolResult) =>
       this.notes.attach(result, scopeKey, call.id, context.mcpReq.signal);
+    const observation = this.notes.watchUserNotes(scopeKey);
     try {
       // The Code Mode service already bounded this result.
-      const { result: raw, state } = await run(call);
+      const { result: raw, state } = await run(call, observation.signal);
       const result = attachNotes(raw);
       call.finish({ status: callStatus(raw, state), output: result });
       return identify(result);
@@ -391,6 +393,8 @@ export class ExecRuntime {
         output: result,
       });
       return identify(result);
+    } finally {
+      observation.dispose();
     }
   }
   server(): McpServer {
@@ -445,7 +449,7 @@ export class ExecRuntime {
             max_output_tokens: args.max_output_tokens,
             files: args.files?.map(fileAuditMetadata),
           },
-          async (call) => {
+          async (call, yieldSignal) => {
             if (!this.ready)
               throw new Error("The exec-mcp service is shutting down.");
             const signal = context.mcpReq.signal;
@@ -478,6 +482,7 @@ export class ExecRuntime {
             let state: CodeModeState | undefined;
             const result = await this.codeMode.exec({
               source: args.source,
+              yieldSignal,
               ...(call.id === "audit-disabled" ? {} : { requestId: call.id }),
               takeAttachments,
               ...(args.max_output_tokens === undefined
@@ -521,10 +526,11 @@ export class ExecRuntime {
             max_tokens: args.max_tokens,
             terminate: args.terminate,
           },
-          async () => {
+          async (_call, yieldSignal) => {
             let state: CodeModeState | undefined;
             const result = await this.codeMode.wait({
               cellId: args.cell_id,
+              yieldSignal,
               ...(args.max_tokens === undefined
                 ? {}
                 : { maxTokens: args.max_tokens }),

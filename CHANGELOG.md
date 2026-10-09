@@ -7,6 +7,8 @@ English | [简体中文](CHANGELOG.zh.md)
 First stable release of exec-mcp for connecting ChatGPT to a user-operated machine.
 
 Code Mode provides exec and wait, with nested shell commands, patches, file transfer, Skill discovery, and downstream MCP tools and resources.
+Codex 0.162.0 adds native as_settled and stream_settled helpers and improves timer and stored-value memory handling. Patch updates preserve LF/CRLF line endings.
+New Web notes and answers can return an in-flight response early while execution continues.
 Errors for tool input, configuration, and downstream calls name the field and the expected values, and runtime and CLI messages are in English. Commands stopped by a signal report exit code 128+N.
 Terminal sessions and their unread output have configurable limits, and cells that no wait observes stop after the idle retention period.
 HTTP downstream services can read credentials from environment variables (bearer_token_env_var, env_http_headers). A request that was never sent reconnects once, and closing a stdio service also stops its child processes.

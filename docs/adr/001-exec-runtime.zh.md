@@ -2,7 +2,7 @@
 
 [English](001-exec-runtime.md) | 简体中文
 
-当前生效，2026-10-01 更新。
+当前生效，2026-10-09 更新。
 
 ## 选择原因
 
@@ -40,6 +40,7 @@ exec.source 是 JavaScript，MCP 外层使用对象参数。exec.workdir 决定�
 命令可以单独指定目录，Shell 的 cd 只影响该进程；下游 MCP 的路径与参数保持原有语义。
 
 tools.apply_patch 接收一个完整补丁字符串，经 stdin 进入固定引擎，避免命令行参数长度限制。
+接收 LF 或 CRLF 换行的补丁封装，原文直接传递。文件更新沿用引擎的行尾保留和末尾换行规则，混合行尾文件也按该规则处理。
 MCP 外层使用 source/workdir/files 对象，exec 内各方法保留自己的参数形状，不另建直接调用包装。
 
 补丁沿用 Codex 的语法和引擎，工具描述提供完整语法。多文件补丁可能部分成功，
@@ -53,6 +54,8 @@ Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Serv
 [来源记录](../../proto/PROVENANCE.json)写明 Code Mode 协议副本的上游 tag、commit、路径和 SHA-256，测试据此校验副本。
 二进制定位读取 codex-package.json，布局、版本或目标与预期不符时给出明确错误并停止。
 升级时，版本 pin、协议副本及其来源记录一并修改。
+0.162.0 同时升级 host 与补丁引擎。采用原生的 Promise 完成处理、定时器清理和存储快照共享，
+改善常驻实例的使用，继续复用上游运行时并保留现有内存压力回收。
 Codex 组件及协议的许可见 [Apache-2.0 原文](../../proto/LICENSE)，依赖自带的许可证与 NOTICE 保留。
 
 Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。

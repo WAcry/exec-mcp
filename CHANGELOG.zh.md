@@ -7,6 +7,8 @@
 exec-mcp 首个正式版本，连接 ChatGPT 与用户自行管理的机器。
 
 Code Mode 提供 exec 和 wait，内置命令、补丁、文件传输、Skill 发现及下游 MCP 工具和资源。
+Codex 0.162.0 增加原生 as_settled 和 stream_settled，并改善定时器与存储值的内存处理。补丁更新保留 LF/CRLF 行尾。
+Web 新补充和答案可让进行中的响应提前返回，执行继续。
 工具参数、配置和下游调用的错误会指出字段和允许的取值，运行时与 CLI 消息使用英语。被信号终止的命令报告退出码 128+N。
 终端会话及其未读输出有可配置的上限；没有 wait 观察的 cell 超过空闲保留期后停止。
 HTTP 下游服务可以从环境变量读取凭据（bearer_token_env_var、env_http_headers）。确定没有发出的请求会重连一次，关闭 stdio 服务时也会停止它启动的子进程。

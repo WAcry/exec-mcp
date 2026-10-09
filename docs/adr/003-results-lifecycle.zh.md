@@ -2,7 +2,7 @@
 
 [English](003-results-lifecycle.md) | 简体中文
 
-当前生效，2026-10-01 更新。
+当前生效，2026-10-09 更新。
 
 ## 结果去重与展示
 
@@ -13,6 +13,10 @@ structuredContent 与等价 JSON 文本只保留一份。处理下游结果时�
 
 本机函数将原值交给 JS，下游保留 CallToolResult。脚本通过 text/image/audio/generatedImage 显式输出，
 导出链接独立附带，见 [ADR-005](005-file-transfer.zh.md)。显式输出只发送一次，省去无实际消费者的兼容镜像。
+
+as_settled 与 stream_settled 复用原生 host 的实现，逐项处理已完成的 Promise。
+脚本选择输出内容，text 记录结果，yield_control 或观察期限通过 exec/wait 返回结果。
+这沿用普通 MCP 响应，无需异步注入模型消息，也不改变结果预算。
 
 大结果由 Agent 在 Code Mode 中筛选，或用 store 保存后分段 load；需要持久内容时可显式写文件。
 服务不自动把通用结果写盘，以免增加重读、路径解析和结果清理步骤。
@@ -58,7 +62,7 @@ write_stdin 沿用固定 Codex 的收集窗口。非空写入默认等待较短�
 
 内层工具可以运行超过一次外层等待窗口。exec 先交回 cell_id，再由 wait 续取结果。
 外层 wait 默认及最大为 110 秒，依据目标 connector 超时不少于 120 秒的工程假设，
-为传输留出余量。任务可以继续运行，完成、主动 yield 或终止时则提前返回。
+为传输留出余量。完成、主动 yield 或终止可以提前返回；新的用户补充也可提前结束观察，见 [ADR-010](010-session-notes.zh.md)。
 当前没有独立 sleep 工具、后台模型轮询或持久任务调度。
 
 取消一次 wait 只停止观察；终止 cell 会请求取消尚未完成的嵌套调用。

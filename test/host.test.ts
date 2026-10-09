@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -191,6 +191,54 @@ describe("real local processes", () => {
   });
 });
 describe("pinned freeform patch engine", () => {
+  it.each([
+    ["LF", "old\nkeep\n", "new\nkeep\n"],
+    ["CRLF", "old\r\nkeep\r\n", "new\r\nkeep\r\n"],
+    ["mixed", "old\r\nkeep-lf\nkeep-crlf\r\n", "new\r\nkeep-lf\nkeep-crlf\r\n"],
+    // The upstream engine ensures a final newline using the file's preferred ending.
+    ["missing final newline", "old\r\nkeep", "new\r\nkeep\r\n"],
+  ])(
+    "preserves existing line endings when updating a %s file",
+    async (_kind, before, after) => {
+      const cwd = await directory();
+      await writeFile(path.join(cwd, "endings.txt"), before);
+      const runner = new PatchRunner();
+      patches.push(runner);
+      const result = await runner.apply(
+        "*** Begin Patch\n*** Update File: endings.txt\n@@\n-old\n+new\n*** End Patch\n",
+        cwd,
+      );
+      expect(result.success, result.output).toBe(true);
+      expect(await readFile(path.join(cwd, "endings.txt"), "utf8")).toBe(after);
+    },
+  );
+  it("accepts CRLF patch text directly and preserves whitespace in context lines", async () => {
+    const cwd = await directory();
+    await writeFile(
+      path.join(cwd, "white space.txt"),
+      "\told  \r\n\tkeep \r\n",
+    );
+    const runner = new PatchRunner();
+    patches.push(runner);
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: white space.txt",
+      "@@",
+      "-\told  ",
+      "+\tnew  ",
+      " \tkeep ",
+      "*** Add File: added.txt",
+      "+hello",
+      "*** End Patch",
+      "",
+    ].join("\r\n");
+    const result = await runner.apply(patch, cwd);
+    expect(result.success, result.output).toBe(true);
+    expect(await readFile(path.join(cwd, "white space.txt"), "utf8")).toBe(
+      "\tnew  \r\n\tkeep \r\n",
+    );
+    expect(await readFile(path.join(cwd, "added.txt"), "utf8")).toBe("hello\n");
+  });
   it("creates, updates, moves and deletes files without a UI wrapper", async () => {
     const cwd = await directory();
     const runner = new PatchRunner();

@@ -39,6 +39,8 @@ export type CodeModeOutputItem =
 
 export interface CodeModeExecRequest {
   source: string;
+  /** Ends only the current observation early; the script and nested calls keep running. */
+  yieldSignal?: AbortSignal;
   /** Correlate diagnostics with the Web call record; not supplied by the model. */
   requestId?: string;
   /** Server-side exit for native attachments; not a V8 global or a model-supplied callback. */
@@ -56,6 +58,8 @@ export interface CodeModeExecRequest {
 
 export interface CodeModeWaitRequest {
   cellId: string;
+  /** Separate from cancellation. Ignored by terminate requests. */
+  yieldSignal?: AbortSignal;
   sessionScope?: string;
   signal?: AbortSignal;
   maxTokens?: number;

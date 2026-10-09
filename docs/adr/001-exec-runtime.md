@@ -2,7 +2,7 @@
 
 English | [简体中文](001-exec-runtime.zh.md)
 
-Active, updated 2026-10-01.
+Active, updated 2026-10-09.
 
 ## Rationale
 
@@ -40,6 +40,7 @@ Omitting it uses the service account's home; a relative value also resolves from
 A command may override its directory. A shell's cd affects only its process; downstream MCP paths and parameters retain their own semantics.
 
 tools.apply_patch accepts a complete patch string and sends it through stdin to the pinned engine, avoiding command-line argument limits.
+LF and CRLF patch envelopes are accepted without rewriting the text. Updates use the engine's line-ending preservation and final-newline behavior, including for mixed-ending files.
 The outer MCP object contains source/workdir/files. Nested methods retain their own parameter shapes without separate direct-call wrappers.
 
 Patches use Codex's syntax and engine, with the full grammar in the tool description. A multi-file patch can partially succeed,
@@ -53,6 +54,8 @@ it does not read the installed Codex configuration or database. Component upgrad
 The [provenance record](../../proto/PROVENANCE.json) gives the upstream tag, commit, path, and SHA-256 of the Code Mode protocol copy, and tests check the copy against it.
 The binary locator reads codex-package.json and stops with a clear error when the layout, version, or target is not the expected one.
 An upgrade changes the version pin, the protocol copy, and its provenance record together.
+The 0.162.0 upgrade keeps host and patch engine together. Native Promise settlement helpers, timer cleanup, and shared stored-value snapshots
+benefit long-lived instances without a fork of the runtime. Existing memory pressure recovery remains in place.
 See the [Apache-2.0 text](../../proto/LICENSE) for the components and protocol. Retain licenses and NOTICE files shipped with dependencies.
 
 Windows, Linux, and macOS are product targets; Windows uses native execution.

@@ -456,8 +456,8 @@ export const messages = {
   "composer.send": { en: "Send message", zh: "发送消息" },
   "composer.keys": { en: "↵ send · ⇧↵ new line", zh: "↵ 发送 · ⇧↵ 换行" },
   "composer.working": {
-    en: "ChatGPT is working. Your message arrives with its next tool response.",
-    zh: "ChatGPT 正在工作，消息会随它的下一次工具响应送达。",
+    en: "ChatGPT is working. New messages can return its current tool response early; commands keep running.",
+    zh: "ChatGPT 正在工作，新消息可随提前返回的工具响应送达，命令继续执行。",
   },
   "composer.recent": {
     en: "ChatGPT was active moments ago. Your message goes out with its next tool response.",

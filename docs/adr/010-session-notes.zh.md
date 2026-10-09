@@ -2,12 +2,12 @@
 
 [English](010-session-notes.md) | 简体中文
 
-当前生效，2026-10-01 更新。
+当前生效，2026-10-09 更新。
 
 ## 对话归属与返回方式
 
 操作者可以在对话底部的输入框主动发送文字，也可以回答 Agent 提交的问题。
-两种内容共用 User Note 队列，随同一对话下一次工具自然返回时附带。
+两种内容共用 User Note 队列，随同一对话下一次工具响应附带。
 模型可在 exec 内用 tools.send_message_to_user_async 告知操作者，用 tools.request_user_input_async 带选项提问，并用 tools.set_conversation_title 为对话命名一次；没有答案查询或代发用户消息的工具。
 服务不同步等待用户，也不增加确认参数或问答数据库。
 
@@ -21,7 +21,14 @@
 exec/wait 的成功、运行中和普通执行错误响应都可附带补充。
 嵌套工具的原值保持不变，MCP tools/list、resources/read 和 Web 查询不消费消息。
 返回时才从队列取消息，因此等待期间提交的内容可随当前响应返回。
-补充不唤醒等待或改写已运行的脚本，需要停下操作时仍应使用相应终止方法。
+新的用户补充和已接受的答案通过 YieldObservation 请求同一对话中进行的 exec/wait 提前返回。
+原生 host 返回正常结果并保留未读输出，cell 和嵌套调用继续运行。为传递补充而提前返回时，原观察不会被丢弃或取消；
+需要停止工作时仍使用相应终止方法。
+
+只有新提交触发一次性信号。重试、标题、Agent 消息、已读状态、撤回和投递状态更新都不触发。
+调用开始前已排队的补充等待正常返回，避免放不下的队首反复触发立即返回。
+并发观察可能一起返回，现有 FIFO 仍只附带每条补充一次。控制 RPC 失败时继续正常等待。
+不新增 MCP 参数、查询工具或输出额度，也无法主动开启 ChatGPT 新轮次或撤销副作用。
 
 ## Agent 发来的消息
 
@@ -67,7 +74,7 @@ exec/wait 的结果都是文本；结构化信封仍只包含原结果和补充�
 
 ## 异步提问与作答
 
-参考固定 Codex rust-v0.155.1 的
+接口最初参考 Codex rust-v0.155.1 的
 [request_user_input_async](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
 沿用 questions/title/options 字符串数组与 accepted 的形状。await 只等提交完成，Agent 可继续其他工作。
 Codex 能注入新的用户消息，exec-mcp 则通过后续普通工具响应传回答案。

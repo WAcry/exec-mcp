@@ -74,7 +74,7 @@ Signing out, clearing browser cookies, or rotating the Web access key requires a
 
 ### Send a note
 
-Type in the message box at the bottom of a conversation and press Enter. The text arrives with that conversation's next normal tool response and does not interrupt a running command.
+Type in the message box at the bottom of a conversation and press Enter. The text arrives with that conversation's next tool response. A new note or answer can return an in-flight wait early while its command keeps running.
 Queued messages can be withdrawn, and the timeline shows which call delivered each one. If ChatGPT has finished its turn, copy the text into the original conversation instead.
 
 ### Answer questions

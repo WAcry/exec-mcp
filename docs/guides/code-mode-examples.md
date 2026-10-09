@@ -37,6 +37,27 @@ Terminals return up to 4 MiB per read. Use write_stdin with the same session_id 
 Buffer overflow drops middle logs and returns truncated/omitted_bytes. Finding no error in retained output does not establish that the whole run was error-free.
 Explicitly redirect to a file when complete logs are needed. The service does not automatically persist all tool results.
 
+## Process results as they settle
+
+as_settled accepts an iterable of promises or a Map and yields each outcome as it settles.
+Each record carries its index or Map key and its fulfilled value or rejected reason.
+stream_settled calls a callback for each record and awaits that callback before processing the next one.
+
+```js
+const jobs = new Map([
+  ["status", tools.exec_command({ cmd: "git status --short" })],
+  ["changes", tools.exec_command({ cmd: "git diff --stat" })]
+]);
+await stream_settled(jobs, result => {
+  text(result);
+  yield_control();
+});
+```
+
+The example returns partial output through the existing exec/wait path. Omitting yield_control leaves output to the normal collection window.
+An async loop over as_settled can inspect the same records directly. Both helpers wait for inputs already supplied to them; they do not schedule or cancel those operations.
+Command exit codes and MCP isError remain in the fulfilled value and retain their tool-specific meanings.
+
 ## Terminal collection and outer waits
 
 With chars omitted or empty, `tools.write_stdin` collects unread output without writing and defaults to 5 seconds. Nonempty input defaults to 250 ms.
@@ -54,6 +75,9 @@ text(result);
 exec may first return cell_id for continuation through outer wait. A terminal collection is not cut short by the outer 110-second window,
 and an outer timeout does not restart or replay the nested call. Continue collecting from the handle instead of rerunning the original command.
 Waiting does not enlarge log or model-output budgets. An exited process with more unread output than one read can hold also needs further reads.
+
+A newly submitted Web note or answer can yield the outer observation early. The inner collection and cell continue; wait with the returned cell_id collects later output.
+Existing queued notes alone do not repeatedly wake later waits.
 
 ## Interpret script and command results
 

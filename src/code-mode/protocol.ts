@@ -54,6 +54,11 @@ export interface CodeModeHostClient extends grpc.Client {
     options: grpc.CallOptions,
     callback: grpc.requestCallback<ProtoMessage>,
   ): grpc.ClientUnaryCall;
+  yieldObservation(
+    request: ProtoMessage,
+    options: grpc.CallOptions,
+    callback: grpc.requestCallback<ProtoMessage>,
+  ): grpc.ClientUnaryCall;
 }
 
 interface CodeModeHostConstructor {

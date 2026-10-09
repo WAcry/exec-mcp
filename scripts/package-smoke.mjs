@@ -300,16 +300,58 @@ enabled = true
     assert.ok(value, JSON.stringify(result));
     return JSON.parse(value.text);
   };
+  // Finite smoke probes may yield during a cold Windows process launch. Resume
+  // the same cell, preserving output and scope, instead of rerunning the probe.
+  const completeExec = async (request) => {
+    const deadline = Date.now() + 90_000;
+    let result = await client.callTool(request);
+    const content = [];
+    for (;;) {
+      const first = result.content[0];
+      const running =
+        first?.type === "text"
+          ? /^Script running with cell ID (\S+)/.exec(first.text)
+          : undefined;
+      if (!running || result.isError) {
+        return content.length
+          ? {
+              ...result,
+              content: first
+                ? [first, ...content, ...result.content.slice(1)]
+                : content,
+            }
+          : result;
+      }
+      content.push(...result.content.slice(1));
+      const remaining = deadline - Date.now();
+      assert.ok(
+        remaining > 0,
+        "Packaged exec did not finish: " + JSON.stringify(result),
+      );
+      result = await client.callTool({
+        name: "wait",
+        arguments: {
+          cell_id: running[1],
+          yield_time_ms: Math.min(30_000, remaining),
+          ...(request.arguments.max_output_tokens === undefined
+            ? {}
+            : { max_tokens: request.arguments.max_output_tokens }),
+        },
+        ...(request._meta ? { _meta: request._meta } : {}),
+      });
+    }
+  };
   const runNative = (name, args, workdir) =>
-    client.callTool({
+    completeExec({
       name: "exec",
       arguments: {
+        yield_time_ms: 0,
         source: `text(await tools[${JSON.stringify(name)}](${JSON.stringify(args)}));`,
         ...(workdir ? { workdir } : {}),
       },
     });
   // A known downstream method works on the first exec without a discovery handshake.
-  const direct = await client.callTool({
+  const direct = await completeExec({
     name: "exec",
     arguments: { source: "text(await tools.mcp__packaged__echo({}));" },
   });
@@ -406,7 +448,7 @@ enabled = true
     path.join(disabledDirectory, "SKILL.md"),
     "---\nname: packaged-disabled\ndescription: PRIVATE_DISABLED_TRIGGER\n---\nPRIVATE_DISABLED_BODY\n",
   );
-  const skillsResult = await client.callTool({
+  const skillsResult = await completeExec({
     name: "exec",
     arguments: {
       workdir: project,
@@ -434,7 +476,7 @@ enabled = true
   );
   const patch =
     "*** Begin Patch\n*** Add File: smoke.txt\n+packaged runtime works\n*** End Patch\n";
-  const result = await client.callTool({
+  const result = await completeExec({
     name: "exec",
     arguments: {
       workdir: project,
@@ -463,11 +505,27 @@ enabled = true
     JSON.stringify(webCallBody),
   );
   const scopedCall = (source, extra = {}) =>
-    client.callTool({
+    completeExec({
       name: "exec",
       arguments: { source, ...extra },
       _meta: { "openai/session": "package-smoke-conversation" },
     });
+  const yieldedProbe = await scopedCall(
+    'store("probe-runs",(load("probe-runs")||0)+1);text("BEFORE_YIELD");yield_control();await new Promise(r=>setTimeout(r,25));text("AFTER_YIELD");',
+    { yield_time_ms: 0 },
+  );
+  assert.ok(!yieldedProbe.isError, JSON.stringify(yieldedProbe));
+  for (const marker of ["BEFORE_YIELD", "AFTER_YIELD"])
+    assert.equal(
+      yieldedProbe.content.filter(
+        (item) => item.type === "text" && item.text === marker,
+      ).length,
+      1,
+    );
+  assert.deepEqual(
+    valueOf(await scopedCall('text({runs:load("probe-runs")});')),
+    { runs: 1 },
+  );
   // The installed package exposes complete, callable metadata through ALL_TOOLS.
   const catalogCheck = await scopedCall(`
     const complete=ALL_TOOLS.every(tool => typeof tools[tool.name] === 'function' && tool.description.length > 0);

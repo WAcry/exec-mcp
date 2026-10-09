@@ -331,7 +331,7 @@ const NATIVE_CONTRACTS = {
       required: ["success", "exit_code", "output"],
       additionalProperties: false,
     },
-    description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Updates preserve LF/CRLF line endings and ensure a final newline. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
+    description: `The apply_patch tool can be used to edit files. Takes a complete patch string; relative paths resolve from exec.workdir. The patch is sent through stdin, avoiding command-line argument limits. Updates preserve LF/CRLF line endings; the engine can add a missing final newline. Returns success, exit_code and output; a failure may leave partial changes. Lark grammar:\n${PATCH_GRAMMAR}`,
   }),
   view_image: contract({
     name: "view_image",
@@ -581,4 +581,4 @@ const WAIT_DEFAULT = waitDefault(
   DEFAULT_WAIT_YIELD_TIME_MS,
   MAX_WAIT_YIELD_TIME_MS,
 );
-export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; completion, yield_control or new Web user input can return sooner while the cell keeps running. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;
+export const WAIT_DESCRIPTION = `Returns only the new output since the last yield, or the final completion or termination result for an exec cell. A running cell may yield again with the same cell_id. Defaults to ${WAIT_DEFAULT}; completion, yield_control or new Web user input can return sooner. Early yields leave the cell and nested calls running. terminate=true stops the cell; cancelling this wait only cancels observation. max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;

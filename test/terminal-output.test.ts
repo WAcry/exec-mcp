@@ -168,13 +168,21 @@ describe("real rolling terminal output, not output files", () => {
     const value = terminal(4096, 1000);
     const ended = await value.execCommand(
       {
-        cmd: nodeCommand('process.stdout.write("old-output");'),
+        cmd: nodeCommand(
+          'process.stdin.resume();process.stdin.once("end",()=>process.stdout.write("old-output"));',
+        ),
         yield_time_ms: 0,
       },
       tmpdir(),
     );
+    expect(ended.session_id).toBeDefined();
     const closed = value["sessions"].get(ended.session_id!)!;
+    // Release the finite producer only after the handle is retained. Otherwise
+    // a fast process can exit and be completely consumed by its initial read.
+    if (closed.backend.kind !== "pipe") throw new Error("Expected pipes");
+    closed.backend.process.stdin.end();
     await closed.done;
+    expect(closed.buffer.bytes).toBeGreaterThan(0);
     const running = await value.execCommand(
       { cmd: nodeCommand("setInterval(()=>{},1000);"), yield_time_ms: 0 },
       tmpdir(),

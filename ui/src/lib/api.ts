@@ -66,9 +66,12 @@ export async function apiFetch<T>(
     );
   }
 
-  if (response.status === 401)
-    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
-  if (!response.ok) throw await failure(response);
+  if (!response.ok) {
+    const error = await failure(response);
+    if (error.status === 401 && error.code === "unauthorized")
+      window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+    throw error;
+  }
   return response.json() as Promise<T>;
 }
 

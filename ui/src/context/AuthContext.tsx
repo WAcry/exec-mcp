@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import type { StatusResponse } from "../types";
+import type { ApiErrorBody, StatusResponse } from "../types";
 import { AUTH_REQUIRED_EVENT } from "../lib/api";
 
 interface AuthContextType {
@@ -55,12 +55,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await fetch("/api/status", {
         credentials: "same-origin",
+        cache: "no-store",
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
       if (response.status === 401) {
-        setIsAuthenticated(false);
-        setSystemStatus(null);
+        const body = (await response.json()) as Partial<ApiErrorBody>;
+        if (!controller.signal.aborted && body.error === "unauthorized") {
+          setIsAuthenticated(false);
+          setSystemStatus(null);
+        }
         return;
       }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -130,14 +134,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchStatus, verifyToken]);
 
   useEffect(() => {
-    const requireAuth = () => {
-      statusRequest.current?.abort();
-      setIsAuthenticated(false);
-      setSystemStatus(null);
+    // A delayed request may have used an older cookie. Check the current one.
+    const requireAuth = () => void fetchStatus();
+    const resume = () => {
+      if (document.visibilityState === "visible") void fetchStatus();
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, requireAuth);
-    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, requireAuth);
-  }, []);
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      window.removeEventListener(AUTH_REQUIRED_EVENT, requireAuth);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [fetchStatus]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

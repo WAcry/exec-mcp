@@ -2,7 +2,7 @@
 
 English | [简体中文](009-web-console.zh.md)
 
-Active, updated 2026-09-28.
+Active, updated 2026-10-09.
 
 ## Observing and managing runtime state
 
@@ -93,6 +93,11 @@ It contains a signed credential; the server checks signature and expiry while th
 Existing console status requests renew the 30-day window, allowing long-lived sign-in during normal use.
 An unexpired cookie survives closing the browser and restarting the service. Sign-out clears this browser's cookie only.
 There is no fixed maximum sign-in lifetime, extra refresh polling, or user-session database.
+
+Returning to the console or restoring connectivity revalidates the current cookie through the existing status endpoint.
+An unauthorized API response also requests that check, since an older request can carry an outdated cookie.
+Only an exec-mcp unauthorized status response clears known UI sign-in; network and intermediary failures retain it.
+Explicit sign-out suppresses automatic recovery. Failed writes are not replayed.
 
 Static assets, failed authentication, and cross-origin requests do not renew sign-in. Long-lived SSE alone does not renew it either.
 SSE checks credentials at its existing heartbeat or send points and disconnects on expiry. A normal page can reconnect with a renewed cookie.

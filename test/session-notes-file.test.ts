@@ -23,11 +23,13 @@ const result = (): CallToolResult => ({
 
 let root: string;
 let file: string;
+const stores: SessionNotes[] = [];
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "exec-notes-file-"));
   file = sessionNotesPath(path.join(root, "config.toml"));
 });
 afterEach(async () => {
+  for (const store of stores.splice(0)) await store.close();
   await rm(root, { recursive: true, force: true });
 });
 
@@ -36,6 +38,7 @@ function open(now: () => number, logs: string[] = []) {
     file,
     log: (line) => logs.push(line),
   });
+  stores.push(store);
   const close = store.openWeb(() => {});
   return { store, logs, close };
 }

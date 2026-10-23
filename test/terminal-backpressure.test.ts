@@ -74,7 +74,12 @@ async function start(terminal: TerminalManager, tty: boolean, body: string) {
   const script = prefix + ".cjs";
   await writeFile(script, source);
   const first = await terminal.execCommand(
-    { cmd: nodeFileCommand(script), tty, yield_time_ms: 0 },
+    {
+      cmd: nodeFileCommand(script),
+      tty,
+      yield_time_ms: 0,
+      max_output_tokens: 2_000_000,
+    },
     root,
   );
   expect(first.session_id).toBeDefined();
@@ -87,7 +92,9 @@ async function start(terminal: TerminalManager, tty: boolean, body: string) {
   };
 }
 async function drain(terminal: TerminalManager, first: TerminalResult) {
-  return observeTerminal(first, (input) => terminal.writeStdin(input));
+  return observeTerminal(first, (input) =>
+    terminal.writeStdin({ ...input, max_output_tokens: 2_000_000 }),
+  );
 }
 const flood = "FLOOD_DATA_0123456789".repeat(3) + "\n";
 const payload = flood.repeat(1100); // About 64 KiB; keep PTY lines shorter than its width.
@@ -218,7 +225,11 @@ describe("per-producer rolling output and cleanup", () => {
     const source =
       'process.stdout.write("汉😀".repeat(350000),()=>process.stderr.write("ERROR_資料\\n".repeat(500),()=>process.exit(0)));';
     const first = await terminal.execCommand(
-      { cmd: nodeCommand(source), yield_time_ms: 0 },
+      {
+        cmd: nodeCommand(source),
+        yield_time_ms: 0,
+        max_output_tokens: 2_000_000,
+      },
       root,
     );
     const result = await drain(terminal, first);
@@ -262,6 +273,7 @@ describe("per-producer rolling output and cleanup", () => {
       const part = await terminal.writeStdin({
         session_id: a.id,
         yield_time_ms: 0,
+        max_output_tokens: 2_000_000,
       });
       output += part.output;
       omitted += part.omitted_bytes ?? 0;

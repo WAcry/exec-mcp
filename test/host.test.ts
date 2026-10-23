@@ -135,11 +135,14 @@ describe("real local processes", () => {
   it("reads complete Unicode output in increments when it fits the configured buffer", async () => {
     const value = terminal(4 * 1024 * 1024);
     const first = await value.execCommand(
-      { cmd: nodeCommand('process.stdout.write("汉😀".repeat(350000))') },
+      {
+        cmd: nodeCommand('process.stdout.write("汉😀".repeat(350000))'),
+        max_output_tokens: 2_000_000,
+      },
       await directory(),
     );
     const result = await observeTerminal(first, (input) =>
-      value.writeStdin(input),
+      value.writeStdin({ ...input, max_output_tokens: 2_000_000 }),
     );
     expect(result.exit_code).toBe(0);
     expect(result.output).toBe("汉😀".repeat(350000));

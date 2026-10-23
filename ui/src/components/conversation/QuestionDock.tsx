@@ -67,7 +67,9 @@ export function QuestionDock({
     const target = pending.findIndex((question) => question.id === focusId.id);
     if (target >= 0) setIndex(target);
     window.requestAnimationFrame(() =>
-      root.current?.querySelector<HTMLElement>("[role=radio]")?.focus(),
+      root.current
+        ?.querySelector<HTMLElement>("[role=radio], textarea")
+        ?.focus(),
     );
   }, [focusId, pending]);
 
@@ -78,21 +80,23 @@ export function QuestionDock({
   if (!current) return null;
 
   const draft = drafts.answers[sessionId]?.[current.id];
-  const choice = draft?.option_index;
+  const choice =
+    draft?.option_index !== undefined
+      ? draft.option_index
+      : current.options.length
+        ? 0
+        : null;
   const text = draft?.note ?? "";
-  const composed =
-    choice === undefined ? "" : formatUserAnswer(current, choice, text);
+  const composed = formatUserAnswer(current, choice, text);
   const bytes = Math.max(
     utf8Bytes(composed),
     utf8Bytes(JSON.stringify(composed)),
   );
-  const valid =
-    choice !== undefined &&
-    (choice !== null || !!text.trim()) &&
-    bytes <= NOTE_MAX_BYTES;
+  const valid = (choice !== null || !!text.trim()) && bytes <= NOTE_MAX_BYTES;
   const change = (next: Partial<AnswerDraft>) =>
     drafts.setAnswer(sessionId, current.id, {
       ...draft,
+      option_index: choice,
       note: text,
       ...next,
       id: draftId(),
@@ -105,11 +109,16 @@ export function QuestionDock({
   };
 
   const submit = async () => {
-    if (!draft || !valid || inFlight.current) return;
+    if (!valid || inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     setError("");
-    const submitted = draft;
+    const submitted = {
+      id: draft?.id ?? draftId(),
+      option_index: choice,
+      note: text,
+    };
+    drafts.setAnswer(sessionId, current.id, submitted);
     try {
       const saved = await apiFetch<SessionNote>(
         `/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(current.id)}/answer`,
@@ -134,7 +143,9 @@ export function QuestionDock({
     }
   };
 
-  const options: (string | null)[] = [...current.options, null];
+  const options: (string | null)[] = current.options.length
+    ? [...current.options, null]
+    : [];
   if (collapsed)
     return (
       <button
@@ -227,97 +238,95 @@ export function QuestionDock({
       {current.delivery === "withdrawn" && (
         <p className="mt-1 text-xs text-ink-3">{t("question.selectAgain")}</p>
       )}
-      <div
-        role="radiogroup"
-        aria-label={t("question.legend", current.title)}
-        className="mt-2.5 space-y-1"
-      >
-        {options.map((option, optionIndex) => {
-          const value = option === null ? null : optionIndex;
-          const selected = choice !== undefined && choice === value;
-          return (
-            <div
-              key={optionIndex}
-              role="radio"
-              aria-checked={selected}
-              tabIndex={
-                selected || (choice === undefined && optionIndex === 0) ? 0 : -1
-              }
-              onClick={() => choose(value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  choose(value);
-                } else if (
-                  event.key === "ArrowDown" ||
-                  event.key === "ArrowUp"
-                ) {
-                  event.preventDefault();
-                  const radios = [
-                    ...root.current!.querySelectorAll<HTMLElement>(
-                      "[role=radio]",
-                    ),
-                  ];
-                  const next =
-                    radios[
-                      (optionIndex +
-                        (event.key === "ArrowDown" ? 1 : -1) +
-                        radios.length) %
-                        radios.length
+      {options.length > 0 && (
+        <div
+          role="radiogroup"
+          aria-label={t("question.legend", current.title)}
+          className="mt-2.5 space-y-1"
+        >
+          {options.map((option, optionIndex) => {
+            const value = option === null ? null : optionIndex;
+            const selected = choice === value;
+            return (
+              <div
+                key={optionIndex}
+                role="radio"
+                aria-checked={selected}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => choose(value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    choose(value);
+                  } else if (
+                    event.key === "ArrowDown" ||
+                    event.key === "ArrowUp"
+                  ) {
+                    event.preventDefault();
+                    const radios = [
+                      ...root.current!.querySelectorAll<HTMLElement>(
+                        "[role=radio]",
+                      ),
                     ];
-                  next?.focus();
-                }
-              }}
-              className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-1.5 transition-colors duration-150 ${selected ? "border-ink bg-hover" : "border-line hover:border-line-strong hover:bg-hover"}`}
-            >
-              <span
-                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${selected ? "border-ink bg-ink" : "border-line-strong"}`}
+                    const next =
+                      radios[
+                        (optionIndex +
+                          (event.key === "ArrowDown" ? 1 : -1) +
+                          radios.length) %
+                          radios.length
+                      ];
+                    next?.focus();
+                  }
+                }}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-1.5 transition-colors duration-150 ${selected ? "border-ink bg-hover" : "border-line hover:border-line-strong hover:bg-hover"}`}
               >
-                {selected && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-surface" />
-                )}
-              </span>
-              <span
-                className={`min-w-0 flex-1 text-sm whitespace-pre-wrap ${option === null ? "text-ink-2" : "text-ink"}`}
-              >
-                {option ?? t("question.none")}
-              </span>
-              {optionIndex === 0 && (
-                <span className="shrink-0 pt-px text-2xs text-ink-3">
-                  {t("question.recommended")}
+                <span
+                  className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${selected ? "border-ink bg-ink" : "border-line-strong"}`}
+                >
+                  {selected && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-surface" />
+                  )}
                 </span>
-              )}
-              <span className="hidden sm:contents [@media(hover:none)]:hidden">
-                <Kbd>{optionIndex + 1}</Kbd>
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="reveal" data-open={choice !== undefined}>
-        <div inert={choice === undefined}>
-          <label className="mt-2.5 block">
-            <span className="sr-only">
-              {choice === null
-                ? t("question.required")
-                : t("question.optional")}
-            </span>
-            <AutoTextarea
-              ref={note}
-              value={text}
-              maxRows={6}
-              disabled={busy}
-              onChange={(value) => change({ note: value })}
-              onSubmit={() => void submit()}
-              placeholder={
-                choice === null
-                  ? t("question.customPlaceholder")
-                  : t("question.notePlaceholder")
-              }
-              className="w-full rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-line-strong"
-            />
-          </label>
+                <span
+                  className={`min-w-0 flex-1 text-sm whitespace-pre-wrap ${option === null ? "text-ink-2" : "text-ink"}`}
+                >
+                  {option ?? t("question.none")}
+                </span>
+                {optionIndex === 0 && (
+                  <span className="shrink-0 pt-px text-2xs text-ink-3">
+                    {t("question.recommended")}
+                  </span>
+                )}
+                {optionIndex < 9 && (
+                  <span className="hidden sm:contents [@media(hover:none)]:hidden">
+                    <Kbd>{optionIndex + 1}</Kbd>
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
+      )}
+      <div>
+        <label className="mt-2.5 block">
+          <span className="sr-only">
+            {choice === null ? t("question.required") : t("question.optional")}
+          </span>
+          <AutoTextarea
+            ref={note}
+            value={text}
+            maxRows={6}
+            disabled={busy}
+            onChange={(value) => change({ note: value })}
+            onSubmit={() => void submit()}
+            placeholder={
+              choice === null
+                ? t("question.customPlaceholder")
+                : t("question.notePlaceholder")
+            }
+            className="w-full rounded-lg border border-line bg-sunken px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-line-strong"
+          />
+        </label>
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="min-w-0 flex-1 text-2xs text-ink-3">

@@ -36,6 +36,7 @@ export const API_ERROR_CODES = [
   "media_not_found",
   "conversation_not_found",
   "question_not_found",
+  "question_too_long",
   "note_not_found",
   "note_invalid_id",
   "note_empty",

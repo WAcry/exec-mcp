@@ -88,7 +88,7 @@ export function nativeRequest(name: string, args: Record<string, unknown>) {
     arguments: {
       source:
         name === "view_image"
-          ? `image((${invocation}).content[0]);`
+          ? `image(${invocation});`
           : `text(${invocation});`,
       ...(name === "apply_patch" && args.workdir !== undefined
         ? { workdir: args.workdir }

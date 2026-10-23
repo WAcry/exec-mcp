@@ -2,7 +2,7 @@
 
 English | [简体中文](001-exec-runtime.zh.md)
 
-Active, updated 2026-10-09.
+Active, updated 2026-10-23.
 
 ## Rationale
 
@@ -43,7 +43,7 @@ tools.apply_patch accepts a complete patch string and sends it through stdin to 
 LF and CRLF patch envelopes are accepted without rewriting the text. Updates use the engine's line-ending preservation and final-newline behavior, including for mixed-ending files.
 The outer MCP object contains source/workdir/files. Nested methods retain their own parameter shapes without separate direct-call wrappers.
 
-Patches use Codex's syntax and engine, with the full grammar in the tool description. A multi-file patch can partially succeed,
+Patches use the pinned Codex syntax and engine. A multi-file patch can partially succeed,
 so callers must check its result. The service does not generate additional snapshots or line counts for a diff UI.
 
 ## Components and platforms
@@ -54,8 +54,8 @@ it does not read the installed Codex configuration or database. Component upgrad
 The [provenance record](../../proto/PROVENANCE.json) gives the upstream tag, commit, path, and SHA-256 of the Code Mode protocol copy, and tests check the copy against it.
 The binary locator reads codex-package.json and stops with a clear error when the layout, version, or target is not the expected one.
 An upgrade changes the version pin, the protocol copy, and its provenance record together.
-The 0.162.0 upgrade keeps host and patch engine together. Native Promise settlement helpers, timer cleanup, and shared stored-value snapshots
-benefit long-lived instances without a fork of the runtime. Existing memory pressure recovery remains in place.
+The host and patch engine are pinned together at 0.164.0. Native Promise settlement helpers, timer cleanup, and shared stored-value snapshots
+benefit long-lived instances without a fork of the runtime. Recovery follows the state-loss boundary in [ADR-003](003-results-lifecycle.md).
 See the [Apache-2.0 text](../../proto/LICENSE) for the components and protocol. Retain licenses and NOTICE files shipped with dependencies.
 
 Windows, Linux, and macOS are product targets; Windows uses native execution.
@@ -84,9 +84,9 @@ while validating cancellation, result fidelity, and connectivity. Adopt old prod
 
 ## Source references
 
-Reference snapshot `8b78600dc85cc265d7e7e827f6aa903875405287` of Codex.
-Its [patch tool](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
-is freeform; [Code Mode contract conversion](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-rs/code-mode-protocol/src/description.rs)
+Reference snapshot `6aaac694803004a63c6f393d153c96d22521a6b9` of Codex.
+Its [patch tool](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
+is freeform; [Code Mode contract conversion](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/code-mode-protocol/src/description.rs)
 maps it to a string argument.
-The [platform packaging script](https://github.com/openai/codex/blob/8b78600dc85cc265d7e7e827f6aa903875405287/codex-cli/scripts/build_npm_package.py)
+The [platform packaging script](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-cli/scripts/build_npm_package.py)
 is a reference for upstream distribution. exec-mcp's platform support needs its own validation, and project dependencies explicitly pin the runtime version.

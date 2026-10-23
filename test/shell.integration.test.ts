@@ -294,8 +294,8 @@ describe.each(variants())(
       expect(entry.description).toContain(shellDescription(selected));
       expect(tools[0]!.description).toContain(entry.description);
       expect(tools[0]!.description).toContain(shellDescription(selected));
-      expect(entry.description).toContain('"shell"');
-      expect(entry.description).toContain('"login"');
+      expect(entry.description).toContain("shell?: string;");
+      expect(entry.description).toContain("login?: boolean;");
       if (ps(selected)) {
         const version = await connection.client.callTool({
           name: "exec",

@@ -111,11 +111,12 @@ describe("real execution lifecycle boundaries", () => {
       {
         cmd: nodeCommand('process.stdout.write("x".repeat(2*1024*1024))'),
         yield_time_ms: 100,
+        max_output_tokens: 600000,
       },
       tmpdir(),
     );
     const result = await observeTerminal(first, (input) =>
-      terminal.writeStdin(input),
+      terminal.writeStdin({ ...input, max_output_tokens: 600000 }),
     );
     expect(result.exit_code).toBe(0);
     expect(result.output).toBe("x".repeat(2 * 1024 * 1024));
@@ -130,15 +131,14 @@ describe("real execution lifecycle boundaries", () => {
       ),
     );
     const image = await viewImage(file, "original");
-    expect(image.content[0]).toMatchObject({
-      type: "image",
-      mimeType: "image/png",
-      _meta: { "codex/imageDetail": "original" },
+    expect(image).toMatchObject({
+      image_url: expect.stringMatching(/^data:image\/png;base64,/),
+      detail: "original",
     });
     const service = new CodeModeService();
     cleanup.push(() => service.close());
     const result = await service.exec({
-      source: "image((await tools.picture({})).content[0]);",
+      source: "image(await tools.picture({}));",
       tools: [
         { name: "picture", description: "图片", call: async () => image },
       ],
@@ -211,7 +211,9 @@ describe("real execution lifecycle boundaries", () => {
         while(!failed&&Date.now()<end)await new Promise(r=>setTimeout(r,10));
         let message='';try{await service.wait({cellId:id,sessionScope:'scope'});}catch(error){message=error.message;}
         if(!message.includes('The result is unknown'))throw new Error(message);
-        const next=await service.exec({source:'text({recovered:load("cache")===undefined});',tools:[],sessionScope:'scope'});
+        let reset='';try{await service.exec({source:'store("must-not-run",1);',tools:[],sessionScope:'scope'});}catch(error){reset=error.message;}
+        if(!reset.includes('The exec runtime was replaced'))throw new Error('Missing reset notice: '+reset);
+        const next=await service.exec({source:'text({recovered:load("cache")===undefined && load("must-not-run")===undefined});',tools:[],sessionScope:'scope'});
         if(!JSON.stringify(next).includes('recovered')||!JSON.stringify(next).includes('true'))throw new Error('No recovery');
         console.log('host recovery ok');
       } finally {await service.close();}

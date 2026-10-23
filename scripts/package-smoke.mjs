@@ -870,7 +870,8 @@ enabled = true
       const run=source=>service.exec({source,tools:[],sessionScope:'unchanged-package-conversation'});
       assert.ok(!(await run('store("old",42);')).isError);
       await service.checkMemory();
-      const fresh=await run('text(load("old")===undefined);store("new",7);');
+      await assert.rejects(run('store("must-not-run",1);'),/The exec runtime was replaced/);
+      const fresh=await run('text(load("old")===undefined && load("must-not-run")===undefined);store("new",7);');
       assert.ok(!fresh.isError&&fresh.content.some(x=>x.type==='text'&&x.text==='true'));
       const next=await run('text(load("new"));');
       assert.ok(!next.isError&&next.content.some(x=>x.type==='text'&&x.text==='7'));

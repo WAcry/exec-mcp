@@ -19,6 +19,7 @@ import {
   TERMINAL_READ_BYTES,
 } from "../limits.js";
 import { RollingOutputBuffer } from "./output-buffer.js";
+import { validateOutputBudget } from "../code-mode/output-budget.js";
 import { inputPreview } from "../tool-names.js";
 import {
   resolveCommandShell,
@@ -34,12 +35,14 @@ export interface ExecCommandInput {
   login?: boolean;
   tty?: boolean;
   yield_time_ms?: number;
+  max_output_tokens?: number;
 }
 export interface WriteStdinInput {
   session_id: string;
   chars?: string;
   close_stdin?: boolean;
   yield_time_ms?: number;
+  max_output_tokens?: number;
   cols?: number;
   rows?: number;
   terminate?: boolean;
@@ -51,6 +54,7 @@ export interface TerminalResult {
   exit_code?: number;
   truncated?: true;
   omitted_bytes?: number;
+  original_token_count?: number;
   /** Cumulative stderr bytes observed for pipe sessions, including rolled-off output. */
   stderr_bytes?: number;
 }
@@ -73,6 +77,7 @@ interface Session {
   finish(code: number): void;
   exitReady?: () => void;
   exitCode?: number;
+  processExited?: boolean;
   terminating?: Promise<void>;
   stderrBytes: number;
 }
@@ -192,6 +197,7 @@ export class TerminalManager {
     owner?: string,
   ): Promise<TerminalResult> {
     this.requireOpen();
+    validateOutputBudget(input.max_output_tokens);
     throwIfAborted(signal);
     const cwd = await realpath(resolveUserPath(input.workdir ?? base, base));
     if (!(await stat(cwd)).isDirectory())
@@ -252,10 +258,12 @@ export class TerminalManager {
     };
     if (backend.kind === "pipe") {
       const child = backend.process;
+      let drainTimer: NodeJS.Timeout | undefined;
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (text: string) => this.append(session, text));
       child.stderr.on("data", (text: string) => {
+        if (session.exitCode !== undefined) return;
         session.stderrBytes = Math.min(
           Number.MAX_SAFE_INTEGER,
           session.stderrBytes + Buffer.byteLength(text),
@@ -268,7 +276,23 @@ export class TerminalManager {
       child.on("error", (error) => {
         this.append(session, `The process failed to start: ${error.message}\n`);
       });
-      child.on("close", (code, signal) => ended(exitStatus(code, signal)));
+      child.on("exit", (code, signal) => {
+        session.processExited = true;
+        // Match Codex's bounded local post-exit drain. A descendant may keep
+        // inherited pipes open after the foreground shell has already exited.
+        drainTimer = setTimeout(() => {
+          ended(exitStatus(code, signal));
+          // Keep consuming the descendant's pipes without retaining output or
+          // sending a signal. They must not keep this server alive on shutdown.
+          child.unref();
+          for (const stream of [child.stdin, child.stdout, child.stderr])
+            (stream as typeof stream & { unref?: () => void }).unref?.();
+        }, 50);
+      });
+      child.on("close", (code, signal) => {
+        clearTimeout(drainTimer);
+        ended(exitStatus(code, signal));
+      });
     } else {
       backend.process.onData((text) => this.append(session, text));
       backend.process.onExit((event) =>
@@ -282,7 +306,7 @@ export class TerminalManager {
         input.yield_time_ms ?? COMMAND_YIELD_TIME_MS.default,
         signal,
       );
-      return this.collect(session, started);
+      return this.collect(session, started, input.max_output_tokens);
     } catch (error) {
       await this.terminate(session);
       this.remove(session);
@@ -300,6 +324,7 @@ export class TerminalManager {
     signal?: AbortSignal,
   ): Promise<TerminalResult> {
     this.requireOpen();
+    validateOutputBudget(input.max_output_tokens);
     throwIfAborted(signal);
     const session = this.sessions.get(input.session_id);
     if (!session)
@@ -364,7 +389,7 @@ export class TerminalManager {
           }
         }
         throwIfAborted(signal);
-        return this.collect(session, started);
+        return this.collect(session, started, input.max_output_tokens);
       });
     } finally {
       session.observers--;
@@ -390,7 +415,8 @@ export class TerminalManager {
     return inheritedEnvironment();
   }
   private append(session: Session, text: string): void {
-    if (!this.sessions.has(session.id)) return;
+    if (!this.sessions.has(session.id) || session.exitCode !== undefined)
+      return;
     session.buffer.append(text);
     this.enforceBudget(session);
   }
@@ -447,10 +473,14 @@ export class TerminalManager {
       excess -= session.buffer.shed(excess);
     }
   }
-  private collect(session: Session, started: number): TerminalResult {
+  private collect(
+    session: Session,
+    started: number,
+    maxOutputTokens = 10_000,
+  ): TerminalResult {
     session.touched = Date.now();
     const result: TerminalResult = {
-      ...session.buffer.read(TERMINAL_READ_BYTES),
+      ...session.buffer.read(TERMINAL_READ_BYTES, maxOutputTokens),
       wall_time_seconds: (performance.now() - started) / 1000,
       ...(session.stderrBytes ? { stderr_bytes: session.stderrBytes } : {}),
     };
@@ -476,6 +506,10 @@ export class TerminalManager {
   private terminate(session: Session): Promise<void> {
     session.terminating ??= (async () => {
       if (session.exitCode !== undefined) return;
+      if (session.processExited) {
+        await session.done;
+        return;
+      }
       const pid = session.backend.process.pid;
       const stopped =
         pid !== undefined

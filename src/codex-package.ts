@@ -6,7 +6,7 @@ import path from "node:path";
  * The @openai/codex version that exec-mcp runs. Tests keep it equal to the
  * package.json dependency, the lockfile, and the tag in proto/PROVENANCE.json.
  */
-export const PINNED_CODEX_VERSION = "0.162.0";
+export const PINNED_CODEX_VERSION = "0.164.0";
 /** The codex-package.json layout that this locator can read. */
 const PACKAGE_LAYOUT_VERSION = 1;
 const REINSTALL =

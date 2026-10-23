@@ -11,6 +11,23 @@ export const HOST_GRPC_FRAME_BYTES = 64 * 1024 * 1024;
 
 export type ProtoMessage = Record<string, unknown>;
 
+/** Preserve the RPC status when adding diagnostics so callers can identify a lost session. */
+export class CodeModeRpcError extends Error {
+  constructor(
+    message: string,
+    readonly code: grpc.status,
+  ) {
+    super(message);
+    this.name = "CodeModeRpcError";
+  }
+}
+
+export function isMissingSession(error: unknown): error is CodeModeRpcError {
+  return (
+    error instanceof CodeModeRpcError && error.code === grpc.status.NOT_FOUND
+  );
+}
+
 export interface CodeModeHostClient extends grpc.Client {
   acknowledgeNotification(
     request: ProtoMessage,
@@ -140,7 +157,7 @@ export function unaryCall(
       { deadline: Date.now() + timeoutMs },
       (error, response): void => {
         if (error !== null) {
-          finish(new Error(trimGrpcError(error)));
+          finish(new CodeModeRpcError(trimGrpcError(error), error.code));
         } else {
           finish(undefined, response);
         }
@@ -156,7 +173,14 @@ export function grpcError(error: unknown, operation: string): Error {
       : typeof error === "string"
         ? error
         : String(error);
-  return new Error(`Code Mode ${operation} failed: ${message.slice(0, 512)}`);
+  const diagnostic = `Code Mode ${operation} failed: ${message.slice(0, 512)}`;
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "number"
+  )
+    return new CodeModeRpcError(diagnostic, error.code);
+  return new Error(diagnostic);
 }
 
 interface StreamFailureMonitor {

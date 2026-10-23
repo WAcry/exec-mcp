@@ -118,17 +118,48 @@ export async function discoverSkills(
             const document = parseYaml(yaml);
             if (document !== null) {
               const policy = mapping(document).policy;
-              if (policy !== undefined) {
+              if (policy !== undefined && policy !== null) {
                 const object = mapping(policy);
                 if (
                   Object.keys(object).some(
-                    (key) => key !== "allow_implicit_invocation",
+                    (key) =>
+                      key !== "allow_implicit_invocation" && key !== "products",
                   )
                 )
                   throw new Error("unknown policy");
                 const allow = object.allow_implicit_invocation;
-                if (allow !== undefined && typeof allow !== "boolean")
+                if (
+                  allow !== undefined &&
+                  allow !== null &&
+                  typeof allow !== "boolean"
+                )
                   throw new Error("invalid policy");
+                const products =
+                  object.products === undefined ? [] : object.products;
+                if (
+                  !Array.isArray(products) ||
+                  products.some(
+                    (product) =>
+                      ![
+                        "chatgpt",
+                        "codex",
+                        "atlas",
+                        "CHATGPT",
+                        "CODEX",
+                        "ATLAS",
+                      ].includes(product),
+                  )
+                )
+                  throw new Error("invalid products");
+                // This service exposes Skills to ChatGPT. Product visibility is
+                // independent of whether an eligible Skill allows implicit use.
+                if (
+                  products.length &&
+                  !products.some(
+                    (product) => product === "chatgpt" || product === "CHATGPT",
+                  )
+                )
+                  continue;
                 implicit = allow !== false;
               }
             }

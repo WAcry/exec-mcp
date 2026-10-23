@@ -28,7 +28,7 @@ function terminal(bufferBytes = 4096, idleMs?: number) {
   return value;
 }
 const marker =
-  /\n\[\d+ bytes omitted from the middle; the output buffer rolled over and later reads cannot recover them\]\n/g;
+  /\n\[\d+ bytes omitted from the middle; (?:the output buffer rolled over|max_output_tokens was exceeded) and later reads cannot recover them\]\n/g;
 function plain(output: string) {
   return stripVTControlCharacters(output).replaceAll("\r\n", "\n");
 }

@@ -1,11 +1,12 @@
 /** Questions and answers share the lifetime and delivery queue of session notes. */
 export interface UserQuestionInput {
   title: string;
-  options: string[];
+  options?: string[];
 }
 
 export interface UserQuestion extends UserQuestionInput {
   id: string;
+  options: string[];
   answer?: {
     option_index: number | null;
     note: string;
@@ -43,5 +44,7 @@ export function formatUserAnswer(
   optionIndex: number | null,
   note: string,
 ): string {
+  if (!question.options?.length)
+    return `Question: ${question.title}\nAnswer: ${note}`;
   return `Question: ${question.title}\nSelected: ${optionIndex === null ? "None of the above" : question.options[optionIndex]}${note ? `\nNote: ${note}` : ""}`;
 }

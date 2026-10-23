@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeModeService } from "../src/code-mode/service.js";
 import { CodeModeSession } from "../src/code-mode/session.js";
 import { CodeModeHostProcess } from "../src/code-mode/host-process.js";
-import { MEMORY_RECLAIMED_TEXT } from "../src/code-mode/session-pool.js";
+import {
+  MEMORY_RECLAIMED_TEXT,
+  RUNTIME_REPLACED_TEXT,
+} from "../src/code-mode/session-pool.js";
 import type { CodeModeServiceOptions } from "../src/code-mode/types.js";
 import * as processMemory from "../src/host/process-memory.js";
 import { MEMORY_DEFAULTS, MiB } from "../src/memory.js";
@@ -63,6 +66,27 @@ const run = (
   sessionScope = "conversation",
 ) => value.exec({ source, sessionScope, tools: [] });
 
+async function expectResetNotice(
+  value: CodeModeService,
+  sessionScope = "conversation",
+) {
+  const effect = vi.fn(async () => null);
+  await expect(
+    value.exec({
+      source: "await tools.effect({});",
+      tools: [
+        {
+          name: "effect",
+          description: "Records an external effect.",
+          call: effect,
+        },
+      ],
+      sessionScope,
+    }),
+  ).rejects.toThrow(RUNTIME_REPLACED_TEXT);
+  expect(effect).not.toHaveBeenCalled();
+}
+
 describe("native host pressure reclamation", () => {
   it(
     "uses the actual owned-host memory sampler and recovers the same scope with a deliberately tiny test threshold",
@@ -90,6 +114,7 @@ describe("native host pressure reclamation", () => {
         old.usable,
         `host should be retired after ${sampler.mock.calls.length} real OS sampling attempts`,
       ).toBe(false);
+      await expectResetNotice(value);
       const result = await run(value, 'text(load("before")===undefined);');
       expect(jsonOutput(result)).toBe(true);
       expect(opened[1]).not.toBe(old);
@@ -145,6 +170,7 @@ describe("native host pressure reclamation", () => {
     expect(
       jsonOutput(await run(value, 'text({value:load("value")});', "a")),
     ).toEqual({ value: "old-a" });
+    await expectResetNotice(value, "b");
     const replacement = await run(
       value,
       'text(load("value")===undefined);',
@@ -201,6 +227,7 @@ describe("native host pressure reclamation", () => {
     await expect(
       value.wait({ cellId: cellId(a), sessionScope: "b" }),
     ).rejects.toThrow("another ChatGPT conversation");
+    await expectResetNotice(value, "a");
     const newA = await run(value, 'text(load("anything")===undefined);', "a");
     expect(jsonOutput(newA)).toBe(true);
     await expect(
@@ -253,6 +280,10 @@ describe("native host pressure reclamation", () => {
     const pressure = value.checkMemory();
     await closing.promise;
     try {
+      await Promise.all([
+        expectResetNotice(value, "stable-meta"),
+        expectResetNotice(value, "stable-meta"),
+      ]);
       const [one, two] = await Promise.all([
         run(
           value,
@@ -301,6 +332,7 @@ describe("native host pressure reclamation", () => {
     const pressure = value.checkMemory();
     await closing.promise;
     try {
+      await expectResetNotice(value);
       await run(value, 'store("new",3);');
       const replacement = opened[1]!;
       release.resolve();
@@ -322,6 +354,7 @@ describe("native host pressure reclamation", () => {
         /^Restarting the Code Mode host \(PID \d+\) because memory was \d+ MiB after all native sessions were reclaimed/,
       ),
     ]);
+    await expectResetNotice(value);
     expect(jsonOutput(await run(value, 'text(load("old")===undefined);'))).toBe(
       true,
     );
@@ -329,7 +362,7 @@ describe("native host pressure reclamation", () => {
     expect(reads.at(-1)).not.toBe(reads[0]);
     expect(opened).toHaveLength(2);
   });
-  it("gates new exec only during a host-wide reset, then releases it into a fresh generation", async () => {
+  it("rejects requests queued across a host-wide reset before allowing a fresh exec", async () => {
     const { value } = service([1200], { memoryCloseTimeoutMs: 30 });
     await run(value, 'store("old",9);');
     const session = opened[0]!;
@@ -352,7 +385,7 @@ describe("native host pressure reclamation", () => {
     const pressure = value.checkMemory();
     await stopping.promise;
     let completed = false;
-    const next = run(value, 'text(load("old")===undefined);').then((result) => {
+    const next = expectResetNotice(value).then((result) => {
       completed = true;
       return result;
     });
@@ -361,7 +394,10 @@ describe("native host pressure reclamation", () => {
       expect(completed).toBe(false);
       releaseStop.resolve();
       await pressure;
-      expect(jsonOutput(await next)).toBe(true);
+      await next;
+      expect(
+        jsonOutput(await run(value, 'text(load("old")===undefined);')),
+      ).toBe(true);
       expect(opened[1]!.usable).toBe(true);
     } finally {
       releaseStop.resolve();
@@ -414,6 +450,7 @@ describe("native host pressure reclamation", () => {
     try {
       await host!.stop();
       await pause(30);
+      await expectResetNotice(value);
       await run(value, 'store("new",2);');
       expect(host!.identity).not.toBe(firstIdentity);
       finish.resolve(1200);
@@ -509,7 +546,12 @@ describe.each([false, true])(
       });
       expect(forgotten.isError).toBe(true);
       expect(texts(forgotten).join("\n")).toContain("memory pressure");
-      const fresh = await call('text(load("old")===undefined);store("new",7);');
+      const notice = await call('store("must-not-run",1);');
+      expect(notice.isError).toBe(true);
+      expect(texts(notice).join("\n")).toContain(RUNTIME_REPLACED_TEXT);
+      const fresh = await call(
+        'text(load("old")===undefined && load("must-not-run")===undefined);store("new",7);',
+      );
       expect(fresh.isError).not.toBe(true);
       expect(jsonOutput(fresh)).toBe(true);
       expect(opened[1]!.id).not.toBe(oldNativeId);

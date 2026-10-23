@@ -33,8 +33,10 @@ text({
 
 后续可从 `load("build-result")` 分段取内容。store 按当前 ChatGPT 对话关联，保存在临时内存中。
 上限保护只保留最终文本首尾，被省略内容不会由 wait 自动补发；在结束前保存需要复用的数据。
-终端每次最多交回 4 MiB，未读内容用同一 session_id 的 write_stdin 续取；每个进程默认缓冲 16 MiB。
-超过缓冲后中间日志会丢弃并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
+终端每次最多消费 4 MiB，再应用 max_output_tokens；exec_command 与 write_stdin 的默认值均为 10,000。
+JS 筛选前需要更多批次内容时可调大该工具参数。预算只保留首尾，省略的内容不能通过 store/load 或后续读取补回。
+已消费批次之外的输出用同一 session_id 的 write_stdin 续取，每个进程默认缓冲 16 MiB。
+缓冲溢出和 token 预算均可能丢弃中间日志，并返回 truncated/omitted_bytes，因此没有搜到错误不能证明全过程无错误。
 确需完整原始日志时由调用方显式重定向文件；服务不替所有工具自动落盘。
 
 ## 逐项处理已完成的结果
@@ -120,6 +122,15 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 
 source 内的下游方法返回 MCP CallToolResult。外层宿主可能重新包装 exec/wait 的输出，
 转发输出的代码按宿主实际返回结构读取，该结构可以与嵌套方法的结果不同。
+
+## 查看本地图片
+
+view_image 返回 {image_url, detail}，image_url 包含本地文件的 data URL。把结果传给 image 即可展示。
+detail 是宿主提示，默认 high，需要时可设 original。
+
+```js
+image(await tools.view_image({ path: "plot.png", detail: "original" }));
+```
 
 ## MCP 资源
 
@@ -270,7 +281,7 @@ text(await tools.send_message_to_user_async({
 ```
 
 消息会固定在本对话的 Web 界面中，直到用户点“知道了”。用户之后写下的内容仍随后续 exec/wait 响应作为补充返回。
-两种沟通工具都需要 Web 已启动且宿主提供对话标识。需要用户作答时，用 request_user_input_async 提问并给出选项。
+两种沟通工具都需要 Web 已启动且宿主提供对话标识。用 request_user_input_async 提问，可省略 options 收集文本回答，也可提供建议选项。
 
 ```js
 text(await tools.request_user_input_async({
@@ -281,6 +292,6 @@ text(await tools.request_user_input_async({
 }));
 ```
 
-await 只等待提交成功，不等待人回答。Web 需要已经启动，宿主需要提供对话标识。
+首个建议选项会预选，答案仍由用户主动提交。await 只等待问题提交成功，不等待人回答。
 用户选择、题目和补充随该对话的正常 exec/wait 响应送达，与主动补充使用同一通道；没有答案轮询工具。
 问题提交后仍可继续不依赖答案的工作；答案不会撤回已经执行的操作。

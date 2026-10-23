@@ -2,14 +2,14 @@
 
 [English](007-command-shell.md) | 简体中文
 
-当前生效，2026-09-22 更新。
+当前生效，2026-10-23 更新。
 
 ## 默认配置与单次参数
 
 config.toml 的 execution.shell 和 execution.login 决定实例默认值，exec_command 的同名参数
 只覆盖本次新建进程。普通调用只需提交命令，切换 Shell 时可直接传参数，减少命令中的解释器嵌套。
-参数形状参考固定 rust-v0.155.1 的
-[Direct exec_command](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/unified_exec.rs)，
+参数形状参考固定 rust-v0.164.0 的
+[Direct exec_command](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/shell_spec.rs)，
 不引入 zsh-fork、App Server 或其他执行模式。
 
 shell 与 login 各自独立覆盖，显式参数优先，省略的字段继承实例配置。

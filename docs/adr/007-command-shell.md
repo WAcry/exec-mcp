@@ -2,14 +2,14 @@
 
 English | [简体中文](007-command-shell.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-10-23.
 
 ## Instance defaults and call parameters
 
 execution.shell and execution.login in config.toml define instance defaults. The same parameters on exec_command override only the newly created process.
 An ordinary call needs just a command. A shell override avoids another interpreter nested inside the command text.
-The parameter shape follows [Direct exec_command](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/unified_exec.rs)
-in pinned rust-v0.155.1, without introducing zsh-fork, App Server, or another execution mode.
+The parameter shape follows [Direct exec_command](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/shell_spec.rs)
+in pinned rust-v0.164.0, without introducing zsh-fork, App Server, or another execution mode.
 
 shell and login override independently. Explicit values win; omitted fields inherit configuration.
 Changing only shell retains login, and explicit login=false overrides a configured true. The default remains login=false.

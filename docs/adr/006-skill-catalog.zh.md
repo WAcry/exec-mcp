@@ -2,7 +2,7 @@
 
 [English](006-skill-catalog.md) | 简体中文
 
-当前生效，2026-09-22 更新。
+当前生效，2026-10-23 更新。
 
 ## 目录与全文
 
@@ -29,7 +29,7 @@ Skill 集合可分层，包括 .codex/skills/.system。发现 SKILL.md 后按一
 ## 配置启停
 
 操作者在 exec-mcp 的 config.toml 中设置 skills.config，未匹配规则的 Skill 默认启用。
-选择器与顺序语义参考 [Codex 0.155.1 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/skills_config.rs)，
+选择器与顺序语义参考 [Codex 0.164.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/config/src/skills_config.rs)，
 配置仍只从本服务读取。每项使用 name 或 path，并提供 enabled 布尔值。
 name 精确匹配所有同名项，path 指定一个 SKILL.md，因而可单独控制同名的不同文件。
 按配置顺序应用，最后匹配者生效。
@@ -38,13 +38,16 @@ name 精确匹配所有同名项，path 指定一个 SKILL.md，因而可单独�
 禁用项不参与展示、描述预算或调用策略处理，目录也不返回其状态。
 模型工具中不增加启停教程，用法见[配置指南](../guides/configuration.zh.md#skills)。
 
-enabled=true 只启用既有发现范围中的文件，allow_implicit_invocation=false 仍然生效。
+enabled=true 只启用既有发现范围中的文件，产品适用范围与 allow_implicit_invocation 仍然生效。
 配置路径可以暂不存在，之后发现时再匹配；配置更新需要重启，没有热更新或 watcher。
 开关只改变目录可见性，Shell 文件权限和模型已经收到的内容保持不变。
 
 ## 显式调用策略
 
-SKILL.md 读取 YAML frontmatter，agents/openai.yaml 读取调用策略，发现结果不包含全文。
+SKILL.md 读取 YAML frontmatter，agents/openai.yaml 读取策略，发现结果不包含全文。
+本服务的产品固定为 ChatGPT。非空 policy.products 列表须含 chatgpt 或 CHATGPT 才进入目录，
+省略或空列表表示不限制产品。合法值沿用 Codex 的 chatgpt/codex/atlas 及其全大写别名。
+产品适用范围与 allow_implicit_invocation 分别处理：符合产品范围的 Skill 仍可要求显式调用。
 allow_implicit_invocation=false 的项目单独列为仅显式调用，只保留名称和路径，
 触发描述不显示，也不参与描述预算。这类 Skill 只有用户明确要求才可使用，
 任务相似、其他文档推荐或用户说不使用都不算授权。
@@ -74,7 +77,7 @@ allow_implicit_invocation=false 的项目单独列为仅显式调用，只保留
 
 ## Codex 复用范围
 
-参考固定快照 7498521d288b9b3b96ffba4eedf089d8d6e06a84 的
+移植来源为固定快照 7498521d288b9b3b96ffba4eedf089d8d6e06a84，并已与 rust-v0.164.0 核对；参考其中的
 [render.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/render.rs) 和
 [aliases.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/aliases.rs)，
 移植必要的预算和路径别名算法及其测试。固定包没有独立 Skill Loader 二进制，

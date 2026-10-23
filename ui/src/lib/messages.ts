@@ -562,8 +562,8 @@ export const messages = {
     zh: "提交未确认：{0}。草稿已保留，重试不会重复提交。",
   },
   "question.selectAgain": {
-    en: "Your previous answer was withdrawn. Choose again.",
-    zh: "上一份答复已撤回，请重新选择。",
+    en: "Your previous answer was withdrawn. Answer again.",
+    zh: "上一份答复已撤回，请重新回答。",
   },
   "question.queued": {
     en: "Queued for the next tool response",
@@ -1015,8 +1015,8 @@ export const messages = {
     zh: "所选选项不存在。",
   },
   "error.answerRequired": {
-    en: "Choose an option or write a note.",
-    zh: "请选择一个选项或填写补充说明。",
+    en: "Write your answer in the text field.",
+    zh: "请在输入框中填写你的回答。",
   },
   "error.answerChanged": {
     en: "This question already has a different answer.",

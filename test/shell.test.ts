@@ -276,6 +276,7 @@ describe("shell command construction and concise contracts", () => {
   it("exposes optional per-command selectors and generates both default descriptions from the same contract", () => {
     expect(Object.keys(COMMAND_SCHEMA.shape)).toEqual([
       "cmd",
+      "max_output_tokens",
       "workdir",
       "shell",
       "login",

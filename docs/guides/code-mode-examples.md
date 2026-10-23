@@ -33,8 +33,10 @@ text({
 
 Later calls can retrieve sections through `load("build-result")`. Store is temporary memory associated with the current ChatGPT conversation.
 The output guard retains only the final text's head and tail; wait does not recover omissions. Save data before the script ends if it will be reused.
-Terminals return up to 4 MiB per read. Use write_stdin with the same session_id to collect more; each process defaults to a 16 MiB buffer.
-Buffer overflow drops middle logs and returns truncated/omitted_bytes. Finding no error in retained output does not establish that the whole run was error-free.
+Each terminal read consumes up to 4 MiB, then applies max_output_tokens, which defaults to 10,000 for both exec_command and write_stdin.
+Increase that tool parameter when JS needs more of the batch before filtering. The budget keeps the head and tail; omitted text cannot be recovered by store/load or a later read.
+Use write_stdin with the same session_id for output beyond the consumed batch. Each process defaults to a 16 MiB buffer.
+Both buffer overflow and token budgeting can drop middle logs and return truncated/omitted_bytes. Finding no error in retained output does not establish that the whole run was error-free.
 Explicitly redirect to a file when complete logs are needed. The service does not automatically persist all tool results.
 
 ## Process results as they settle
@@ -121,6 +123,15 @@ This is the bound snapshot for the current exec. Filtering does not connect to o
 
 Inside source, downstream methods return MCP CallToolResult values. When an outer host wraps exec/wait output,
 code forwarding that output uses the host's actual return shape, which can differ from the nested method's result.
+
+## View a local image
+
+view_image returns {image_url, detail}; image_url contains the local file as a data URL. Pass the result to image to display it.
+detail is a host hint, with high as the default and original available when needed.
+
+```js
+image(await tools.view_image({ path: "plot.png", detail: "original" }));
+```
 
 ## MCP resources
 
@@ -271,7 +282,7 @@ text(await tools.send_message_to_user_async({
 ```
 
 The message stays pinned in this conversation's Web UI until the user dismisses it. Anything the user writes afterwards still arrives as a user note with a later exec/wait response.
-Both communication tools require a running Web server and a host-provided conversation ID. When you need an answer, ask with request_user_input_async and offer choices.
+Both communication tools require a running Web server and a host-provided conversation ID. Ask with request_user_input_async; omit options for a free-text answer or supply suggested choices.
 
 ```js
 text(await tools.request_user_input_async({
@@ -282,6 +293,6 @@ text(await tools.request_user_input_async({
 }));
 ```
 
-await waits only for successful submission, not for a person to answer. Web must be running, and the host must supply a conversation identifier.
+The first suggested option is preselected, and the user explicitly submits their answer. await waits only for successful question submission, not for a person to answer.
 The question, user selection, and note arrive with a normal exec/wait response in the same path as unsolicited notes. There is no answer-polling tool.
 After submission, the agent can continue work that does not depend on the answer. Answers do not undo completed operations.

@@ -36,7 +36,8 @@ those decisions remain active and own the detailed behavior of their topics. Thi
 
 6. **Tool descriptions are a core product interface.** A fresh ChatGPT session should be able to make its first call confidently without guessing.
    Provide complete, accurate contracts with schemas that match execution; leave implementation history and tutorials in their appropriate documents.
-   English model contracts preserve equivalent Codex wording. Evaluate token efficiency against the actual model and text under [ADR-002](002-tool-discovery.md).
+   English model contracts keep the pinned Codex wording and declarations. Adapt only for actual ChatGPT MCP versus Codex CLI differences;
+   evaluate token efficiency against the actual model and text under [ADR-002](002-tool-discovery.md).
 
 7. **Avoid unnecessary negative prompts.** One agent's isolated, recoverable mistake does not justify a permanent prohibition.
    Keep hard calling rules for predictable misuse with serious consequences, such as resolved absolute literals for destructive deletion

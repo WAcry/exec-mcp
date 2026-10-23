@@ -55,7 +55,23 @@ export class AuditMedia {
   /** Returns a copy for the audit; the tool result itself is never modified. */
   extract(value: unknown, owner: string): unknown {
     try {
+      const imageUrl = own(value, "image_url");
+      const image =
+        typeof imageUrl === "string"
+          ? /^data:(image\/[^;,]+);base64,([\s\S]*)$/.exec(imageUrl)
+          : null;
       const content = own(value, "content");
+      if (image)
+        return this.extract(
+          {
+            ...without(value as object, "image_url"),
+            content: [
+              ...(Array.isArray(content) ? content : []),
+              { type: "image", mimeType: image[1], data: image[2] },
+            ],
+          },
+          owner,
+        );
       if (!Array.isArray(content)) return value;
       let changed = false;
       const blocks = content.map((block: unknown) => {

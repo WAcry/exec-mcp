@@ -312,7 +312,6 @@ describe("real paths and invocation policy", () => {
     "policy:\n  allow_implicit_invocation: false\n",
     "policy:\n  allow_implicit_invocation: 'false'\n",
     "policy:\n  allow_implicit_invocation: [broken\n",
-    "policy: null\n",
     "policy:\n  allowImplicitInvocation: false\n",
   ])(
     "never exposes trigger descriptions when invocation policy is false or ambiguous",
@@ -344,6 +343,8 @@ describe("real paths and invocation policy", () => {
     "",
     "interface:\n  display_name: Display\n",
     "policy: {}\n",
+    "policy: null\n",
+    "policy:\n  allow_implicit_invocation: null\n",
     "policy:\n  allow_implicit_invocation: true\n",
   ])(
     "keeps the default when no implicit invocation prohibition exists",
@@ -361,6 +362,50 @@ describe("real paths and invocation policy", () => {
         description: "match this",
       });
       expect(result.warnings).toEqual([]);
+    },
+  );
+  it.each([
+    [[], true, true],
+    [["chatgpt"], true, true],
+    [["CHATGPT", "CODEX", "ATLAS"], true, true],
+    [["codex", "chatgpt"], false, true],
+    [["codex"], true, false],
+    [["atlas"], false, false],
+  ])(
+    "applies ChatGPT product visibility independently of invocation policy (%j)",
+    async (products, implicit, visible) => {
+      const home = await directory();
+      await skill(
+        path.join(home, ".agents", "skills", "scoped"),
+        "scoped",
+        "product trigger",
+        `policy:\n  products: ${JSON.stringify(products)}\n  allow_implicit_invocation: ${implicit}\n`,
+      );
+      const result = await discoverSkills({ homeDir: home });
+      expect(result.warnings).toEqual([]);
+      expect(result.skills).toHaveLength(visible ? 1 : 0);
+      if (visible) {
+        expect(result.skills[0]!.implicit).toBe(implicit);
+        expect(result.skills[0]!.description).toBe(
+          implicit ? "product trigger" : undefined,
+        );
+      }
+    },
+  );
+  it.each(["null", "chatgpt", "[unknown]", "[ChatGPT]"])(
+    "keeps invalid product policies explicit-only (%s)",
+    async (products) => {
+      const home = await directory();
+      await skill(
+        path.join(home, ".codex", "skills", "invalid"),
+        "invalid",
+        "private trigger",
+        `policy:\n  products: ${products}\n`,
+      );
+      const result = await discoverSkills({ homeDir: home });
+      expect(result.skills[0]!.implicit).toBe(false);
+      expect(result.skills[0]!.description).toBeUndefined();
+      expect(result.warnings).toHaveLength(1);
     },
   );
   it.skipIf(process.platform === "win32")(

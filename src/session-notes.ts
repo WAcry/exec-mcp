@@ -82,6 +82,9 @@ const noteBytes = (n: Pick<SessionNote, "text">) =>
   1024 + n.text.length * 2 + Buffer.byteLength(n.text);
 const pendingCount = (c: Conversation) =>
   c.notes.filter((n) => n.status === "pending").length;
+const answerTooLong = (text: string) =>
+  Buffer.byteLength(text) > NOTE_MAX_BYTES ||
+  Buffer.byteLength(JSON.stringify(text)) > NOTE_MAX_BYTES;
 const requestBytes = (request: UserQuestionRequest) => {
   const value = JSON.stringify(request);
   return 1024 + value.length * 2 + Buffer.byteLength(value);
@@ -473,6 +476,26 @@ export class SessionNotes {
         "The host did not send a conversation ID, so this question has no destination. Ask the user in your reply instead.",
       );
     const input = REQUEST_USER_INPUT_SCHEMA.parse(raw);
+    const questions = input.questions.map(({ title, options }) => ({
+      title,
+      options: [...(options ?? [])],
+    }));
+    // Reserve one byte for a free-text answer and check every suggested answer.
+    // Accepted questions must fit the same delivery budget as their answers.
+    if (
+      questions.some(
+        (q) =>
+          answerTooLong(formatUserAnswer(q, null, "x")) ||
+          q.options.some((_, index) =>
+            answerTooLong(formatUserAnswer(q, index, "")),
+          ),
+      )
+    )
+      throw new SessionNoteError(
+        413,
+        "question_too_long",
+        `The question and each suggested answer must fit within ${NOTE_MAX_BYTES} bytes, including JSON encoding. Shorten the question or its options.`,
+      );
     this.observe(id);
     const c = this.require(id);
     const existing =
@@ -483,7 +506,7 @@ export class SessionNotes {
       if (
         JSON.stringify(
           existing.questions.map(({ title, options }) => ({ title, options })),
-        ) !== JSON.stringify(input.questions)
+        ) !== JSON.stringify(questions)
       )
         throw new SessionNoteError(
           409,
@@ -499,9 +522,8 @@ export class SessionNotes {
         : { request_key: input.request_key }),
       createdAt: new Date(this.now()).toISOString(),
       touched: this.now(),
-      questions: input.questions.map((q) => ({
+      questions: questions.map((q) => ({
         ...q,
-        options: [...q.options],
         id: randomHandle("q"),
       })),
     };
@@ -571,14 +593,11 @@ export class SessionNotes {
       throw new SessionNoteError(
         400,
         "answer_required",
-        "None of the above needs your own answer in the note.",
+        "Write your answer in the text field.",
       );
     const text = formatUserAnswer(question, input.option_index, input.note);
     // Every admitted answer can fit even the JSON-based notes channel of a small response.
-    if (
-      Buffer.byteLength(text) > NOTE_MAX_BYTES ||
-      Buffer.byteLength(JSON.stringify(text)) > NOTE_MAX_BYTES
-    )
+    if (answerTooLong(text))
       throw new SessionNoteError(
         413,
         "answer_too_long",

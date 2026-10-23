@@ -184,12 +184,13 @@ export class CodeModeService {
     validateYieldTime(yieldTimeMs, "yield_time_ms", MAX_EXEC_YIELD_TIME_MS);
     const maxOutputTokens = request.maxOutputTokens ?? parsed.maxOutputTokens;
     validateOutputBudget(maxOutputTokens, "max_output_tokens");
+    const scope = sessionScopeKey(request.sessionScope);
+    const generation = this.#pool.captureGeneration(scope);
     // A host-wide emergency reset has a short barrier. It never replays a command
     // already sent to an old session, and it never requires a new metadata scope.
     await this.#memory.restarting;
     this.#requireRunning();
-    const scope = sessionScopeKey(request.sessionScope);
-    const lease = await this.#pool.acquire(scope);
+    const lease = await this.#pool.acquire(scope, generation);
     const session = lease.session;
     const startedAt = performance.now();
     try {

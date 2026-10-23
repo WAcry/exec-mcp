@@ -429,6 +429,37 @@ describe.each([false, true])(
       ).toBe(0);
     });
 
+    it("accepts a free-text question through exec and delivers its Web answer once", async () => {
+      const f = await fixture(legacy);
+      const accepted = await f.call("request_user_input_async", {
+        questions: [{ title: "What should change?" }],
+      });
+      expect(accepted.isError).not.toBe(true);
+      const questions = (await (
+        await f.api(`/api/sessions/${hashA}/questions`)
+      ).json()) as UserQuestionsPage;
+      expect(questions.items[0]!.options).toEqual([]);
+      const answered = await f.api(
+        `/api/sessions/${hashA}/questions/${questions.items[0]!.id}/answer`,
+        "POST",
+        {
+          id: "free-text",
+          option_index: null,
+          note: "Keep local skills.",
+        },
+      );
+      expect(answered.status).toBe(200);
+      expect(noteBlocks(await f.call("exec", { source: "text(1)" }))).toEqual([
+        {
+          type: "text",
+          text: "用户额外补充：\nQuestion: What should change?\nAnswer: Keep local skills.",
+        },
+      ]);
+      expect(noteBlocks(await f.call("exec", { source: "text(2)" }))).toEqual(
+        [],
+      );
+    });
+
     it("requires actual Web availability and a scope, without creating or polling a global question box", async () => {
       const f = await fixture(legacy);
       const args = { questions: [{ title: "Choose?", options: ["A", "B"] }] };

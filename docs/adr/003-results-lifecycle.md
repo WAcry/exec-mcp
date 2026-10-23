@@ -2,7 +2,7 @@
 
 English | [简体中文](003-results-lifecycle.zh.md)
 
-Active, updated 2026-10-09.
+Active, updated 2026-10-23.
 
 ## Deduplication and presentation
 
@@ -25,7 +25,7 @@ Later waits do not recover omitted text. Truncation may break JSON syntax, and t
 
 exec.max_output_tokens and wait.max_tokens narrow their respective response text budgets. Outer arguments override first-line pragmas;
 wait does not inherit exec's explicit budget. Token counting is approximate. Status, handles, and media are preserved within the relevant final payload limits.
-Nested tools retain original results but remain subject to separate transport limits; oversized values can fail before reaching JS.
+The outer response budget leaves nested values intact for JS processing. Each tool still applies its own output and transport limits; oversized values can fail before reaching JS.
 Oversized inputs fail before an operation, while oversized results may fail afterward and must not trigger automatic replay.
 
 User notes share the normal result's text channel and use only spare capacity. Complete messages that do not fit remain queued;
@@ -38,6 +38,9 @@ Encoded payload size and process memory are checked separately. SDK buffering, c
 Each terminal retains its unread head and a rolling tail. Overflow discards the middle and reports its position and byte count.
 Byte accounting also bounds very long individual lines. Already-read prefixes are not returned again.
 Buffers are bounded at receipt, independently for each session, so a noisy terminal cannot pause another terminal.
+exec_command and write_stdin apply max_output_tokens to each collected batch, defaulting to 10,000, with an estimate of four UTF-8 bytes per token.
+Each read consumes at most 4 MiB. The budget retains the batch's head and tail; omitted middle text is consumed and cannot return on a later read.
+Unread bytes beyond the batch remain available through session_id. This keeps the caller's chosen output size separate from the buffer's memory limit.
 Callers explicitly redirect to files when they need complete logs or data. Users manage generated file sizes and disk quotas.
 
 Exited terminals that remain unread can expire. Running processes remain retained.
@@ -57,14 +60,17 @@ Handles are valid only during the current run; ingress authentication controls a
 Normal shutdown cleans up owned processes. Files and external operations may survive abnormal exits.
 
 write_stdin follows the pinned Codex collection window. Nonempty input defaults to a short wait; empty input allows a longer collection.
-The [upstream collector](https://github.com/openai/codex/blob/ebc05da3bdb76f25861e7cb418bd06d28cadc609/codex-rs/core/src/unified_exec/process_manager.rs)
+The [upstream collector](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/unified_exec/process_manager.rs)
 collects logs until the deadline or process exit. Its window starts after acquiring the terminal and completing writes or resizing.
 Queueing and stdin backpressure do not consume that window, and new logs do not reset the deadline. Explicit 0 retains immediate reads.
 Longer waits do not increase buffer or output capacity.
+After the main shell exits, a short bounded drain collects remaining output and reports its exit code once the retained output is consumed.
+Descendants may keep inherited pipes open; they do not keep the terminal observation alive, and this drain does not send them a termination signal.
 
 Nested tools may outlast an outer wait window. exec returns cell_id first, and wait retrieves subsequent output.
-Outer wait defaults to and is capped at 110 seconds, based on an engineering assumption that the target connector timeout is at least 120 seconds,
-leaving transport margin. Completion, an explicit yield, or termination returns sooner; new user input can also end an observation early under [ADR-010](010-session-notes.md).
+Outer wait deliberately defaults to and is capped at 110 seconds. Long observations reduce repeated ChatGPT round trips and token use,
+while leaving transport margin under the engineering assumption that the target connector timeout is at least 120 seconds.
+Completion, an explicit yield, or termination returns sooner; new user input can also end an observation early under [ADR-010](010-session-notes.md).
 There is no standalone sleep tool, background model polling, or persistent task scheduler.
 
 Cancelling one wait stops observation only. Terminating a cell requests cancellation of unfinished nested calls.
@@ -97,9 +103,11 @@ Without an identifier, ordinary execution still works and store/load fails inste
 
 ## Memory reclamation and recovery
 
-Host conversation identity and native-session generations are separate. Reclamation removes the old binding before closing the old instance asynchronously,
-so the conversation can immediately obtain a new instance. Old close callbacks, late results, and leases affect their own generation only;
-cleanup cannot use the conversation name to remove its replacement. Old cells are neither moved nor replayed into the new session.
+Host conversation identity and native-session generations are separate. After runtime failure or memory reclamation, recovery prepares a new session
+and reports that the previous state was lost before executing more source. The recovering exec and calls already queued for the old generation do not run their scripts;
+a fresh exec can use the new session. This lets the agent inspect actual state before deciding how to continue, since prior side effects may remain.
+Old close callbacks, late results, and leases affect their own generation only. Old cells are neither moved nor replayed.
+Normal idle expiry creates a fresh session on the next exec and returns the existing new-session/store-empty notice. Failure markers follow the same idle retention.
 
 Only the owned Code Mode host's approximate RSS/working set is sampled. Users manage browsers, compilers, and other child process trees they start.
 Sampling failures produce diagnostics, and stale samples cannot judge a new host. Normally, idle sessions remain after all cells finish.
@@ -121,5 +129,6 @@ historical nested-call failures do not mark them permanently unhealthy.
 
 Only after the native host reports SyntaxError does the service parse the received source for a fingerprint and a locatable excerpt.
 This auxiliary parse provides diagnostics; it neither gates V8 syntax nor executes altered source.
+view_image reads a local image and returns {image_url, detail}; image_url is a data URL, and detail is a host hint. Scripts display it through image(await tools.view_image(...)).
 generatedImage outputs an existing data URL and hint. Image generation, URL download, and saving files require the relevant separate capability.
 Media follows the pinned host's rules without an additional audio or image filter for text budgets.

@@ -4,6 +4,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import type { CodeModeToolDefinition } from "../code-mode/types.js";
 import type { DownstreamTool } from "../types.js";
+import { schemaType, toolDeclaration } from "../tool-descriptions.js";
 import {
   DownstreamMcpRegistry,
   type DownstreamStartupEvent,
@@ -61,14 +62,13 @@ export class ToolDiscovery {
       }
       const description = [
         `MCP server: ${tool.serverId}. ${tool.namespaceInstructions ? `Server instructions: ${tool.namespaceInstructions}\n` : ""}${tool.tool.description ?? ""}`,
-        `Call: await tools.${tool.codeName}(args)\nInput JSON Schema:`,
-        JSON.stringify(schema),
-        `Returns CallToolResult: {content, structuredContent?, isError?}.`,
-        ...(tool.tool.outputSchema
-          ? [
-              `structuredContent JSON Schema: ${JSON.stringify(tool.tool.outputSchema)}`,
-            ]
-          : []),
+        toolDeclaration(
+          tool.codeName,
+          schemaType(schema),
+          tool.tool.outputSchema
+            ? `CallToolResult<${schemaType(tool.tool.outputSchema)}>`
+            : "CallToolResult",
+        ),
         ...(tool.tool.annotations
           ? [`Tool annotations: ${JSON.stringify(tool.tool.annotations)}`]
           : []),

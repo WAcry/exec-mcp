@@ -2,13 +2,13 @@
 
 [English](010-session-notes.md) | 简体中文
 
-当前生效，2026-10-09 更新。
+当前生效，2026-10-23 更新。
 
 ## 对话归属与返回方式
 
 操作者可以在对话底部的输入框主动发送文字，也可以回答 Agent 提交的问题。
 两种内容共用 User Note 队列，随同一对话下一次工具响应附带。
-模型可在 exec 内用 tools.send_message_to_user_async 告知操作者，用 tools.request_user_input_async 带选项提问，并用 tools.set_conversation_title 为对话命名一次；没有答案查询或代发用户消息的工具。
+模型可在 exec 内用 tools.send_message_to_user_async 告知操作者，用 tools.request_user_input_async 提问，并用 tools.set_conversation_title 为对话命名一次；没有答案查询或代发用户消息的工具。
 服务不同步等待用户，也不增加确认参数或问答数据库。
 
 输入框固定在每个对话底部，外形与聊天输入框一致，首次使用者无需另找入口。
@@ -32,9 +32,9 @@ exec/wait 的成功、运行中和普通执行错误响应都可附带补充。
 
 ## Agent 发来的消息
 
-[Codex 消息工具](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) 接收单个 message，立即返回 accepted。
+[Codex 消息工具](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) 接收单个 message，立即返回 accepted。
 我们沿用它的接口和大部分描述。消息只用于告知：操作者必须马上知道的阻塞或发现，或者简短回答操作者在工作途中发来的问题。
-提问改用 request_user_input_async，它提供选项并返回答案。消息发送到当前对话的 Web 界面。
+提问使用 request_user_input_async，支持文本或选项问题并返回答案。消息发送到当前对话的 Web 界面。
 
 描述删去了上游的三处内容。Codex 承诺回复会作为新的用户消息到达，而 exec-mcp 无法开启 ChatGPT 的新轮次，
 这个承诺曾让 ChatGPT 等待永远不会来的回复。Codex 的参数说明提到问题，描述还建议加粗问题；
@@ -56,7 +56,7 @@ Agent 消息与用户输入分别存储，不会作为用户指令返回给模�
 ## 对话标题
 
 ChatGPT 不在 `_meta` 中提供对话标题，服务也看不到用户消息。固定版本的 Codex 在 TUI 收到首条用户消息后，另起一次隐藏的模型调用为 thread 生成标题
-（[thread_title.rs](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/tui/src/app/thread_title.rs)）；exec-mcp 没有这份输入，
+（[thread_title.rs](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/tui/src/app/thread_title.rs)）；exec-mcp 没有这份输入，
 因此由模型在第一次 exec 里顺手调用 tools.set_conversation_title 设置标题。描述只保留 ChatGPT 用好它所需的信息：
 用途、在第一次 exec 中调用一次、用 3 到 8 个词概括用户的任务、使用用户的语言，以及只保留第一个标题。
 建议按词计长，而不是 Codex 的最多 36 字符、尽量少于五个词，因为 Codex 约束的是结构化输出，这里的模型手写字符串，数不准字符。
@@ -74,13 +74,14 @@ exec/wait 的结果都是文本；结构化信封仍只包含原结果和补充�
 
 ## 异步提问与作答
 
-接口最初参考 Codex rust-v0.155.1 的
-[request_user_input_async](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
-沿用 questions/title/options 字符串数组与 accepted 的形状。await 只等提交完成，Agent 可继续其他工作。
+接口参考 Codex rust-v0.164.0 的
+[request_user_input_async](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
+沿用 questions/title、可选的 options 字符串数组与 accepted 的形状。await 只等提交完成，Agent 可继续其他工作。
 Codex 能注入新的用户消息，exec-mcp 则通过后续普通工具响应传回答案。
 
-每题提供多个选项，首项标记推荐，初始不选中，也不自动提交。
-界面自动增加自定义答案选项，选择任一项都可填写补充；自定义答案须填写文本。
+省略 options 时为纯文本问题。有选项时首项标记推荐并预选，只有用户主动提交才发送答案。
+界面自动增加自定义答案选项，选择任一项都可填写补充；文本答案须填写内容。
+题数、选项数、题目及选项文本由共享字节容量和答复可交付检查约束，不另设固定数量或单字段长度上限。
 问题显示在所属对话的时间线中，位于提问的调用下方；回答后同一位置显示答复及其送达状态。
 待回答的问题同时固定在输入框上方的问题面板中，先问的排在前面；数字键可选择选项，阅读对话时可收起面板。
 有待答问题的对话在列表中置顶，浏览器标签标题和 favicon 也会提示。
@@ -94,7 +95,8 @@ Codex 能注入新的用户消息，exec-mcp 则通过后续普通工具响应�
 未选选项、请求 ID 和审计时间不再发送给模型。回答按提交时间与主动补充一起排队，未回答的问题不占队列。
 
 提问需要 Web 已监听且宿主提供对话标识，缺失时明确失败。问题和回答使用有界实例内存，
-无需修改原生 host 或自动续跑任务。提交前检查题目、选择与补充的编码总量，确保一条回答能够单独放进补充消息。
+无需修改原生 host 或自动续跑任务。保存问题前确认各建议答案能放入编码后 30,000 字节的补充边界，文本回答也须留有输入空间。
+提交答案前检查题目、选择与补充的编码总量，确保完整回答能够单独放进补充消息。
 
 ## 浏览器通知
 

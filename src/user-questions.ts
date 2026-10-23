@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { NOTE_MAX_BYTES } from "./session-notes-types.js";
 
-/** Mirror Codex's questions/title/options shape, with options required for this Web workflow. */
+/** Mirror Codex's questions/title/options shape, with conversation-scoped retry identity. */
 export const REQUEST_USER_INPUT_SCHEMA = z
   .object({
     questions: z
@@ -12,28 +12,22 @@ export const REQUEST_USER_INPUT_SCHEMA = z
               .string()
               .trim()
               .min(1)
-              .max(2000)
               .describe(
                 "The complete question shown to the user, including any context needed to answer it.",
               ),
             options: z
-              .array(z.string().trim().min(1).max(500))
-              .min(2)
-              .max(6)
-              .refine(
-                (options) => new Set(options).size === options.length,
-                "The options of one question must all be different.",
-              )
+              .array(z.string().trim().min(1))
+              .min(1)
+              .optional()
               .describe(
-                "Distinct suggested answers in display order. The first is marked recommended but not preselected. The UI adds 'None of the above' and a note field for every choice.",
+                "Suggested answers, in display order. Put the recommended answer first; the first option is preselected by default. The user can select one option or enter a free-text answer. Do not include an Other option or a free-text placeholder; the UI provides free-text input automatically. Omit options for a free-text-only question.",
               ),
           })
           .strict(),
       )
       .min(1)
-      .max(3)
       .describe(
-        "One to three self-contained questions to present together, in display order.",
+        "One or more self-contained questions to present together, in display order.",
       ),
     request_key: z
       .string()

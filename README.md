@@ -81,7 +81,7 @@ Queued messages can be withdrawn, and the timeline shows which call delivered ea
 
 Conversations with a pending question move to the top of the sidebar, and the browser tab shows the count.
 Open the conversation and answer in the panel above the message box: pick an option (number keys work), add a note if you like,
-or select None of the above and write your own answer. Recommended options are never selected or submitted automatically.
+or select None of the above and write your own answer. The first suggested option is preselected; submit when your answer is ready. Questions without options use a text field.
 Answers and unsolicited notes use the same delivery path.
 
 ### Messages from ChatGPT

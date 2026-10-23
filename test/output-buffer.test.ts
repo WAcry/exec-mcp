@@ -20,6 +20,27 @@ function drain(buffer: RollingOutputBuffer, size = 4096) {
 }
 
 describe("bounded oldest-prefix/newest-tail output", () => {
+  it("accounts for token clipping and buffer rollover without splitting UTF-8 or replaying discarded bytes", () => {
+    const text = "START\n" + "汉😀".repeat(300) + "\nEND";
+    for (const capacity of [64, 1024, 8192]) {
+      for (const tokens of [0, 1, 20, 200]) {
+        const buffer = new RollingOutputBuffer(capacity);
+        buffer.append(text);
+        const result = buffer.read(8192, tokens);
+        const kept = result.output.replace(
+          /\n\[\d+ bytes omitted from the middle; [^\n]*\]\n/g,
+          "",
+        );
+        expect(kept).not.toContain("\ufffd");
+        expect(Buffer.byteLength(kept)).toBeLessThanOrEqual(tokens * 4);
+        expect(Buffer.byteLength(kept) + (result.omitted_bytes ?? 0)).toBe(
+          Buffer.byteLength(text),
+        );
+        expect(buffer.pending).toBe(false);
+        expect(buffer.read(8192, tokens).output).toBe("");
+      }
+    }
+  });
   it("preserves ordinary output completely and releases it after incremental reads", () => {
     const buffer = new RollingOutputBuffer(4096);
     const content = "first\n汉😀test\nlast\n";

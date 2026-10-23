@@ -136,10 +136,11 @@ describe("conservative model-bound text, separate from tool data", () => {
     );
     const result = await observeTerminal(
       await terminal.execCommand(
-        { cmd: command, yield_time_ms: 0 },
+        { cmd: command, yield_time_ms: 0, max_output_tokens: 1_000_000 },
         process.cwd(),
       ),
-      (input) => terminal.writeStdin(input),
+      (input) =>
+        terminal.writeStdin({ ...input, max_output_tokens: 1_000_000 }),
     );
     expect(result.output.length).toBe(3 * 1024 * 1024 + "MIDDLE_ERROR".length);
     expect(result.output).toContain("MIDDLE_ERROR");
@@ -186,7 +187,7 @@ describe("large command content is available before final model output filtering
       const result = await connection.client.callTool({
         name: "exec",
         arguments: {
-          source: `const r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:30000});text({found:r.output.includes("ERROR_MIDDLE_42"),length:r.output.length,truncated:r.truncated??false,exit:r.exit_code});`,
+          source: `const r=await tools.exec_command({cmd:${JSON.stringify(cmd)},yield_time_ms:30000,max_output_tokens:1000000});text({found:r.output.includes("ERROR_MIDDLE_42"),length:r.output.length,truncated:r.truncated??false,exit:r.exit_code});`,
         },
       });
       expect(result.isError).not.toBe(true);

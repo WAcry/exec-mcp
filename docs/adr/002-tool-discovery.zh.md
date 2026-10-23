@@ -2,7 +2,7 @@
 
 [English](002-tool-discovery.md) | 简体中文
 
-当前生效，2026-10-09 更新。
+当前生效，2026-10-23 更新。
 
 ## 工具入口与契约来源
 
@@ -11,7 +11,7 @@ ALL_TOOLS 条目与 tools.* 绑定也由它生成。这样新 Agent 无需额外
 隐藏的直接入口和手写契约副本均不保留。
 
 ALL_TOOLS 沿用 Codex 的 `{name, description}[]` 数组，包含本次已绑定的全部本机及下游方法。
-description 保留完整输入和返回约束，包括必填项、枚举与引用。
+description 使用从可执行 schema 生成的 Codex TypeScript 声明，完整 schema 继续负责参数校验。
 数组留在运行时，只有显式输出才进入模型上下文，因此本机条目也可完整保留。
 按名称或描述使用标准 JS 筛选，已知名称和参数时可在第一次 exec 直接调用。
 
@@ -85,7 +85,7 @@ Agent 第一次阅读应能确定参数、默认值和返回类型，并知道�
 工具描述与示例文档说明嵌套语言的语法风险；示例展示可行写法，具体构造方式由调用者选择。
 Skill 的 explicit-only 来自用户元数据；压缩后的目录自行说明路径别名和省略方式。
 
-完整语法和 schema 从代码生成。用户操作示例见 [Code Mode 示例](../guides/code-mode-examples.zh.md)，
+TypeScript 声明从执行所用的同一 schema 生成。用户操作示例见 [Code Mode 示例](../guides/code-mode-examples.zh.md)，
 配置方法见[配置指南](../guides/configuration.zh.md)，工具描述无需重复这些教程。
 描述中的数字（如 yield 窗口和字节上限）取自代码实际执行的常量，修改上限时描述随之更新。
 
@@ -95,18 +95,18 @@ Skill 的 explicit-only 来自用户元数据；压缩后的目录自行说明�
 
 ## Codex 参考与适配
 
-运行时和补丁语法固定为 rust-v0.162.0。较早的提示词参考包括 rust-v0.155.1，以及已核对的
-[6149914 Code Mode prompt](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/code-mode-protocol/src/description.rs)、
-[Shell 定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/shell_spec.rs)、
-[资源定义](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)，
-并查阅同快照的系统提示、图片和异步问题定义。运行组件另行固定，查阅源码不会触发升级。
-Codex 0.162.0 在 Code Mode 中还提供可选的排名搜索路径。本实例继续使用 ALL_TOOLS，升级 host 不会注册上游应用层工具。
+运行时、补丁引擎、提示和声明统一参考 rust-v0.164.0（`6aaac694803004a63c6f393d153c96d22521a6b9`）。
+参考源码包括 [Code Mode 提示](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/description.rs)、
+[TypeScript schema 渲染器](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/json_schema_types.rs)、
+[Shell 定义](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/shell_spec.rs)和
+[资源定义](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)。
+图片和异步问题契约也使用同一快照。本机与下游声明使用小型移植渲染器，
+apply_patch 的字符串参数交给固定补丁引擎；本实例继续通过 ALL_TOOLS 发现工具。
 
 | 保留的差异 | 原因 |
 | --- | --- |
 | MCP source/workdir/files 对象 | MCP 没有 Codex 的隐式 turn cwd；宿主附件在外层绑定，JS 使用索引。 |
-| 补丁字符串及描述内的 Lark grammar | MCP inputSchema 没有 freeform grammar 槽，语法放在描述中供读取，固定引擎负责解析。 |
-| 完整 JSON Schema 和字符串句柄 | 保留真实校验与当前执行器的字段类型。 |
+| 字符串句柄 | 保留本地执行器的真实字段类型。 |
 | 外层预算和 110 秒 wait | 适配目标连接器，内层保留原值供 JS 处理，见 ADR-003。 |
 | Shell 单次覆盖、EOF/resize/terminate 和零等待 | 保留现有进程操作；配置默认值允许单次参数覆盖。 |
 | 原生 MCP 图片/文件块、Skills 和 Web 问答 | 适配 ChatGPT 的文件及消息交付方式，提供独立的 Skill 发现；未接入 notify 注入。 |
@@ -114,4 +114,5 @@ Codex 0.162.0 在 Code Mode 中还提供可选的排名搜索路径。本实例�
 | 由模型通过 set_conversation_title 为对话命名 | Codex 根据用户消息另起隐藏的模型调用生成标题，而 exec-mcp 收不到用户消息，见 [ADR-010](010-session-notes.zh.md#对话标题)。 |
 | 资源直接 URI 读取与聚合 errors | 支持模板和链接，并保留部分失败的信息。 |
 
-含义相同处沿用上游原文，环境差异按实际行为说明。无需为措辞一致而接入完整 App Server、审批流程或另一套执行器。
+措辞与声明形式沿用上游，仅在 ChatGPT MCP 与 Codex CLI 确有差异时修改，并在这里记录原因。
+集成边界仍是 [ADR-001](001-exec-runtime.zh.md) 定义的执行层。

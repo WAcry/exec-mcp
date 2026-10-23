@@ -160,26 +160,73 @@ export class RollingOutputBuffer {
     return count;
   }
 
-  read(maximum: number): {
+  read(
+    maximum: number,
+    maxOutputTokens?: number,
+  ): {
     output: string;
     truncated?: true;
     omitted_bytes?: number;
+    original_token_count?: number;
   } {
     if (!Number.isSafeInteger(maximum) || maximum < 4)
       throw new Error("The terminal read budget must be at least 4 bytes.");
     const head = this.#head.read(maximum);
-    let output = head.toString("utf8");
+    let tail: Buffer = EMPTY;
     let omitted = 0;
     if (!this.#head.bytes && (maximum > head.length || !this.#tail.bytes)) {
       omitted = this.#omitted;
       this.#omitted = 0;
-      if (omitted)
-        output += `\n[${omitted} bytes omitted from the middle; the output buffer rolled over and later reads cannot recover them]\n`;
-      output += this.#tail.read(maximum - head.length).toString("utf8");
+      tail = this.#tail.read(maximum - head.length);
     }
     if (!this.pending) this.#prefixClosed = false;
+    const marker = (bytes: number, reason: string) =>
+      `\n[${bytes} bytes omitted from the middle; ${reason} and later reads cannot recover them]\n`;
+    const rollover = omitted
+      ? marker(omitted, "the output buffer rolled over")
+      : "";
+    const data = Buffer.concat([head, tail]);
+    const budget =
+      maxOutputTokens === undefined
+        ? data.length
+        : Math.min(Number.MAX_SAFE_INTEGER, maxOutputTokens * 4);
+    if (data.length > budget) {
+      // Codex estimates four UTF-8 bytes per token and preserves the head/tail.
+      // Consume the original batch once; a later poll cannot replay its middle.
+      let headEnd = Math.ceil(budget / 2);
+      let tailStart = data.length - Math.floor(budget / 2);
+      while (headEnd && continuation(data[headEnd]!)) headEnd--;
+      while (tailStart < data.length && continuation(data[tailStart]!))
+        tailStart++;
+      const dropped = tailStart - headEnd;
+      const originalTokenCount = Math.ceil((data.length + omitted) / 4);
+      const gapInHead = omitted > 0 && head.length <= headEnd;
+      const gapInTail = omitted > 0 && !gapInHead && head.length >= tailStart;
+      const prefix = gapInHead
+        ? data.toString("utf8", 0, head.length) +
+          rollover +
+          data.toString("utf8", head.length, headEnd)
+        : data.toString("utf8", 0, headEnd);
+      const suffix = gapInTail
+        ? data.toString("utf8", tailStart, head.length) +
+          rollover +
+          data.toString("utf8", head.length)
+        : data.toString("utf8", tailStart);
+      return {
+        output:
+          prefix +
+          marker(
+            dropped + (gapInHead || gapInTail ? 0 : omitted),
+            "max_output_tokens was exceeded",
+          ) +
+          suffix,
+        truncated: true,
+        omitted_bytes: omitted + dropped,
+        original_token_count: originalTokenCount,
+      };
+    }
     return {
-      output,
+      output: head.toString("utf8") + rollover + tail.toString("utf8"),
       ...(omitted ? { truncated: true as const, omitted_bytes: omitted } : {}),
     };
   }

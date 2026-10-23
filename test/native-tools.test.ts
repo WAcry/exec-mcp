@@ -195,7 +195,7 @@ describe.each([false, true])(
         'process.stdout.write("HEAD_MARKER\\n"+"x".repeat(100000)+"\\nTAIL_MARKER");',
       );
       const result = await t.exec(
-        `const r=await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:30000});store('log',r);text({length:r.output.length,exit:r.exit_code,tail:r.output.slice(-11)});`,
+        `const r=await tools.exec_command({cmd:${JSON.stringify(command)},yield_time_ms:30000,max_output_tokens:30000});store('log',r);text({length:r.output.length,exit:r.exit_code,tail:r.output.slice(-11)});`,
         { yield_time_ms: 30000 },
       );
       expect(jsonOutput(result)).toEqual({
@@ -277,7 +277,7 @@ describe.each([false, true])(
       );
       expect(hidden.content.some((item) => item.type === "image")).toBe(false);
       const shown = await t.exec(
-        "image((await tools.view_image({path:'pixel.png',detail:'original'})).content[0]);",
+        "image(await tools.view_image({path:'pixel.png',detail:'original'}));",
       );
       expect(shown.isError).not.toBe(true);
       expect(shown.content.find((item) => item.type === "image")).toMatchObject(

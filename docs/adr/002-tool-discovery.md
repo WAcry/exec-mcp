@@ -2,7 +2,7 @@
 
 English | [简体中文](002-tool-discovery.zh.md)
 
-Active, updated 2026-10-09.
+Active, updated 2026-10-23.
 
 ## Entry points and contract sources
 
@@ -11,7 +11,7 @@ share executable definitions that also generate ALL_TOOLS entries and tools.* bi
 There are no hidden direct entry points or handwritten contract copies.
 
 ALL_TOOLS follows Codex's `{name, description}[]` array and contains every local and downstream method bound for that exec.
-Descriptions retain complete input and output constraints, including required fields, enums, and references.
+Descriptions use Codex TypeScript declarations generated from the executable schemas. The full schemas remain the source of argument validation.
 The array remains in the runtime until explicitly printed, so keeping full local entries does not automatically add them to model context.
 Standard JS filters names and descriptions. A known name and argument shape can be called on the first exec.
 
@@ -84,7 +84,7 @@ Describe capabilities, environment, and calling rules without personality, progr
 Tool descriptions and examples explain nested-language syntax risks. Examples show workable approaches; callers choose how to build strings.
 Skill explicit-only behavior comes from user metadata. A compressed catalog explains its own aliases and omissions.
 
-Generate complete grammar and schemas from code. [Code Mode examples](../guides/code-mode-examples.md) and the [configuration guide](../guides/configuration.md)
+Generate TypeScript declarations from the same schemas used by execution. [Code Mode examples](../guides/code-mode-examples.md) and the [configuration guide](../guides/configuration.md)
 provide operational detail; tool descriptions need not repeat those tutorials.
 Numbers in descriptions, such as yield windows and byte limits, come from the constants that the code enforces, so a limit change also changes its description.
 
@@ -94,18 +94,18 @@ A fresh model can correct its next call from this error alone.
 
 ## Codex references and adaptation
 
-Runtime and grammar follow pinned rust-v0.162.0. Earlier prompt references include rust-v0.155.1 and the reviewed
-[6149914 Code Mode prompt](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/code-mode-protocol/src/description.rs),
-[shell definitions](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/shell_spec.rs), and
-[resource definitions](https://github.com/openai/codex/blob/6149914a0e59363b6777080b3e953b05d592dbac/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs).
-System prompts, image tools, and asynchronous question definitions were checked at the same snapshot. Reviewing source does not upgrade the separately pinned runtime.
-Codex 0.162.0 also has an optional ranked-search path in Code Mode. This instance retains ALL_TOOLS; upgrading the host does not register upstream application tools.
+Runtime, patch engine, prompts, and declarations follow rust-v0.164.0 (`6aaac694803004a63c6f393d153c96d22521a6b9`).
+The references are the [Code Mode prompt](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/description.rs),
+[TypeScript schema renderer](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/json_schema_types.rs),
+[shell definitions](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/shell_spec.rs), and
+[resource definitions](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs).
+Image and asynchronous question contracts use the same snapshot. Local and downstream declarations use the small ported renderer;
+the pinned patch engine receives apply_patch's string argument. ALL_TOOLS remains this instance's discovery path.
 
 | Retained difference | Reason |
 | --- | --- |
 | MCP source/workdir/files object | MCP lacks Codex's implicit turn directory. The host binds attachments outside JS, which selects them by index. |
-| Patch string with Lark grammar in the description | MCP inputSchema has no freeform-grammar slot. The description supplies the grammar, and the pinned engine parses the string. |
-| Full JSON Schema and string handles | Preserves actual validation and the executor's field types. |
+| String handles | Preserves the local executor's actual field types. |
 | Outer budgets and a 110-second wait | Fits the target connector while retaining nested values for JS processing under ADR-003. |
 | Shell overrides, EOF/resize/terminate, and zero wait | Preserves supported process operations and per-call overrides of configured defaults. |
 | Native MCP image/file blocks, Skills, and Web questions | Fits ChatGPT file and message delivery and provides independent Skill discovery; notify injection is not connected. |
@@ -113,5 +113,5 @@ Codex 0.162.0 also has an optional ranked-search path in Code Mode. This instanc
 | The model titles conversations with set_conversation_title | Codex titles threads with a hidden model call on the user's message, which exec-mcp never receives; see [ADR-010](010-session-notes.md#conversation-titles). |
 | Direct resource URI reads and aggregate errors | Supports templates and links while retaining partial-failure information. |
 
-Use upstream wording where the meaning matches and explain actual environment differences.
-Wording alignment alone does not justify adding the full App Server, approval flows, or another executor.
+Keep upstream wording and declaration forms. Change them only where ChatGPT MCP and Codex CLI actually differ, with the reason recorded here.
+The integration boundary remains the execution layer described in [ADR-001](001-exec-runtime.md).

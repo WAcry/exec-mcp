@@ -444,16 +444,19 @@ it("continues draining an ended process with the same handle when one response c
         'process.stdout.write("x".repeat(5*1024*1024),()=>process.exit(0));',
       ),
       yield_time_ms: 0,
+      max_output_tokens: 2_000_000,
     },
     tmpdir(),
   );
   const next = await value.writeStdin({
     session_id: first.session_id!,
+    max_output_tokens: 2_000_000,
   });
   expect(next.session_id).toBe(first.session_id);
   expect(next.truncated).toBeUndefined();
   const last = await value.writeStdin({
     session_id: next.session_id!,
+    max_output_tokens: 2_000_000,
   });
   expect(last.exit_code).toBe(0);
   expect(last.session_id).toBeUndefined();

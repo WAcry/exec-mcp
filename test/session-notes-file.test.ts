@@ -93,6 +93,45 @@ describe("saved session notes", () => {
     expect(first.logs.concat(second.logs, third.logs)).toEqual([]);
   });
 
+  it("keeps free-text and existing choice questions together across restarts", async () => {
+    const now = Date.UTC(2026, 8, 20);
+    const first = open(() => now);
+    first.store.ask("a", {
+      questions: [{ title: "Which branch?", options: ["main", "dev"] }],
+    });
+    const input = {
+      questions: [{ title: "What needs to change?" }],
+      request_key: "change",
+    };
+    const asked = first.store.ask("a", input);
+    await first.store.close();
+
+    const second = open(() => now + 1000);
+    expect(second.store.ask("a", input)).toEqual(asked);
+    const questions = second.store.questions("a").items;
+    expect(questions.map((q) => q.options)).toEqual([[], ["main", "dev"]]);
+    const q = questions[0]!;
+    second.store.answer("a", q.id, {
+      id: "text",
+      option_index: null,
+      note: "Keep the current behavior.",
+    });
+    await second.store.close();
+
+    const third = open(() => now + 2000);
+    expect(
+      third.store.questions("a").items.find((item) => item.id === q.id),
+    ).toMatchObject({
+      options: [],
+      pending: false,
+      answer: { option_index: null, note: "Keep the current behavior." },
+    });
+    expect(
+      JSON.stringify(third.store.attach(result(), "a", "answer").content),
+    ).toContain("Answer: Keep the current behavior.");
+    expect(third.store.attach(result(), "a", "again")).toEqual(result());
+  });
+
   it("drops expired records when it loads a file", async () => {
     const now = Date.UTC(2026, 8, 20);
     const first = open(() => now);

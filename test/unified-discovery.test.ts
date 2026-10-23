@@ -81,7 +81,7 @@ async function setup(
 const inspectCatalog = `
   text({names:ALL_TOOLS.map(t=>t.name),rows:ALL_TOOLS.map(tool=>({
     name:tool.name,bound:typeof tools[tool.name],keys:Object.keys(tool).sort(),
-    complete:tool.description.includes('JSON Schema')
+    complete:tool.description.includes('declare const tools:')
   })),removed:typeof tools.tool_search});`;
 
 describe.each([false, true])(
@@ -99,7 +99,7 @@ describe.each([false, true])(
         const headings = nativeContracts(resolveShell()).map(
           (tool) => tool.name,
         );
-        expect(description).toContain("Input JSON Schema");
+        expect(description).toContain("declare const tools:");
         const result = await s.call(inspectCatalog);
         expect(result.isError, JSON.stringify(result)).not.toBe(true);
         const value = jsonOutput<{
@@ -144,12 +144,8 @@ describe.each([false, true])(
         .snapshot()
         .find((t) => t.name === entry.name)!;
       expect(entry.description).toBe(definition.description);
-      expect(entry.description).toContain(
-        JSON.stringify(definition.inputSchema),
-      );
-      expect(entry.description).toContain('"$defs"');
-      expect(entry.description).toContain('"minimum":0');
-      expect(entry.description).toContain("structuredContent JSON Schema");
+      expect(entry.description).toContain("value: number;");
+      expect(entry.description).toContain("Promise<CallToolResult<");
       expect(entry.description).toContain("MCP server: fixture");
       expect(entry.description).toContain(
         "读取夹具数值 / Find a fixture value.",
@@ -157,7 +153,6 @@ describe.each([false, true])(
       expect(entry.description.split("\n")[0]).toContain(
         "读取夹具数值 / Find a fixture value.",
       );
-      expect(entry.description).toContain("待查询数值");
       const native = jsonOutput<{ name: string; description: string }>(
         await s.call('text(ALL_TOOLS.find(t => t.name === "apply_patch"));'),
       );
@@ -201,7 +196,7 @@ describe.each([false, true])(
       );
       expect(matched).toHaveLength(1);
       expect(matched[0]!.name).toBe("mcp__fixture__fixture_79");
-      expect(matched[0]!.description).toContain('"required":["value"]');
+      expect(matched[0]!.description).toContain("value: number;");
       const invoked = await s.call(
         'const t=ALL_TOOLS.find(t=>t.name==="mcp__fixture__fixture_79");text(await tools[t.name]({value:79}));',
       );

@@ -2,7 +2,7 @@
 
 English | [简体中文](006-skill-catalog.zh.md)
 
-Active, updated 2026-09-22.
+Active, updated 2026-10-23.
 
 ## Catalog and full content
 
@@ -30,7 +30,7 @@ Discovery reads files without running Git, Skill scripts, or installers. Other C
 ## Configuration toggles
 
 Operators configure skills.config in exec-mcp's config.toml. Skills without a matching rule are enabled by default.
-Selectors and rule ordering follow [Codex 0.155.1 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.155.1/codex-rs/config/src/skills_config.rs),
+Selectors and rule ordering follow [Codex 0.164.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/config/src/skills_config.rs),
 while configuration is read only from this service. Each rule specifies name or path and an enabled boolean.
 name exactly matches all entries with that name. path identifies one SKILL.md and can distinguish separate files sharing a name.
 Apply rules in configuration order; the last match wins.
@@ -39,13 +39,16 @@ Relative paths resolve from the configuration file, with ~/ support. Resolve sym
 Disabled items do not enter display, description budgeting, or invocation-policy processing, and the model catalog does not report their state.
 Keep enable/disable tutorials out of model descriptions; see the [configuration guide](../guides/configuration.md#skills).
 
-enabled=true only includes files within the existing discovery scope. allow_implicit_invocation=false still applies.
+enabled=true only includes files within the existing discovery scope. Product eligibility and allow_implicit_invocation still apply.
 Configured paths may be temporarily absent and match on a later discovery. Configuration changes require a restart; there is no hot reload or watcher.
 Toggles change catalog visibility only. Shell permissions and content the model already received remain unchanged.
 
 ## Explicit invocation policy
 
-Read YAML frontmatter from SKILL.md and invocation policy from agents/openai.yaml, without returning full content during discovery.
+Read YAML frontmatter from SKILL.md and policy from agents/openai.yaml, without returning full content during discovery.
+The service's product is ChatGPT. A nonempty policy.products list must include chatgpt or CHATGPT for the Skill to enter the catalog;
+omission or an empty list leaves product eligibility unrestricted. Codex's accepted values are chatgpt/codex/atlas and their uppercase aliases.
+Product eligibility and allow_implicit_invocation are independent: an eligible Skill can still require explicit invocation.
 Items with allow_implicit_invocation=false are listed separately as explicit-only with name and path.
 Their trigger descriptions are neither displayed nor budgeted. These Skills may be used only when the user explicitly requests them.
 Task similarity, recommendations from other documents, and a request not to use a Skill are not authorization.
@@ -75,7 +78,7 @@ without an advance explanation of the budgeting algorithm or extreme cases.
 
 ## Codex reuse
 
-The port references snapshot 7498521d288b9b3b96ffba4eedf089d8d6e06a84,
+The port references snapshot 7498521d288b9b3b96ffba4eedf089d8d6e06a84 and was checked against rust-v0.164.0,
 including [render.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/render.rs)
 and [aliases.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/aliases.rs).
 Only the needed budget and path-alias algorithms and tests are ported. The pinned package has no standalone Skill Loader binary,

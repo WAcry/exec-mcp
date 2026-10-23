@@ -197,7 +197,7 @@ describe.each([false, true])(
         );
         expect(entries).toHaveLength(1);
         expect(entries[0]!.name).toBe("mcp__fixture__add");
-        expect(entries[0]!.description).toContain("Input JSON Schema");
+        expect(entries[0]!.description).toContain("declare const tools:");
         const source = `text(await tools[${JSON.stringify(entries[0]!.name)}]({value:41}));`;
         const invoked = await exec(
           outer.client,

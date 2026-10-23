@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SessionPool,
   MEMORY_RECLAIMED_TEXT,
+  RUNTIME_REPLACED_TEXT,
   type RetirementReason,
 } from "../src/code-mode/session-pool.js";
 import type { CodeModeSession } from "../src/code-mode/session.js";
@@ -35,6 +36,40 @@ function pool(
 }
 
 describe("metadata scope is stable; the native session generation is replaceable", () => {
+  it("rejects a request captured before a reset even after a newer request opened the replacement", async () => {
+    let opens = 0;
+    const value = pool(async () => fake(String(++opens)));
+    const first = await value.acquire("conversation");
+    first.release();
+    const queuedGeneration = value.captureGeneration("conversation");
+    value.invalidate(first.session);
+    await expect(value.acquire("conversation")).rejects.toThrow(
+      RUNTIME_REPLACED_TEXT,
+    );
+    const fresh = await value.acquire("conversation");
+    await expect(
+      value.acquire("conversation", queuedGeneration),
+    ).rejects.toThrow(RUNTIME_REPLACED_TEXT);
+    expect(value.has(fresh.session)).toBe(true);
+    expect(opens).toBe(2);
+    fresh.release();
+  });
+
+  it("expires lightweight reset notices with the existing idle retention", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(100);
+    const value = pool(async () => fake("native"));
+    const first = await value.acquire("conversation");
+    first.release();
+    value.invalidate(first.session);
+    expect(value.captureGeneration("conversation")).toBeDefined();
+    vi.setSystemTime(100 + value.retentionIdleMs);
+    expect(value.captureGeneration("conversation")).toBeUndefined();
+    const fresh = await value.acquire("conversation");
+    expect(fresh.newSession).toBe(true);
+    fresh.release();
+  });
+
   it("detaches an old native session before asynchronous close, and deduplicates concurrent replacements", async () => {
     const closeOld = gate();
     const old = fake("host-session-old", () => closeOld.promise);
@@ -50,6 +85,14 @@ describe("metadata scope is stable; the native session generation is replaceable
     const generation = value.generation;
     const retiring = value.reclaimOldest(true, generation)!;
     expect(value.has(old)).toBe(false);
+    await Promise.all([
+      expect(value.acquire("same-metadata-scope")).rejects.toThrow(
+        RUNTIME_REPLACED_TEXT,
+      ),
+      expect(value.acquire("same-metadata-scope")).rejects.toThrow(
+        RUNTIME_REPLACED_TEXT,
+      ),
+    ]);
     const [b, c] = await Promise.all([
       value.acquire("same-metadata-scope"),
       value.acquire("same-metadata-scope"),

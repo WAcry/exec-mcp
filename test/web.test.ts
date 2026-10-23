@@ -993,7 +993,7 @@ describe("Web management data and actions", () => {
     const tracker = activity.startCall({
       tool: "exec",
       sessionId: "scope-digest",
-      args: { source: "image((await tools.view_image({path})).content[0]);" },
+      args: { source: "image(await tools.view_image({path}));" },
     });
     tracker.recordSubcall({
       name: "view_image",

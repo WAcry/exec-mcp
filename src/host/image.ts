@@ -1,12 +1,11 @@
 import { open } from "node:fs/promises";
 import { fileTypeFromBuffer } from "file-type";
-import type { CallToolResult } from "@modelcontextprotocol/client";
 import { MAX_PAYLOAD_BYTES } from "../limits.js";
 
 export async function viewImage(
   file: string,
-  detail = "high",
-): Promise<CallToolResult> {
+  detail: "high" | "original" = "high",
+): Promise<{ image_url: string; detail: "high" | "original" }> {
   const handle = await open(file, "r");
   let data: Buffer;
   try {
@@ -40,13 +39,7 @@ export async function viewImage(
   )
     throw new Error("Only PNG, JPEG, WebP, and GIF images are supported.");
   return {
-    content: [
-      {
-        type: "image",
-        data: data.toString("base64"),
-        mimeType: type.mime,
-        _meta: { "codex/imageDetail": detail },
-      },
-    ],
+    image_url: `data:${type.mime};base64,${data.toString("base64")}`,
+    detail,
   };
 }

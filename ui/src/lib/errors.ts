@@ -26,6 +26,7 @@ const ERROR_TEXT: Record<ClientErrorCode, MessageKey> = {
   media_not_found: "error.mediaNotFound",
   conversation_not_found: "error.conversationNotFound",
   question_not_found: "error.questionNotFound",
+  question_too_long: "error.tooLong",
   note_not_found: "error.noteNotFound",
   note_invalid_id: "error.invalidRequest",
   note_empty: "error.noteEmpty",

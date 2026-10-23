@@ -16,6 +16,23 @@ function viewImage(data: string, mimeType = "image/png") {
 }
 
 describe("images kept for the Web audit", () => {
+  it("preserves content beside a data URL while storing each image once", () => {
+    const data = png(64);
+    const media = new AuditMedia();
+    const text = { type: "text", text: "Image context" };
+    const result = media.extract(
+      { image_url: `data:image/png;base64,${data}`, content: [text] },
+      "owner",
+    ) as { content: Record<string, unknown>[] };
+    expect(result.content[0]).toEqual(text);
+    expect(result.content[1]).toMatchObject({
+      type: "image",
+      mimeType: "image/png",
+      media: expect.any(String),
+    });
+    expect(JSON.stringify(result)).not.toContain(data);
+  });
+
   it("keeps one copy per image and gives the audit a reference instead of base64", () => {
     const activity = new ActivityStore();
     const first = png(64);
@@ -25,7 +42,10 @@ describe("images kept for the Web audit", () => {
       sessionId: "scope",
       args: { source: "image(...)" },
     });
-    const nested = viewImage(first);
+    const nested = {
+      image_url: `data:image/png;base64,${first}`,
+      detail: "high",
+    };
     const before = structuredClone(nested);
     tracker.recordSubcall({
       name: "view_image",
@@ -56,7 +76,6 @@ describe("images kept for the Web audit", () => {
       type: "image",
       mimeType: "image/png",
       bytes: Buffer.from(first, "base64").length,
-      _meta: { "codex/imageDetail": "high" },
     });
     const parsed = parseToolResult(call.output);
     expect(parsed.preview).toBeUndefined();

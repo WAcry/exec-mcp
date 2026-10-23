@@ -29,7 +29,7 @@ Internal links should normally stay in the reader's language. Preserve commands,
 Write new commit messages in English and leave existing commit history intact. The Web UI supports English and Simplified Chinese through one shared message catalog.
 Logs, user content, and raw runtime diagnostics keep their original text. Interface language does not change model contracts or user messages.
 Model-visible MCP instructions, tool and resource descriptions, schema descriptions, and ALL_TOOLS wrappers use English.
-Refer to the pinned Codex version and reviewed upstream prompts; differences need an actual environment or contract reason, as recorded in ADR-002.
+Keep model-facing wording and declarations aligned with the pinned Codex version. Adapt them only for actual differences between ChatGPT MCP and Codex CLI, and record the reason in ADR-002.
 Preserve identifiers, protocol fields, commands, enum values, and upstream data. User notes, Skill content, and third-party contracts remain unchanged.
 Keep personal paths, company environments, and credentials out of public documentation. Installation instructions must work for independent deployments.
 

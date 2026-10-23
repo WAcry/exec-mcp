@@ -160,6 +160,8 @@ policy:
 
 The catalog then lists only its name and path, marked for explicit user invocation, without a trigger description.
 Configuration toggles control visibility; invocation policy guides model selection. The shell still reads according to OS permissions.
+Optional policy.products limits the intended products. For this ChatGPT service, a nonempty list must include chatgpt or CHATGPT;
+missing or empty lists apply to all products. Valid values are chatgpt/codex/atlas and their uppercase aliases. Explicit-invocation policy still applies independently.
 Rediscover after changing Skill files. Restart after changing exec-mcp configuration. Codex's own enable/disable configuration is neither read nor modified.
 
 max_chars counts Unicode code points. Catalog rendering also adapts to the model-response byte budget; exact token counts depend on the model.
@@ -247,10 +249,13 @@ terminal_total_buffer_mib = 256
 The high-water mark triggers memory reclamation for the Code Mode execution component only. Users manage total machine memory and their child process trees.
 Sampling and reclamation are delayed, so instantaneous component memory can exceed the threshold.
 Pressure first reclaims the oldest idle sessions, then may reclaim the least recently used active session.
-The same ChatGPT conversation can create clean execution state afterward without starting a new chat. Old cells cannot resume, and commands are not replayed.
+After failure or reclamation, the recovering call first reports lost execution state without running its script; queued calls for the old state also fail.
+A fresh exec can continue in the same ChatGPT conversation. Old cells cannot resume, and commands are not replayed. Normal idle expiry starts a new session with an empty-store notice.
 Save important data to files; the service does not impose disk limits on user-generated files.
 
-Each terminal defaults to a 16 MiB unread head/tail buffer, with up to 4 MiB per read. Dropped middle logs are marked and cannot be recovered.
+Each terminal defaults to a 16 MiB unread head/tail buffer, with up to 4 MiB consumed per read.
+exec_command and write_stdin each default max_output_tokens to 10,000. The budget keeps each batch's head and tail; omitted middle logs are marked and cannot be recovered by later calls.
+Unread output beyond that batch can still be collected through session_id.
 A noisy terminal does not pause others, and logs are not automatically written to disk. Commands can explicitly save complete logs.
 terminal_max_sessions limits the sessions kept at one time, running or finished but unread. terminal_total_buffer_mib limits unread output across all sessions
 and is never smaller than terminal_buffer_mib. At a limit, finished unread sessions are released first; then the oldest unread output of running sessions is dropped and marked.

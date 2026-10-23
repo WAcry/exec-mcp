@@ -78,15 +78,9 @@ describe("asynchronous questions are human-produced session notes", () => {
     });
   });
 
-  it("validates concise questions and multiple distinct options without requiring hand-authored IDs", () => {
+  it("accepts optional or nonempty options without arbitrary question or option counts", () => {
     expect(REQUEST_USER_INPUT_SCHEMA.parse(input)).toEqual(input);
-    for (const options of [
-      [],
-      ["one"],
-      ["same", " same "],
-      ["", "valid"],
-      Array.from({ length: 7 }, (_, i) => String(i)),
-    ])
+    for (const options of [[], ["", "valid"], ["   "]])
       expect(
         REQUEST_USER_INPUT_SCHEMA.safeParse({
           questions: [{ title: "Choose", options }],
@@ -96,10 +90,91 @@ describe("asynchronous questions are human-produced session notes", () => {
       false,
     );
     expect(
-      REQUEST_USER_INPUT_SCHEMA.safeParse({
-        questions: Array(4).fill(input.questions[0]),
-      }).success,
+      REQUEST_USER_INPUT_SCHEMA.safeParse({ questions: [{ title: " " }] })
+        .success,
     ).toBe(false);
+    expect(
+      REQUEST_USER_INPUT_SCHEMA.safeParse({
+        questions: [
+          { title: "Describe the requirements" },
+          { title: "Continue?", options: ["Continue"] },
+          {
+            title: "Choose",
+            options: Array.from({ length: 7 }, (_, i) => String(i)),
+          },
+          { title: "Repeated labels", options: ["same", "same"] },
+          { title: "Q".repeat(2001), options: ["A".repeat(501)] },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
+  it("deduplicates free-text questions and delivers their answers through the same queue", () => {
+    const { store } = fixture();
+    const request = {
+      questions: [{ title: "Which requirements should we follow?" }],
+      request_key: "requirements",
+    };
+    const accepted = store.ask("a", request);
+    expect(store.ask("a", request)).toEqual(accepted);
+    const question = store
+      .questions("a")
+      .items.find((q) => q.requestId === accepted.request_id)!;
+    expect(question.options).toEqual([]);
+    expect(() =>
+      store.answer("a", question.id, {
+        id: "empty",
+        option_index: null,
+        note: " ",
+      }),
+    ).toThrow("Write your answer");
+    expect(() =>
+      store.answer("a", question.id, {
+        id: "invalid",
+        option_index: 0,
+        note: "answer",
+      }),
+    ).toThrow("Select one");
+    const answer = {
+      id: "text",
+      option_index: null,
+      note: "Keep the local workflow.",
+    };
+    const saved = store.answer("a", question.id, answer);
+    expect(store.answer("a", question.id, answer)).toEqual(saved);
+    expect(saved.text).toBe(
+      "Question: Which requirements should we follow?\nAnswer: Keep the local workflow.",
+    );
+    expect(
+      store.attach(ordinary(), "a", "call").structuredContent,
+    ).toMatchObject({ user_notes: [saved.text] });
+    expect(store.attach(ordinary(), "a", "later")).toEqual(ordinary());
+  });
+
+  it("accepts only questions whose choices and a free-text reply fit the delivery budget", () => {
+    const { store } = fixture();
+    for (const question of [
+      { title: "Q".repeat(NOTE_MAX_BYTES) },
+      { title: "Q".repeat(10_000), options: ["small", "A".repeat(20_000)] },
+      { title: "Context?", options: ["small", "\0".repeat(5000)] },
+    ])
+      expect(() => store.ask("a", { questions: [question] })).toThrow(
+        "The question and each suggested answer must fit",
+      );
+    expect(store.questions("a").total).toBe(2);
+    const request = store.ask("a", {
+      questions: [{ title: "Q".repeat(10_000), options: ["A".repeat(19_000)] }],
+    });
+    const question = store
+      .questions("a")
+      .items.find((q) => q.requestId === request.request_id)!;
+    expect(
+      store.answer("a", question.id, {
+        id: "long-choice",
+        option_index: 0,
+        note: "",
+      }).text,
+    ).toContain("A".repeat(19_000));
   });
 
   it("enqueues independent choice-plus-note answers atomically in human submission order", () => {
@@ -219,6 +294,10 @@ describe("asynchronous questions are human-produced session notes", () => {
   it("accounts for question/answer memory, refuses full submissions atomically and expires both", () => {
     const { store, advance } = fixture(8500);
     const q = store.questions("a").items[0]!;
+    expect(() =>
+      store.ask("a", { questions: [{ title: "Q".repeat(3000) }] }),
+    ).toThrow("is full");
+    expect(store.questions("a").total).toBe(2);
     expect(() =>
       store.answer("a", q.id, {
         id: "full",

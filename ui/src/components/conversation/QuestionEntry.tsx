@@ -141,33 +141,35 @@ export function QuestionEntry({
         ) : (
           answer && (
             <>
-              <ol className="mt-2.5 space-y-1">
-                {[...question.options, null].map((option, index) => {
-                  const value = option === null ? null : index;
-                  const chosen = answer.option_index === value;
-                  if (option === null && !chosen) return null;
-                  return (
-                    <li
-                      key={index}
-                      className={`flex items-start gap-2 text-sm ${chosen ? "text-ink" : "text-ink-3"}`}
-                    >
-                      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-                        {chosen ? (
-                          <Check
-                            className="h-3.5 w-3.5 text-ok"
-                            strokeWidth={2.4}
-                          />
-                        ) : (
-                          <span className="h-1 w-1 rounded-full bg-ink-4" />
-                        )}
-                      </span>
-                      <span className="whitespace-pre-wrap">
-                        {option ?? t("question.none")}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
+              {question.options.length > 0 && (
+                <ol className="mt-2.5 space-y-1">
+                  {[...question.options, null].map((option, index) => {
+                    const value = option === null ? null : index;
+                    const chosen = answer.option_index === value;
+                    if (option === null && !chosen) return null;
+                    return (
+                      <li
+                        key={index}
+                        className={`flex items-start gap-2 text-sm ${chosen ? "text-ink" : "text-ink-3"}`}
+                      >
+                        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                          {chosen ? (
+                            <Check
+                              className="h-3.5 w-3.5 text-ok"
+                              strokeWidth={2.4}
+                            />
+                          ) : (
+                            <span className="h-1 w-1 rounded-full bg-ink-4" />
+                          )}
+                        </span>
+                        <span className="whitespace-pre-wrap">
+                          {option ?? t("question.none")}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
               {answer.note && (
                 <div className="mt-2.5 flex justify-end">
                   <p className="max-w-[90%] rounded-2xl rounded-br-md bg-you px-3 py-1.5 text-sm whitespace-pre-wrap text-you-ink">

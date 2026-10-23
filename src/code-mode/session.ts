@@ -12,6 +12,7 @@ import { prepareNestedToolResult } from "./result.js";
 import {
   firstStreamMessage,
   grpcError,
+  isMissingSession,
   monitorStreamFailure,
   streamReady,
   type CodeModeHostClient,
@@ -219,6 +220,7 @@ export class CodeModeSession {
       });
     } catch (error) {
       this.#executions.delete(executionId);
+      if (isMissingSession(error)) this.#fail(error);
       throw error;
     }
     const unwatch = this.#watchYield(options.yieldSignal, { executionId });
@@ -230,6 +232,11 @@ export class CodeModeSession {
         options.signal,
       );
     } catch (error) {
+      if (isMissingSession(error)) {
+        this.#fail(error);
+        this.#executions.delete(executionId);
+        throw error;
+      }
       // A cancellation before the host reported the cell is cleaned up by the
       // stream reader once the cell ID arrives. It does not affect the session.
       if (state.cancelled === true && state.cellId === undefined) throw error;
@@ -288,6 +295,7 @@ export class CodeModeSession {
       );
       return decodeWaitResponse(response, options.cellId);
     } catch (error) {
+      if (isMissingSession(error)) this.#fail(error);
       if (options.signal?.aborted === true) {
         await this.#cancelWait(waitId);
       }
@@ -337,17 +345,22 @@ export class CodeModeSession {
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
     this.#requireOpen();
-    const response = await unaryCall(
-      (options, callback) =>
-        this.#client.terminate(
-          { sessionId: this.id, cellId },
-          options,
-          callback,
-        ),
-      this.#transportTimeoutMs,
-      signal,
-    );
-    return decodeWaitResponse(response, cellId);
+    try {
+      const response = await unaryCall(
+        (options, callback) =>
+          this.#client.terminate(
+            { sessionId: this.id, cellId },
+            options,
+            callback,
+          ),
+        this.#transportTimeoutMs,
+        signal,
+      );
+      return decodeWaitResponse(response, cellId);
+    } catch (error) {
+      if (isMissingSession(error)) this.#fail(error);
+      throw error;
+    }
   }
 
   close(): Promise<void> {

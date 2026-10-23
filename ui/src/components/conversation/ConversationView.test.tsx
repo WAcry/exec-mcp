@@ -48,7 +48,7 @@ let requests: Request[];
 let routes: Map<string, (request: Request) => Reply>;
 let root: Root | undefined;
 
-function fixture(options: { question: boolean }) {
+function fixture(options: { question: boolean; freeText?: boolean }) {
   const now = Date.now();
   const iso = (ago: number) => new Date(now - ago).toISOString();
   const call: CallListItem = {
@@ -151,7 +151,7 @@ function fixture(options: { question: boolean }) {
             id: "q-1",
             requestId: "ask-1",
             title: "Which branch?",
-            options: ["main", "dev"],
+            options: options.freeText ? [] : ["main", "dev"],
             createdAt: iso(45_000),
             pending: true,
           },
@@ -321,7 +321,8 @@ describe("conversation view", () => {
     const main = [...dock.querySelectorAll("[role=radio]")].find((item) =>
       item.textContent?.includes("main"),
     );
-    click(main);
+    expect(main?.getAttribute("aria-checked")).toBe("true");
+    expect(answers).toEqual([]);
     click(button(dock, messages["question.submit"].en));
     await settle();
     expect(answers).toMatchObject([{ option_index: 0, note: "" }]);
@@ -333,7 +334,42 @@ describe("conversation view", () => {
     click(button(dock, messages["question.submit"].en));
     await settle();
     expect(answers).toHaveLength(2);
+    expect(answers[1]).toEqual(answers[0]);
     expect(view.textContent).toContain(messages["question.saved"].en);
+  });
+
+  it("answers a free-text question without showing choices", async () => {
+    fixture({ question: true, freeText: true });
+    const answers: unknown[] = [];
+    routes.set("POST /api/sessions/chat-1/questions/q-1/answer", (request) => {
+      answers.push(request.body);
+      return { body: { status: "pending" } };
+    });
+    const view = await mount();
+    const dock = view.querySelector(
+      '[role=group][aria-label="' + messages["dock.label"].en + '"]',
+    )!;
+    expect(dock.querySelector("[role=radio]")).toBeNull();
+    const submit = button(dock, messages["question.submit"].en)!;
+    expect(submit.disabled).toBe(true);
+    const textarea = dock.querySelector("textarea")!;
+    expect(textarea.placeholder).toBe(
+      messages["question.customPlaceholder"].en,
+    );
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )!.set!;
+    act(() => {
+      setValue.call(textarea, "Use the release branch.");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(submit.disabled).toBe(false);
+    click(submit);
+    await settle();
+    expect(answers).toMatchObject([
+      { option_index: null, note: "Use the release branch." },
+    ]);
   });
 
   it("dismisses an unread message from the dock", async () => {

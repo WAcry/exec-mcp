@@ -30,8 +30,6 @@ const terminals: TerminalManager[] = [];
 const directories: string[] = [];
 const SKILL_RULE =
   "Skills can be selected by their trigger descriptions; explicit-only skills are read only when the user explicitly requests them.";
-const FILE_EDIT_RULE =
-  "The patch is sent through stdin, avoiding command-line argument limits.";
 const MULTILINE_RULE =
   "Nested JS, shell and other languages each interpret quoting, interpolation, escapes, argument boundaries and whitespace.";
 const AGENT_CLI_RULE =
@@ -60,7 +58,7 @@ describe("self-contained model-visible contracts", () => {
     expect(() =>
       parseNativeInput(contracts.exec_command, { command: "ls" }),
     ).toThrow(
-      'tools.exec_command did not run because its input is invalid. cmd: required field is missing (expected string); input: Unrecognized key: "command". Allowed fields: cmd, workdir, shell, login, tty, yield_time_ms.',
+      'tools.exec_command did not run because its input is invalid. cmd: required field is missing (expected string); input: Unrecognized key: "command". Allowed fields: cmd, max_output_tokens, workdir, shell, login, tty, yield_time_ms.',
     );
     expect(() =>
       parseNativeInput(contracts.view_image, { path: "a.png", detail: "low" }),
@@ -109,7 +107,6 @@ describe("self-contained model-visible contracts", () => {
     ]);
     const description = execDescription(contracts);
     expect(description).toContain("fresh V8 isolate as an async module");
-    expect(description).toContain(FILE_EDIT_RULE);
     expect(description.split("## Local tools")[0]).toContain(MULTILINE_RULE);
     expect(description.split("## Local tools")[0]).toContain(AGENT_CLI_RULE);
     expect(description.split(AGENT_CLI_RULE)).toHaveLength(2);
@@ -162,8 +159,6 @@ describe("self-contained model-visible contracts", () => {
         "*** Begin Patch\n*** Add File: example.txt\n+hello\n*** End Patch\n",
       ).success,
     ).toBe(true);
-    expect(patch.description).toContain("Lark grammar");
-    expect(patch.description).toContain("exec.workdir");
     const skill = contracts.find(
       (contract) => contract.name === "list_skills",
     )!;
@@ -197,8 +192,7 @@ describe("self-contained model-visible contracts", () => {
         });
         const description = execDescription(contracts);
         expect(description).not.toMatch(/\p{Script=Han}/u);
-        expect(description).toContain("Input JSON Schema:");
-        expect(description).toContain("Output JSON Schema:");
+        expect(description).toContain("declare const tools:");
         for (const schema of [
           EXEC_SCHEMA,
           WAIT_SCHEMA,
@@ -208,13 +202,6 @@ describe("self-contained model-visible contracts", () => {
             /\p{Script=Han}/u,
           );
         }
-        // Grammar is carried as metadata, not a patch example or an unsupported MCP schema type.
-        const patch = contracts.find((c) => c.name === "apply_patch")!;
-        expect(patch.description).toContain('add_line: "+" /(.*)/ LF -> line');
-        expect(patch.description).not.toMatch(
-          /example|\*\*\* Add File: [a-z]/i,
-        );
-        expect(patch.schema.safeParse({ patch: "text" }).success).toBe(false);
       }
     }
   });
@@ -292,7 +279,6 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
       2,
     );
     expect(listed[0]!.description).not.toContain("revoke_file");
-    expect(listed[0]!.description!).toContain(FILE_EDIT_RULE);
     expect(listed[0]!.description!.split("## Local tools")[0]).toContain(
       MULTILINE_RULE,
     );

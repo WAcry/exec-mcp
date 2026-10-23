@@ -4,6 +4,10 @@ import { DEFAULT_IDLE_MS } from "../memory.js";
 export const SESSION_IDLE_MS = DEFAULT_IDLE_MS;
 export const MEMORY_RECLAIMED_TEXT =
   "The previous Code Mode session was reclaimed because of memory pressure. Its cells and stored values are gone. A new exec in this conversation starts a clean session. Tool side effects are not rolled back; do not rerun old commands automatically.";
+export const RUNTIME_REPLACED_TEXT =
+  "The exec runtime was replaced. Stored values and running cells were lost. " +
+  "Prior external tool operations may have completed; inspect their results before retrying. " +
+  "You may continue with a fresh exec call.";
 export type RetirementReason =
   | "memory"
   | "idle"
@@ -27,14 +31,21 @@ interface Entry {
   idleSince: number;
   lastUsed: number;
   generation: number;
+  /** Keep the previous generation visible until the replacement finishes opening. */
+  previousGeneration?: number;
   announced: boolean;
   retired?: RetirementReason;
   closing?: Promise<void>;
 }
 
+interface RetiredBinding {
+  generation: number;
+  retiredAt: number;
+}
+
 /** Reuses one native session per conversation. A lease lasts until the cell result is collected, not until the HTTP request ends. */
 export class SessionPool {
-  readonly #shared = new Map<string, Entry>();
+  readonly #shared = new Map<string, Entry | RetiredBinding>();
   readonly #entries = new Set<Entry>();
   readonly #timer: NodeJS.Timeout;
   #closed = false;
@@ -108,10 +119,23 @@ export class SessionPool {
     }));
   }
 
-  async acquire(scope: string | undefined): Promise<SessionLease> {
+  /** Capture before any request queue or host-reset barrier. */
+  captureGeneration(scope: string | undefined): number | undefined {
+    this.#sweep();
+    const binding = scope === undefined ? undefined : this.#shared.get(scope);
+    return binding && "opening" in binding
+      ? (binding.previousGeneration ?? binding.generation)
+      : binding?.generation;
+  }
+
+  async acquire(
+    scope: string | undefined,
+    expectedGeneration = this.captureGeneration(scope),
+  ): Promise<SessionLease> {
     if (this.#closed) throw new Error("The Code Mode session pool is closed.");
     this.#sweep();
-    let entry = scope === undefined ? undefined : this.#shared.get(scope);
+    const binding = scope === undefined ? undefined : this.#shared.get(scope);
+    let entry = binding && "opening" in binding ? binding : undefined;
     if (entry === undefined) {
       entry = {
         scope,
@@ -120,6 +144,9 @@ export class SessionPool {
         idleSince: Date.now(),
         lastUsed: Date.now(),
         generation: ++this.#generation,
+        ...(binding === undefined
+          ? {}
+          : { previousGeneration: binding.generation }),
         announced: false,
       };
       this.#entries.add(entry);
@@ -138,32 +165,18 @@ export class SessionPool {
         if (owner.scope === undefined) void this.#retire(owner, "unscoped");
       }
     };
+    let session: CodeModeSession;
+    const assertActive = () => {
+      if (owner.retired === "memory") throw new Error(MEMORY_RECLAIMED_TEXT);
+      if (this.#closed || owner.retired || !session.usable)
+        throw new Error(
+          "The Code Mode session is no longer usable, and its stored values may be lost. Run exec again in this conversation to start a new session.",
+        );
+    };
     try {
-      const session = await owner.opening;
+      session = await owner.opening;
       owner.session = session;
-      const assertActive = () => {
-        if (owner.retired === "memory") throw new Error(MEMORY_RECLAIMED_TEXT);
-        if (this.#closed || owner.retired || !session.usable)
-          throw new Error(
-            "The Code Mode session is no longer usable, and its stored values may be lost. Run exec again in this conversation to start a new session.",
-          );
-      };
       assertActive();
-      const newSession = !owner.announced;
-      owner.announced = true;
-      return {
-        session,
-        release,
-        assertActive,
-        newSession,
-        touch: () => {
-          assertActive();
-          owner.lastUsed = Date.now();
-        },
-        get reclaimed() {
-          return owner.retired === "memory";
-        },
-      };
     } catch (error) {
       release();
       void this.#retire(owner, "failure");
@@ -171,6 +184,29 @@ export class SessionPool {
         ? new Error(MEMORY_RECLAIMED_TEXT)
         : error;
     }
+    delete owner.previousGeneration;
+    if (
+      expectedGeneration !== undefined &&
+      expectedGeneration !== owner.generation
+    ) {
+      release();
+      throw new Error(RUNTIME_REPLACED_TEXT);
+    }
+    const newSession = !owner.announced;
+    owner.announced = true;
+    return {
+      session,
+      release,
+      assertActive,
+      newSession,
+      touch: () => {
+        assertActive();
+        owner.lastUsed = Date.now();
+      },
+      get reclaimed() {
+        return owner.retired === "memory";
+      },
+    };
   }
 
   has(session: CodeModeSession): boolean {
@@ -213,6 +249,7 @@ export class SessionPool {
   close(): Promise<void> {
     this.#closed = true;
     clearInterval(this.#timer);
+    this.#shared.clear();
     this.#closePromise ??= Promise.all(
       [...this.#entries].map((entry) => this.#retire(entry, "shutdown")),
     ).then(() => undefined);
@@ -224,13 +261,28 @@ export class SessionPool {
     for (const entry of this.#entries)
       if (entry.users === 0 && entry.idleSince <= deadline)
         void this.#retire(entry, "idle");
+    for (const [scope, binding] of this.#shared)
+      if ("retiredAt" in binding && binding.retiredAt <= deadline)
+        this.#shared.delete(scope);
   }
 
   #retire(entry: Entry, reason: RetirementReason): Promise<void> {
     if (entry.retired) return entry.closing ?? Promise.resolve();
     entry.retired = reason;
-    if (entry.scope !== undefined && this.#shared.get(entry.scope) === entry)
-      this.#shared.delete(entry.scope);
+    if (entry.scope !== undefined && this.#shared.get(entry.scope) === entry) {
+      if (
+        (reason === "failure" || reason === "memory") &&
+        (entry.announced || entry.previousGeneration !== undefined)
+      ) {
+        // Retain only the reset notice, never the native session or its tool closures.
+        this.#shared.set(entry.scope, {
+          generation: entry.previousGeneration ?? entry.generation,
+          retiredAt: Date.now(),
+        });
+      } else {
+        this.#shared.delete(entry.scope);
+      }
+    }
     entry.closing = entry.opening
       .then((session) => session.close())
       .catch(() => {

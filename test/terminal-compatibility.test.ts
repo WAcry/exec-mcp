@@ -73,11 +73,13 @@ it("returns the foreground exit while a descendant retains pipes and lets that d
   const release = path.join(directory, "release");
   const finished = path.join(directory, "finished");
   const background = `const fs=require('node:fs');const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(timer);fs.writeFileSync(${JSON.stringify(finished)},'survived');}},10);`;
+  // Inherited output pipes are the fixture; a Windows working-directory lock
+  // must not race cleanup after the descendant writes its completion marker.
   try {
     const first = await value.execCommand(
       {
         cmd: nodeCommand(
-          `const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(background)}],{detached:true,windowsHide:true,stdio:['ignore',1,2]});child.unref();process.stdout.write('FOREGROUND_OUT\\n');process.stderr.write('FOREGROUND_ERR\\n');process.exitCode=7;`,
+          `const child=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(background)}],{cwd:${JSON.stringify(tmpdir())},detached:true,windowsHide:true,stdio:['ignore',1,2]});child.unref();process.stdout.write('FOREGROUND_OUT\\n');process.stderr.write('FOREGROUND_ERR\\n');process.exitCode=7;`,
         ),
         yield_time_ms: 0,
       },

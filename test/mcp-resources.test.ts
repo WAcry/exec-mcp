@@ -403,6 +403,68 @@ describe("MCP resource protocol bridge", () => {
     expect(f.resourceRequests()).toHaveLength(2);
   });
 
+  it("propagates cancellation to the server without cancelling a concurrent read on the same connection", async () => {
+    const f = await fixture();
+    const r = await registry(f);
+    const read = f.state.read;
+    const releases = new Map<string, () => void>();
+    f.state.read = async (uri) => {
+      await new Promise<void>((resolve) => releases.set(uri, resolve));
+      return read(uri);
+    };
+    const abort = new AbortController();
+    const cancelled = r.readResource(
+      { server: "docs", uri: "memo://cancelled" },
+      abort.signal,
+    );
+    const independent = r.readResource({
+      server: "docs",
+      uri: "memo://independent",
+    });
+    const settled = Promise.allSettled([cancelled, independent]);
+    try {
+      await vi.waitFor(() =>
+        expect([...releases.keys()].sort()).toEqual([
+          "memo://cancelled",
+          "memo://independent",
+        ]),
+      );
+      const request = f
+        .resourceRequests()
+        .find((message) => message.params?.uri === "memo://cancelled")!;
+      abort.abort();
+      await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+      await vi.waitFor(() =>
+        expect(
+          f.requests
+            .filter((message) => message.method === "notifications/cancelled")
+            .map((message) => message.params?.requestId),
+        ).toEqual([request.id]),
+      );
+
+      releases.get("memo://independent")!();
+      const result = await independent;
+      expect(result).toMatchObject({
+        server: "docs",
+        uri: "memo://independent",
+      });
+      expect(result.contents).toEqual(
+        (await read("memo://independent")).contents,
+      );
+      f.state.read = read;
+      await expect(
+        r.readResource({ server: "docs", uri: "memo://after-cancellation" }),
+      ).resolves.toMatchObject({ uri: "memo://after-cancellation" });
+      expect(f.resourceRequests()).toHaveLength(3);
+      expect(f.state.initialized).toBe(1);
+    } finally {
+      abort.abort();
+      f.state.read = read;
+      for (const release of releases.values()) release();
+      await settled;
+    }
+  });
+
   it("bounds resource payloads without truncating text or Base64", () => {
     expect(resourceResultBytes({ contents: [{ text: "中文\\n" }] })).toBe(
       Buffer.byteLength(JSON.stringify({ contents: [{ text: "中文\\n" }] })),

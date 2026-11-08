@@ -2,7 +2,7 @@
 
 [English](010-session-notes.md) | 简体中文
 
-当前生效，2026-10-23 更新。
+当前生效，2026-11-08 更新。
 
 ## 对话归属与返回方式
 
@@ -32,7 +32,7 @@ exec/wait 的成功、运行中和普通执行错误响应都可附带补充。
 
 ## Agent 发来的消息
 
-[Codex 消息工具](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) 接收单个 message，立即返回 accepted。
+[Codex 消息工具](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) 接收单个 message，立即返回 accepted。
 我们沿用它的接口和大部分描述。消息只用于告知：操作者必须马上知道的阻塞或发现，或者简短回答操作者在工作途中发来的问题。
 提问使用 request_user_input_async，支持文本或选项问题并返回答案。消息发送到当前对话的 Web 界面。
 
@@ -56,7 +56,7 @@ Agent 消息与用户输入分别存储，不会作为用户指令返回给模�
 ## 对话标题
 
 ChatGPT 不在 `_meta` 中提供对话标题，服务也看不到用户消息。固定版本的 Codex 在 TUI 收到首条用户消息后，另起一次隐藏的模型调用为 thread 生成标题
-（[thread_title.rs](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/tui/src/app/thread_title.rs)）；exec-mcp 没有这份输入，
+（[thread_title.rs](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/tui/src/app/thread_title.rs)）；exec-mcp 没有这份输入，
 因此由模型在第一次 exec 里顺手调用 tools.set_conversation_title 设置标题。描述只保留 ChatGPT 用好它所需的信息：
 用途、在第一次 exec 中调用一次、用 3 到 8 个词概括用户的任务、使用用户的语言，以及只保留第一个标题。
 建议按词计长，而不是 Codex 的最多 36 字符、尽量少于五个词，因为 Codex 约束的是结构化输出，这里的模型手写字符串，数不准字符。
@@ -74,8 +74,8 @@ exec/wait 的结果都是文本；结构化信封仍只包含原结果和补充�
 
 ## 异步提问与作答
 
-接口参考 Codex rust-v0.164.0 的
-[request_user_input_async](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
+接口参考 Codex rust-v0.167.0 的
+[request_user_input_async](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)，
 沿用 questions/title、可选的 options 字符串数组与 accepted 的形状。await 只等提交完成，Agent 可继续其他工作。
 Codex 能注入新的用户消息，exec-mcp 则通过后续普通工具响应传回答案。
 

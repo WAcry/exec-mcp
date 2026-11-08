@@ -2,7 +2,7 @@
 
 [English](006-skill-catalog.md) | 简体中文
 
-当前生效，2026-10-23 更新。
+当前生效，2026-11-08 更新。
 
 ## 目录与全文
 
@@ -29,7 +29,7 @@ Skill 集合可分层，包括 .codex/skills/.system。发现 SKILL.md 后按一
 ## 配置启停
 
 操作者在 exec-mcp 的 config.toml 中设置 skills.config，未匹配规则的 Skill 默认启用。
-选择器与顺序语义参考 [Codex 0.164.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/config/src/skills_config.rs)，
+选择器与顺序语义参考 [Codex 0.167.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/config/src/skills_config.rs)，
 配置仍只从本服务读取。每项使用 name 或 path，并提供 enabled 布尔值。
 name 精确匹配所有同名项，path 指定一个 SKILL.md，因而可单独控制同名的不同文件。
 按配置顺序应用，最后匹配者生效。
@@ -77,7 +77,7 @@ allow_implicit_invocation=false 的项目单独列为仅显式调用，只保留
 
 ## Codex 复用范围
 
-移植来源为固定快照 7498521d288b9b3b96ffba4eedf089d8d6e06a84，并已与 rust-v0.164.0 核对；参考其中的
+移植来源为固定快照 7498521d288b9b3b96ffba4eedf089d8d6e06a84，并已与 rust-v0.167.0 核对；参考其中的
 [render.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/render.rs) 和
 [aliases.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/aliases.rs)，
 移植必要的预算和路径别名算法及其测试。固定包没有独立 Skill Loader 二进制，
@@ -86,3 +86,9 @@ allow_implicit_invocation=false 的项目单独列为仅显式调用，只保留
 本项目保留显式调用项的名称与路径，小预算下也不主动删条目。策略解析失败时继续要求显式调用。
 这些差异由测试覆盖，移植部分的来源见上述链接及源码注释，许可见 [Apache-2.0](../../proto/LICENSE)。
 其余 Codex Skill 配置不在兼容范围内。
+
+核对 0.167.0 后，未发现与本移植相关的 parser、metadata model 或 SkillConfigRules 变化。
+上游的增量目录依赖 Codex 的模型历史生命周期；空远程发现结果缓存依赖 executor 的文件系统监听。
+本服务既不控制 ChatGPT 历史，也不提供远程 Skill 文件系统，因此 list_skills 保留实时完整目录及现有预算、路径算法。
+不引入可选的描述省略：按任务选择 Skill 仍需要有效的触发描述，现有预算机制也无需另加一个呈现选项。
+Codex 后续的文件系统权限归属修正和显示名称查找服务于其 sandbox 及独立 Skill 读取、安装工具，本适配层不提供这些接口。

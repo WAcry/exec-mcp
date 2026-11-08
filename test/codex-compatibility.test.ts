@@ -35,6 +35,48 @@ function wav(samples: number, declaredBytes = samples * 2): string {
 }
 
 describe("pinned Codex runtime compatibility", () => {
+  it("preserves image bytes, detail overrides and ordering across raw MCP and URL objects", async () => {
+    const data =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5xkAAAAASUVORK5CYII=";
+    const block = {
+      type: "image" as const,
+      mimeType: "image/png",
+      data,
+      _meta: { "codex/imageDetail": "original" },
+    };
+    const result = await service().exec({
+      tools: [
+        {
+          name: "picture",
+          description: "Image fixture",
+          call: async () => ({ content: [block] }),
+        },
+      ],
+      source: `const result = await tools.picture();
+text("before");
+image(result.content[0]);
+text("between");
+image(result.content[0], "low");
+image({image_url:${JSON.stringify("data:image/png;base64,")} + result.content[0].data, detail:"original"});
+text("after");`,
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    const image = (detail: string) => ({
+      type: "image",
+      mimeType: "image/png",
+      data,
+      _meta: { "openai/imageDetail": detail },
+    });
+    expect(result.content.slice(1)).toEqual([
+      { type: "text", text: "before" },
+      image("original"),
+      { type: "text", text: "between" },
+      image("low"),
+      image("original"),
+      { type: "text", text: "after" },
+    ]);
+  });
+
   it("delivers omitted and explicit undefined arguments without a JSON serialization failure", async () => {
     const calls: unknown[] = [];
     const result = await service().exec({

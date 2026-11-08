@@ -128,7 +128,10 @@ export class CodeModeSession {
     if (options.maxYieldTimeMs !== undefined) {
       limits.maxYieldTimeMs = options.maxYieldTimeMs;
     }
-    const request: ProtoMessage = {};
+    // MCP budgets text separately, preserving media and rendering errors once.
+    const request: ProtoMessage = {
+      outputTruncation: "OUTPUT_TRUNCATION_CLIENT",
+    };
     if (Object.keys(limits).length > 0) request.cellExecutionLimits = limits;
 
     const eventStream = options.client.openSession(request);
@@ -147,6 +150,14 @@ export class CodeModeSession {
       );
       id = stringField(openedPayload, "sessionId", "session ID");
       validateIdentifier(id, "session ID");
+      const outputTruncation = openedPayload.outputTruncation;
+      if (
+        outputTruncation !== undefined &&
+        outputTruncation !== "OUTPUT_TRUNCATION_CLIENT"
+      )
+        throw new Error(
+          `Code Mode host selected unsupported output truncation ${JSON.stringify(outputTruncation)}; client-side truncation is required.`,
+        );
     } catch (error) {
       eventStream.cancel();
       throw error;

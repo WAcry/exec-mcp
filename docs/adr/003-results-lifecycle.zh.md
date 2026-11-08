@@ -2,7 +2,7 @@
 
 [English](003-results-lifecycle.md) | 简体中文
 
-当前生效，2026-10-23 更新。
+当前生效，2026-11-08 更新。
 
 ## 结果去重与展示
 
@@ -21,12 +21,21 @@ as_settled 与 stream_settled 复用原生 host 的实现，逐项处理已完�
 大结果由 Agent 在 Code Mode 中筛选，或用 store 保存后分段 load；需要持久内容时可显式写文件。
 服务不自动把通用结果写盘，以免增加重读、路径解析和结果清理步骤。
 最终响应采用目标链路实测得出的保守 UTF-8 字节上限，超限保留首尾并提示。
+包括最终限额处理在内，保留的文本、媒体和资源维持相对顺序；只允许合并相邻的纯文本块。
 被省略的内容不会由后续 wait 补发，截断文本也可能失去 JSON 语法完整性。宿主的实际 token 限制仍可能变化。
 
 exec.max_output_tokens 与 wait.max_tokens 分别缩小本次文本预算，外层参数优先于首行 pragma；
 wait 不继承 exec 的显式值。token 数量使用轻量估算，状态、句柄及媒体保留，并计入相应最终载荷限制。
 外层响应预算保留交给 JS 的嵌套原值；各工具仍执行自身的输出与传输限制，过大的原值可能在到达 JS 前就被拒绝。
 输入过大在操作前拒绝，结果过大则可能发生在操作之后，此时不能自动重试。
+
+原生会话显式选择 CLIENT 输出截断；若 host 报告不兼容模式，在运行 cell 前拒绝；确认响应未指定模式时也按 CLIENT 处理，0.167.0 host 即使用这种形式。
+Codex 0.167.0 还提供 [SERVER 截断](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/session.rs)，
+它限制缓冲保留量，但每次观察只接纳总计 8 MiB 的编码图片 URL，并把音频计入输出 token 预算。
+这些策略可能丢弃原始图片或一批截图，并在零文本预算时移除音频，与本适配层已有的 MCP 契约冲突。
+因此保留一套客户端文本策略，避免无声改变媒体交付或叠加两套截断规则。
+接受的代价是原生显式输出缓冲未采用新 collector 的上限；仍执行传输限制与进程内存回收，
+突发分配可能在采样前耗尽内存。嵌套结果和存储值继续独立于最终输出预算。
 
 用户补充与普通结果使用同一文本通道，只占剩余额度。完整消息放不下就继续排队，
 不压缩普通结果，见 [ADR-010](010-session-notes.zh.md)。
@@ -55,9 +64,11 @@ exec_command 与 write_stdin 对每批收取的输出应用 max_output_tokens，
 命令返回 session_id 后由终端管理器持有，可跨 exec 使用，外层 cell 结束后仍能继续操作。
 这些句柄只在当前运行期间有效，调用权限由入口认证决定。
 正常关闭会清理自有进程；异常退出后，已写入的文件和外部操作仍可能保留。
+Windows 通过 taskkill 终止进程树，可能与 Shell 启动期创建子进程发生竞争；前台退出不证明所有后代均已停止。
+运行中进程的终止测试先获得子进程 READY/PID，再验证该子进程退出。本次 Codex 升级没有改变这一已有的平台限制。
 
 write_stdin 沿用固定 Codex 的收集窗口。非空写入默认等待较短时间，空输入可收集较长时间。
-[上游收集器](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/unified_exec/process_manager.rs)
+[上游收集器](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/unified_exec/process_manager.rs)
 持续收集日志，到截止时间或进程结束时返回。窗口在取得终端并完成写入或调整后开始，
 排队及 stdin 背压不占用该窗口，新日志也不重置截止时间。显式 0 保留立即读取的能力。
 延长等待不会扩大缓冲或输出容量。
@@ -106,6 +117,7 @@ store 数据也不会自动写盘。使用固定 host 的同步 store/load，保
 正常空闲过期后，下一次 exec 照常建立新 session，并附已有的新 session/store 为空提示；故障标记沿用同一空闲保留期。
 
 只采样自有 Code Mode host 的近似 RSS/working set，用户启动的浏览器、编译器等进程树由用户管理。
+0.167.0 协议中的可选 metrics RPC 未启用：发布包的独立 host 未配置 collector，会返回 UNIMPLEMENTED，因此仍需平台采样。
 测量失败时报告诊断，过期样本不用于判断新 host。正常情况下，所有 cell 收尾后保留空闲会话；
 内存超过高水位时，按进入空闲的时间 FIFO 回收，再测量。
 没有空闲候选且仍超高水位时，回收最久未使用的活动 session，其多个 cell 和 store 可能一起丢失。

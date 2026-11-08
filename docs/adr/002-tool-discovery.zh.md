@@ -2,7 +2,7 @@
 
 [English](002-tool-discovery.md) | 简体中文
 
-当前生效，2026-10-23 更新。
+当前生效，2026-11-08 更新。
 
 ## 工具入口与契约来源
 
@@ -95,11 +95,11 @@ TypeScript 声明从执行所用的同一 schema 生成。用户操作示例见 
 
 ## Codex 参考与适配
 
-运行时、补丁引擎、提示和声明统一参考 rust-v0.164.0（`6aaac694803004a63c6f393d153c96d22521a6b9`）。
-参考源码包括 [Code Mode 提示](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/description.rs)、
-[TypeScript schema 渲染器](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/code-mode-protocol/src/json_schema_types.rs)、
-[Shell 定义](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/shell_spec.rs)和
-[资源定义](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)。
+运行时、补丁引擎、提示和声明统一参考 rust-v0.167.0（`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`）。
+参考源码包括 [Code Mode 提示](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/description.rs)、
+[TypeScript schema 渲染器](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/json_schema_types.rs)、
+[Shell 定义](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/shell_spec.rs)和
+[资源定义](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs)。
 图片和异步问题契约也使用同一快照。本机与下游声明使用小型移植渲染器，
 apply_patch 的字符串参数交给固定补丁引擎；本实例继续通过 ALL_TOOLS 发现工具。
 
@@ -110,9 +110,14 @@ apply_patch 的字符串参数交给固定补丁引擎；本实例继续通过 A
 | 外层预算和 110 秒 wait | 适配目标连接器，内层保留原值供 JS 处理，见 ADR-003。 |
 | Shell 单次覆盖、EOF/resize/terminate 和零等待 | 保留现有进程操作；配置默认值允许单次参数覆盖。 |
 | 原生 MCP 图片/文件块、Skills 和 Web 问答 | 适配 ChatGPT 的文件及消息交付方式，提供独立的 Skill 发现；未接入 notify 注入。 |
+| view_image 的一处显示示例 | ChatGPT 实际使用中曾把 data URL 误序列化为文本。一句正向示例保留上游返回对象与显式图片输出语义。 |
+| 简短的 settlement helper 描述 | 固定 host 已支持 as_settled 和 stream_settled，但其基础提示仍未列出。保留现有简短描述，让模型能够发现这些原生能力。 |
 | Agent 消息不承诺回复，提问交给 request_user_input_async | exec-mcp 无法开启 ChatGPT 的新轮次，承诺的回复不会到来，见 [ADR-010](010-session-notes.zh.md#agent-发来的消息)。 |
 | 由模型通过 set_conversation_title 为对话命名 | Codex 根据用户消息另起隐藏的模型调用生成标题，而 exec-mcp 收不到用户消息，见 [ADR-010](010-session-notes.zh.md#对话标题)。 |
 | 资源直接 URI 读取与聚合 errors | 支持模板和链接，并保留部分失败的信息。 |
 
 措辞与声明形式沿用上游，仅在 ChatGPT MCP 与 Codex CLI 确有差异时修改，并在这里记录原因。
+0.167.0 的基础 Code Mode 提示、JSON Schema 渲染器和图片契约与 0.164.0 相同，无需重写措辞。
+已审查的更新版 Codex 增量工具消息依赖模型历史控制权，本 MCP 服务不具备这一能力。
+缓存目录后的下游懒启动也与完整启动校验冲突，因此两者都不引入本适配层。
 集成边界仍是 [ADR-001](001-exec-runtime.zh.md) 定义的执行层。

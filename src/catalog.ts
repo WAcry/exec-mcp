@@ -1,5 +1,5 @@
 // Tool descriptions adapted from OpenAI Codex (Apache-2.0),
-// rust-v0.164.0; see proto/LICENSE.
+// rust-v0.167.0; see proto/LICENSE.
 import { z } from "zod/v4";
 import {
   schemaType,
@@ -358,7 +358,7 @@ const NATIVE_CONTRACTS = {
       additionalProperties: false,
     },
     description:
-      "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+      "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk. Display the result with `image(await tools.view_image(...))`.",
   }),
   request_user_input_async: contract({
     name: "request_user_input_async",

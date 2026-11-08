@@ -2,7 +2,7 @@
 
 [English](001-exec-runtime.md) | 简体中文
 
-当前生效，2026-10-23 更新。
+当前生效，2026-11-08 更新。
 
 ## 选择原因
 
@@ -54,8 +54,10 @@ Codex 组件，MCP 使用官方 SDK。依赖范围不包含完整 Codex App Serv
 [来源记录](../../proto/PROVENANCE.json)写明 Code Mode 协议副本的上游 tag、commit、路径和 SHA-256，测试据此校验副本。
 二进制定位读取 codex-package.json，布局、版本或目标与预期不符时给出明确错误并停止。
 升级时，版本 pin、协议副本及其来源记录一并修改。
-host 与补丁引擎一起固定为 0.164.0。采用原生的 Promise 完成处理、定时器清理和存储快照共享，
+host 与补丁引擎一起固定为 0.167.0。采用原生的 Promise 完成处理、定时器清理和存储快照共享，
 改善常驻实例的使用；恢复时的状态丢失边界见 [ADR-003](003-results-lifecycle.zh.md)。
+使用正式发布包，保证各平台二进制可复现；main 分支的后续变化单独评估，避免把未发布 host 与正式协议混用。
+显式协商 0.167.0 的输出模式，兼容性选择及其内存代价记录在 ADR-003。
 Codex 组件及协议的许可见 [Apache-2.0 原文](../../proto/LICENSE)，依赖自带的许可证与 NOTICE 保留。
 
 Windows、Linux、macOS 都是产品目标，Windows 使用原生执行路径。
@@ -84,9 +86,9 @@ exec 描述包含本机完整契约，篇幅较长，但新 Agent 可以直接�
 
 ## 参考源码
 
-参考 Codex 快照 `6aaac694803004a63c6f393d153c96d22521a6b9`。
-[补丁工具](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
-采用 freeform，[Code Mode 契约转换](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/code-mode-protocol/src/description.rs)
+参考 Codex 快照 `086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`。
+[补丁工具](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
+采用 freeform，[Code Mode 契约转换](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/code-mode-protocol/src/description.rs)
 将其映射为字符串参数。
-[平台包装脚本](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-cli/scripts/build_npm_package.py)
+[平台包装脚本](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-cli/scripts/build_npm_package.py)
 用于核对上游平台分发；exec-mcp 的跨平台支持仍需单独验证。运行版本由项目依赖显式固定。

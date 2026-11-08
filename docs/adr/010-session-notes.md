@@ -2,7 +2,7 @@
 
 English | [简体中文](010-session-notes.zh.md)
 
-Active, updated 2026-10-23.
+Active, updated 2026-11-08.
 
 ## Conversation ownership and delivery
 
@@ -32,7 +32,7 @@ No new MCP parameter, polling method, or output allowance is added. This cannot 
 
 ## Agent messages
 
-The [Codex message tool](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) takes a single message and returns accepted immediately.
+The [Codex message tool](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/send_message_to_user_async.rs) takes a single message and returns accepted immediately.
 We keep its shape and most of its description. Messages only inform: a blocker or finding the operator must know now, or a brief answer to a question the operator sent while work continues.
 Questions go through request_user_input_async, which accepts free-text or choice questions and returns answers. The destination is the current conversation's Web UI.
 
@@ -56,7 +56,7 @@ It renders bold, inline code, code blocks, and links without interpreting HTML. 
 ## Conversation titles
 
 ChatGPT sends no conversation title in `_meta`, and the service never sees the user's message. Pinned Codex titles a thread in its TUI with a hidden model call on the first user message
-([thread_title.rs](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/tui/src/app/thread_title.rs)); exec-mcp has no such input,
+([thread_title.rs](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/tui/src/app/thread_title.rs)); exec-mcp has no such input,
 so the model sets a title with tools.set_conversation_title in its first exec, next to its real work. The description keeps only what ChatGPT needs to use it well:
 the purpose, calling once in the first exec, 3 to 8 words summarizing the user's task, the user's language, and that only the first title is kept.
 It suggests words instead of Codex's 36 characters and under five words, because Codex constrains a structured output while this model writes the string by hand and cannot count characters reliably.
@@ -74,8 +74,8 @@ exec/wait results are textual; a structured envelope keeps only its result and n
 
 ## Asynchronous questions and answers
 
-The design follows [request_user_input_async](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
-from Codex rust-v0.164.0, retaining questions/title, optional options string arrays, and the accepted response shape.
+The design follows [request_user_input_async](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+from Codex rust-v0.167.0, retaining questions/title, optional options string arrays, and the accepted response shape.
 await waits for submission only, allowing the agent to continue other work. Codex can inject a new user message;
 exec-mcp returns the answer through a subsequent ordinary tool response.
 

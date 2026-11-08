@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TerminalManager } from "../src/host/terminal.js";
 import { PatchRunner } from "../src/host/patch.js";
 import { nodeCommand, observeTerminal } from "./helpers.js";
@@ -21,6 +21,15 @@ function terminal(bufferBytes?: number): TerminalManager {
   );
   terminals.push(value);
   return value;
+}
+async function expectChildStopped(pid: number): Promise<void> {
+  await vi.waitFor(
+    () =>
+      expect(() => process.kill(pid, 0)).toThrow(
+        expect.objectContaining({ code: "ESRCH" }),
+      ),
+    { timeout: 5000 },
+  );
 }
 afterEach(async () => {
   await Promise.all(terminals.splice(0).map((value) => value.close()));
@@ -89,7 +98,9 @@ describe("real local processes", () => {
   it("describes retained processes by command line, directory and owning conversation", async () => {
     const cwd = await directory();
     const value = terminal();
-    const command = nodeCommand("setInterval(() => {}, 1000)");
+    const command = nodeCommand(
+      'console.log("READY:"+process.pid);setInterval(() => {}, 1000)',
+    );
     const first = await value.execCommand(
       { cmd: `\n${command}`, yield_time_ms: 0 },
       cwd,
@@ -104,7 +115,15 @@ describe("real local processes", () => {
         owner: "conversation-digest",
       }),
     ]);
+    // Test a running child, not the Windows shell's initial child-spawn race.
+    const ready = await observeTerminal(
+      first,
+      (input) => value.writeStdin(input),
+      (result) => /READY:\d+\r?\n/.test(result.output),
+    );
+    const childPid = Number(ready.output.match(/READY:(\d+)\r?\n/)![1]);
     await value.writeStdin({ session_id: first.session_id!, terminate: true });
+    await expectChildStopped(childPid);
   });
   it("keeps an interactive pipe across calls, including stdin EOF", async () => {
     const value = terminal();
@@ -150,15 +169,27 @@ describe("real local processes", () => {
   it("terminates an owned process and yields a final result", async () => {
     const value = terminal();
     const first = await value.execCommand(
-      { cmd: nodeCommand("setInterval(()=>{},1000)"), yield_time_ms: 0 },
+      {
+        cmd: nodeCommand(
+          'console.log("READY:"+process.pid);setInterval(()=>{},1000)',
+        ),
+        yield_time_ms: 0,
+      },
       await directory(),
     );
+    const ready = await observeTerminal(
+      first,
+      (input) => value.writeStdin(input),
+      (result) => /READY:\d+\r?\n/.test(result.output),
+    );
+    const childPid = Number(ready.output.match(/READY:(\d+)\r?\n/)![1]);
     const result = await value.writeStdin({
       session_id: first.session_id!,
       terminate: true,
     });
     expect(result.exit_code).toBeDefined();
     expect(result.session_id).toBeUndefined();
+    await expectChildStopped(childPid);
   });
   it("supports native PTY input and resize", async () => {
     const value = terminal();

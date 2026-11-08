@@ -3,7 +3,10 @@ import * as grpc from "@grpc/grpc-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodeModeHostProcess } from "../src/code-mode/host-process.js";
 import { CodeModeSession } from "../src/code-mode/session.js";
-import type { ProtoMessage } from "../src/code-mode/protocol.js";
+import type {
+  CodeModeHostClient,
+  ProtoMessage,
+} from "../src/code-mode/protocol.js";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -11,13 +14,14 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function open() {
+async function open(configure?: (client: CodeModeHostClient) => void) {
   const host = new CodeModeHostProcess({
     startupTimeoutMs: 10_000,
     onUnexpectedExit() {},
   });
   cleanup.push(() => host.stop());
   const client = await host.start();
+  configure?.(client);
   const onFailure = vi.fn();
   const session = await CodeModeSession.open({
     client,
@@ -39,6 +43,67 @@ function notFound(): grpc.ServiceError {
     },
   );
 }
+
+describe("Code Mode output ownership negotiation", () => {
+  it.each([false, true])(
+    "requests client-owned output and accepts its acknowledgement (explicit=%s)",
+    async (explicit) => {
+      let opened: ProtoMessage | undefined;
+      const { client, session } = await open((client) => {
+        const invoke = client.openSession.bind(client);
+        vi.spyOn(client, "openSession").mockImplementation((request) => {
+          const stream = invoke(request);
+          stream.once("data", (message: ProtoMessage) => {
+            opened = message.opened as ProtoMessage;
+            // The pinned host omits CLIENT; also accept an explicit acknowledgement.
+            if (explicit) opened.outputTruncation = "OUTPUT_TRUNCATION_CLIENT";
+          });
+          return stream;
+        });
+      });
+      expect(client.openSession).toHaveBeenCalledWith({
+        outputTruncation: "OUTPUT_TRUNCATION_CLIENT",
+      });
+      expect(opened?.outputTruncation).toBe(
+        explicit ? "OUTPUT_TRUNCATION_CLIENT" : undefined,
+      );
+      expect(
+        await session.execute({
+          source: 'text("ready");',
+          toolCallId: "negotiated",
+          tools: [],
+        }),
+      ).toMatchObject({
+        state: "completed",
+        items: [{ type: "text", text: "ready" }],
+      });
+    },
+  );
+
+  it.each(["OUTPUT_TRUNCATION_SERVER", "OUTPUT_TRUNCATION_UNSPECIFIED", 42])(
+    "cancels an incompatible session lease (%s)",
+    async (mode) => {
+      let cancel: unknown;
+      let subscribe: unknown;
+      await expect(
+        open((client) => {
+          subscribe = vi.spyOn(client, "subscribeToToolCalls");
+          const invoke = client.openSession.bind(client);
+          vi.spyOn(client, "openSession").mockImplementation((request) => {
+            const stream = invoke(request);
+            cancel = vi.spyOn(stream, "cancel");
+            stream.once("data", (message: ProtoMessage) => {
+              (message.opened as ProtoMessage).outputTruncation = mode;
+            });
+            return stream;
+          });
+        }),
+      ).rejects.toThrow("client-side truncation is required");
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(subscribe).not.toHaveBeenCalled();
+    },
+  );
+});
 
 describe("Code Mode missing-session RPC contracts", () => {
   it.each([false, true])(

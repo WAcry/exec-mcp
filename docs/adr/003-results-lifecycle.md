@@ -2,7 +2,7 @@
 
 English | [简体中文](003-results-lifecycle.zh.md)
 
-Active, updated 2026-10-23.
+Active, updated 2026-11-08.
 
 ## Deduplication and presentation
 
@@ -21,12 +21,21 @@ This fits ordinary MCP responses without asynchronous model-message injection or
 Agents filter large results in Code Mode or store them for later partial reads through load. Persistent content can be explicitly written to files.
 The service does not spill generic results automatically, avoiding extra rereading, path resolution, and cleanup steps.
 Final responses use a conservative UTF-8 byte limit measured on the target connection, retaining the head and tail with a marker when exceeded.
+Retained text, media, and resources keep their relative order, including at this final limit. Only adjacent plain text blocks may be combined.
 Later waits do not recover omitted text. Truncation may break JSON syntax, and the host's actual token limit can change.
 
 exec.max_output_tokens and wait.max_tokens narrow their respective response text budgets. Outer arguments override first-line pragmas;
 wait does not inherit exec's explicit budget. Token counting is approximate. Status, handles, and media are preserved within the relevant final payload limits.
 The outer response budget leaves nested values intact for JS processing. Each tool still applies its own output and transport limits; oversized values can fail before reaching JS.
 Oversized inputs fail before an operation, while oversized results may fail afterward and must not trigger automatic replay.
+
+Native sessions explicitly select CLIENT output truncation and reject an incompatible reported mode before running cells; an absent acknowledgement also means CLIENT, as in the 0.167.0 host.
+Codex 0.167.0 also offers [SERVER truncation](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/session.rs),
+which bounds retention but admits only 8 MiB of encoded image URLs per observation and charges audio against the output token budget.
+Those policies can discard original images or a batch of screenshots and remove audio at a zero text budget, contrary to this adapter's existing MCP contract.
+Keep one client-side text policy instead of silently changing media delivery or applying two competing truncation policies.
+The accepted cost is that native explicit-output retention is not bounded by the new collector; transport limits and process-memory reclamation still apply,
+and burst allocation can exhaust memory before sampling. Nested results and stored values remain separate from final-output budgets.
 
 User notes share the normal result's text channel and use only spare capacity. Complete messages that do not fit remain queued;
 normal output is not reduced for them. See [ADR-010](010-session-notes.md).
@@ -58,9 +67,11 @@ Each exec creates an independent V8 isolate. A running script is resumed or term
 After a command returns session_id, the terminal manager owns that process. It remains usable across exec calls and after the outer cell ends.
 Handles are valid only during the current run; ingress authentication controls access.
 Normal shutdown cleans up owned processes. Files and external operations may survive abnormal exits.
+Windows tree termination uses taskkill and can race a child launched during shell startup. Foreground exit alone does not prove every descendant stopped;
+tests of running-process termination first obtain the child's readiness and PID, then verify that child exits. This existing platform limitation is not changed by the Codex upgrade.
 
 write_stdin follows the pinned Codex collection window. Nonempty input defaults to a short wait; empty input allows a longer collection.
-The [upstream collector](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/core/src/unified_exec/process_manager.rs)
+The [upstream collector](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/unified_exec/process_manager.rs)
 collects logs until the deadline or process exit. Its window starts after acquiring the terminal and completing writes or resizing.
 Queueing and stdin backpressure do not consume that window, and new logs do not reset the deadline. Explicit 0 retains immediate reads.
 Longer waits do not increase buffer or output capacity.
@@ -110,6 +121,7 @@ Old close callbacks, late results, and leases affect their own generation only. 
 Normal idle expiry creates a fresh session on the next exec and returns the existing new-session/store-empty notice. Failure markers follow the same idle retention.
 
 Only the owned Code Mode host's approximate RSS/working set is sampled. Users manage browsers, compilers, and other child process trees they start.
+The 0.167.0 protocol's optional metrics RPC is not used: its standalone packaged host has no collector and returns UNIMPLEMENTED, so platform sampling remains necessary.
 Sampling failures produce diagnostics, and stale samples cannot judge a new host. Normally, idle sessions remain after all cells finish.
 Above the high-water mark, reclaim by time of entering idle state, in FIFO order, then measure again.
 If no idle candidate remains and memory is still high, reclaim the least recently used active session; its cells and store may be lost together.

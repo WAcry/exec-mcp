@@ -184,9 +184,21 @@ describe("real rolling terminal output, not output files", () => {
     await closed.done;
     expect(closed.buffer.bytes).toBeGreaterThan(0);
     const running = await value.execCommand(
-      { cmd: nodeCommand("setInterval(()=>{},1000);"), yield_time_ms: 0 },
+      {
+        cmd: nodeCommand(
+          'console.log("READY:"+process.pid);setInterval(()=>{},1000);',
+        ),
+        yield_time_ms: 0,
+      },
       tmpdir(),
     );
+    // Age a running fixture, not a shell that is still creating its child.
+    const ready = await observeTerminal(
+      running,
+      (input) => value.writeStdin(input),
+      (result) => /READY:\d+\r?\n/.test(result.output),
+    );
+    const childPid = Number(ready.output.match(/READY:(\d+)\r?\n/)![1]);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 2000);
     value["sweep"]();
@@ -202,6 +214,13 @@ describe("real rolling terminal output, not output files", () => {
       (await observeTerminal(stopped, (input) => value.writeStdin(input)))
         .exit_code,
     ).toBeDefined();
+    await vi.waitFor(
+      () =>
+        expect(() => process.kill(childPid, 0)).toThrow(
+          expect.objectContaining({ code: "ESRCH" }),
+        ),
+      { timeout: 5000 },
+    );
   });
   it("refreshes finished output retention when it is actually read", async () => {
     const value = terminal(8 * 1024 * 1024, 1000);

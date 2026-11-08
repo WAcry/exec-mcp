@@ -2,7 +2,7 @@
 
 English | [简体中文](006-skill-catalog.zh.md)
 
-Active, updated 2026-10-23.
+Active, updated 2026-11-08.
 
 ## Catalog and full content
 
@@ -30,7 +30,7 @@ Discovery reads files without running Git, Skill scripts, or installers. Other C
 ## Configuration toggles
 
 Operators configure skills.config in exec-mcp's config.toml. Skills without a matching rule are enabled by default.
-Selectors and rule ordering follow [Codex 0.164.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.164.0/codex-rs/config/src/skills_config.rs),
+Selectors and rule ordering follow [Codex 0.167.0 SkillConfigRules](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/config/src/skills_config.rs),
 while configuration is read only from this service. Each rule specifies name or path and an enabled boolean.
 name exactly matches all entries with that name. path identifies one SKILL.md and can distinguish separate files sharing a name.
 Apply rules in configuration order; the last match wins.
@@ -78,7 +78,7 @@ without an advance explanation of the budgeting algorithm or extreme cases.
 
 ## Codex reuse
 
-The port references snapshot 7498521d288b9b3b96ffba4eedf089d8d6e06a84 and was checked against rust-v0.164.0,
+The port references snapshot 7498521d288b9b3b96ffba4eedf089d8d6e06a84 and was checked against rust-v0.167.0,
 including [render.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/render.rs)
 and [aliases.rs](https://github.com/openai/codex/blob/7498521d288b9b3b96ffba4eedf089d8d6e06a84/codex-rs/ext/skills/src/aliases.rs).
 Only the needed budget and path-alias algorithms and tests are ported. The pinned package has no standalone Skill Loader binary,
@@ -87,3 +87,9 @@ and the rendering interface is internal to the upstream extension. Porting this 
 This project retains names and paths for explicit-only Skills and does not intentionally drop entries under small budgets. Policy parse failures keep invocation explicit.
 Tests cover these differences. The links above and source comments record attribution; see [Apache-2.0](../../proto/LICENSE).
 Other Codex Skill configuration is outside the compatibility scope.
+
+The 0.167.0 review found no changes to the parser, metadata model, or SkillConfigRules relevant to this port.
+Upstream incremental catalogs depend on Codex's model-history lifecycle, while empty remote-discovery caching depends on executor filesystem watches.
+This service owns neither ChatGPT history nor a remote Skill filesystem, so list_skills keeps a fresh complete catalog and the existing budget/path algorithms.
+Optional description omission is not adopted: task-based Skill selection still needs useful trigger descriptions, and the existing budget avoids another rendering option.
+Codex's later filesystem-authority changes and display-name lookup apply to its sandbox and separate Skill read/install tools, which this adapter does not expose.

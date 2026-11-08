@@ -4,10 +4,11 @@ English | [简体中文](CHANGELOG.zh.md)
 
 ## 1.0.0
 
-First stable release of exec-mcp for connecting ChatGPT to a user-operated machine.
+Changes prepared for the first stable release of exec-mcp, connecting ChatGPT to a user-operated machine. Version 1.0.0 remains unreleased.
 
 Code Mode provides exec and wait, with nested shell commands, patches, file transfer, Skill discovery, and downstream MCP tools and resources.
-Codex 0.162.0 adds native as_settled and stream_settled helpers and improves timer and stored-value memory handling. Patch updates preserve LF/CRLF line endings.
+The Code Mode host and patch engine are pinned together to Codex 0.167.0, with matching protocol provenance and reviewed tool contracts. Native as_settled and stream_settled helpers, timer cleanup, stored-value snapshots, and LF/CRLF patch preservation remain available.
+Client-side output budgeting is explicitly negotiated to retain text-only limits and original image/audio delivery. Final text truncation preserves interleaved media and resources; view_image includes one concise image(...) usage example.
 New Web notes and answers can return an in-flight response early while execution continues.
 Errors for tool input, configuration, and downstream calls name the field and the expected values, and runtime and CLI messages are in English. Commands stopped by a signal report exit code 128+N.
 Terminal sessions and their unread output have configurable limits, and cells that no wait observes stop after the idle retention period.

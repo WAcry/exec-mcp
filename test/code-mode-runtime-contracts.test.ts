@@ -12,7 +12,62 @@ function service() {
   return value;
 }
 
-describe("Codex 0.164 runtime compatibility", () => {
+describe("pinned Codex runtime compatibility", () => {
+  it("preserves large images and audio with a zero text budget", async () => {
+    // 25 ms of 16 kHz mono PCM, so the native short-audio rule keeps it.
+    const audio = Buffer.concat([
+      Buffer.from(
+        "UklGRkQDAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YSADAAA=",
+        "base64",
+      ),
+      Buffer.alloc(800),
+    ]).toString("base64");
+    // A wire fixture exceeds the server collector's 8 MiB image URL allowance.
+    // Client-owned truncation must leave these bytes to the MCP transport limit.
+    const imageBytes = 8 * 1024 * 1024;
+    const result = await service().exec({
+      tools: [],
+      maxOutputTokens: 0,
+      source: `text("hidden body");
+        image({image_url:"data:image/png;base64,"+"A".repeat(${imageBytes}),detail:"original"});
+        audio({type:"audio",mimeType:"audio/wav",data:${JSON.stringify(audio)}});`,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content.map((item) => item.type)).toEqual([
+      "text",
+      "image",
+      "audio",
+    ]);
+    const image = result.content.find((item) => item.type === "image");
+    expect(image?.data).toHaveLength(imageBytes);
+    expect(image?.data).toMatch(/^A+$/);
+    expect(image?._meta).toEqual({ "openai/imageDetail": "original" });
+    expect(result.content.find((item) => item.type === "audio")).toEqual({
+      type: "audio",
+      mimeType: "audio/wav",
+      data: audio,
+    });
+    expect(texts(result).join("\n")).not.toContain("hidden body");
+  });
+
+  it.each([false, true])(
+    "renders terminal errors exactly once (yielded=%s)",
+    async (yielded) => {
+      const value = service();
+      let result = await value.exec({
+        tools: [],
+        source: `${yielded ? "yield_control();" : ""}throw new Error("compatibility failure");`,
+      });
+      while (texts(result)[0]?.startsWith("Script running"))
+        result = await value.wait({ cellId: cellId(result) });
+      expect(result.isError).toBe(true);
+      expect(
+        texts(result).filter((item) => item.startsWith("Script error:\n")),
+      ).toHaveLength(1);
+      expect(texts(result).join("\n")).toContain("compatibility failure");
+    },
+  );
+
   it.each([
     'try { exit(); } catch { text("caught"); } finally { store("phase","finally"); text("finally"); }',
     'await Promise.all([Promise.resolve().then(() => exit()), Promise.resolve().then(() => store("phase","sibling"))]);',

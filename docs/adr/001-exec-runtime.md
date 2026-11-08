@@ -2,7 +2,7 @@
 
 English | [简体中文](001-exec-runtime.zh.md)
 
-Active, updated 2026-10-23.
+Active, updated 2026-11-08.
 
 ## Rationale
 
@@ -54,8 +54,10 @@ it does not read the installed Codex configuration or database. Component upgrad
 The [provenance record](../../proto/PROVENANCE.json) gives the upstream tag, commit, path, and SHA-256 of the Code Mode protocol copy, and tests check the copy against it.
 The binary locator reads codex-package.json and stops with a clear error when the layout, version, or target is not the expected one.
 An upgrade changes the version pin, the protocol copy, and its provenance record together.
-The host and patch engine are pinned together at 0.164.0. Native Promise settlement helpers, timer cleanup, and shared stored-value snapshots
+The host and patch engine are pinned together at 0.167.0. Native Promise settlement helpers, timer cleanup, and shared stored-value snapshots
 benefit long-lived instances without a fork of the runtime. Recovery follows the state-loss boundary in [ADR-003](003-results-lifecycle.md).
+Use the released package for reproducible platform binaries; later main-branch changes are reviewed separately instead of mixing an unreleased host with a released protocol.
+The 0.167.0 output-mode negotiation is explicit; the compatibility choice and its memory tradeoff are recorded in ADR-003.
 See the [Apache-2.0 text](../../proto/LICENSE) for the components and protocol. Retain licenses and NOTICE files shipped with dependencies.
 
 Windows, Linux, and macOS are product targets; Windows uses native execution.
@@ -84,9 +86,9 @@ while validating cancellation, result fidelity, and connectivity. Adopt old prod
 
 ## Source references
 
-Reference snapshot `6aaac694803004a63c6f393d153c96d22521a6b9` of Codex.
-Its [patch tool](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
-is freeform; [Code Mode contract conversion](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-rs/code-mode-protocol/src/description.rs)
+Reference snapshot `086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a` of Codex.
+Its [patch tool](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/core/src/tools/handlers/apply_patch_spec.rs)
+is freeform; [Code Mode contract conversion](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-rs/code-mode-protocol/src/description.rs)
 maps it to a string argument.
-The [platform packaging script](https://github.com/openai/codex/blob/6aaac694803004a63c6f393d153c96d22521a6b9/codex-cli/scripts/build_npm_package.py)
+The [platform packaging script](https://github.com/openai/codex/blob/086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a/codex-cli/scripts/build_npm_package.py)
 is a reference for upstream distribution. exec-mcp's platform support needs its own validation, and project dependencies explicitly pin the runtime version.

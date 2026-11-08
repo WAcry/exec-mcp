@@ -1,4 +1,4 @@
-// Adapted from OpenAI Codex rust-v0.164.0 (Apache-2.0),
+// Adapted from OpenAI Codex rust-v0.167.0 (Apache-2.0),
 // code-mode-protocol/src/json_schema_types.rs and description.rs; see proto/LICENSE.
 
 type Schema = Record<string, unknown>;

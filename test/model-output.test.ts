@@ -36,11 +36,35 @@ describe("conservative model-bound text, separate from tool data", () => {
   it("retains status, first/last text and every media/resource block under the combined byte ceiling", () => {
     const input: CallToolResult = {
       content: [
-        { type: "text", text: "Script running with cell ID cell-fixture\n" },
-        { type: "text", text: "BEGIN" + "中文😀".repeat(30000) },
-        { type: "image", data: "fake", mimeType: "image/png" },
-        { type: "text", text: "last".repeat(30000) + "END" },
-        { type: "resource_link", uri: "resource://fixture", name: "fixture" },
+        {
+          type: "text",
+          text: "Script running with cell ID cell-fixture\n",
+          _meta: { status: true },
+        },
+        {
+          type: "text",
+          text: "BEGIN" + "中文😀".repeat(30000),
+          annotations: { audience: ["assistant"] },
+          _meta: { position: "before" },
+        },
+        {
+          type: "image",
+          data: "fake",
+          mimeType: "image/png",
+          _meta: { "openai/imageDetail": "original" },
+        },
+        { type: "audio", data: "audio-fixture", mimeType: "audio/wav" },
+        {
+          type: "text",
+          text: "后😀".repeat(30000) + "END",
+          _meta: { position: "after" },
+        },
+        {
+          type: "resource_link",
+          uri: "resource://fixture",
+          name: "fixture",
+          _meta: { retained: true },
+        },
       ],
     };
     const result = boundModelOutput(input);
@@ -52,20 +76,56 @@ describe("conservative model-bound text, separate from tool data", () => {
     expect(result.content.filter((item) => item.type !== "text")).toEqual(
       input.content.filter((item) => item.type !== "text"),
     );
+    expect(result.content.map((item) => item.type)).toEqual([
+      "text",
+      "text",
+      "image",
+      "audio",
+      "text",
+      "resource_link",
+    ]);
+    expect(result.content[0]!._meta).toEqual({ status: true });
+    expect(result.content[1]).toMatchObject({
+      annotations: { audience: ["assistant"] },
+      _meta: { position: "before" },
+    });
+    expect(result.content[4]!._meta).toEqual({ position: "after" });
+    expect(result.content[2]).toBe(input.content[2]);
+    expect(result.content[3]).toBe(input.content[3]);
+    expect(result.content[5]).toBe(input.content[5]);
     expect(
       input.content[1]!.type === "text" && input.content[1]!.text.length,
     ).toBeGreaterThan(100000);
   });
   it("also bounds thousands of small items and does not duplicate a structured result", () => {
     const result = boundModelOutput({
-      content: Array.from({ length: 20000 }, () => ({
-        type: "text" as const,
-        text: "x",
-      })),
+      content: [
+        ...Array.from({ length: 10000 }, () => ({
+          type: "text" as const,
+          text: "x",
+        })),
+        { type: "image", data: "fixture", mimeType: "image/png" },
+        ...Array.from({ length: 10000 }, () => ({
+          type: "text" as const,
+          text: "y",
+        })),
+      ],
     });
     expect(total(result)).toBeLessThanOrEqual(MODEL_TEXT_BYTES);
     expect(result.structuredContent).toBeUndefined();
     expect(result.content.length).toBeLessThan(10);
+    expect(result.content.map((item) => item.type)).toEqual([
+      "text",
+      "text",
+      "image",
+      "text",
+    ]);
+    expect(result.content[1]).toMatchObject({
+      text: expect.stringMatching(/^x/),
+    });
+    expect(result.content[3]).toMatchObject({
+      text: expect.stringMatching(/y$/),
+    });
   });
   it("preserves a large raw nested result for selection and store/load without replaying the tool", async () => {
     const host = service();

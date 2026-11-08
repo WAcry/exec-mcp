@@ -278,11 +278,18 @@ describe.each([false, true])(
       expect(hidden.content.some((item) => item.type === "image")).toBe(false);
       const shown = await t.exec(
         "image(await tools.view_image({path:'pixel.png',detail:'original'}));",
+        { max_output_tokens: 0 },
       );
       expect(shown.isError).not.toBe(true);
-      expect(shown.content.find((item) => item.type === "image")).toMatchObject(
-        { type: "image", data, mimeType: "image/png" },
-      );
+      expect(shown.content.filter((item) => item.type === "image")).toEqual([
+        {
+          type: "image",
+          data,
+          mimeType: "image/png",
+          _meta: { "openai/imageDetail": "original" },
+        },
+      ]);
+      expect(texts(shown).join("\n")).not.toContain(data);
     });
 
     it("discovers project skills through both the exec default and an explicit nested workdir", async () => {

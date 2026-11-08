@@ -268,6 +268,21 @@ describe.each([false, true])("fresh MCP contract (legacy=%s)", (legacy) => {
     directories.push(directory);
     const listed = (await connection.client.listTools()).tools;
     expect(listed.map((tool) => tool.name)).toEqual(TOP_LEVEL_TOOL_NAMES);
+    expect(listed[0]!.description).toContain(
+      "exec waits 30000 ms by default, at most 30000",
+    );
+    expect(listed[0]!.inputSchema.properties).toMatchObject({
+      yield_time_ms: {
+        maximum: 30_000,
+        description: expect.stringContaining("Defaults to 30000 ms"),
+      },
+    });
+    expect(listed[1]!.inputSchema.properties).toMatchObject({
+      yield_time_ms: {
+        maximum: 110_000,
+        description: expect.stringContaining("Defaults to 110000 ms"),
+      },
+    });
     expect(listed[0]!.description!.split("## Local tools")[0]).toContain(
       AGENT_CLI_RULE,
     );

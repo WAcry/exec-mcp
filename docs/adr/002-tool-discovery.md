@@ -106,7 +106,8 @@ the pinned patch engine receives apply_patch's string argument. ALL_TOOLS remain
 | --- | --- |
 | MCP source/workdir/files object | MCP lacks Codex's implicit turn directory. The host binds attachments outside JS, which selects them by index. |
 | String handles | Preserves the local executor's actual field types. |
-| Outer budgets and a 110-second wait | Fits the target connector while retaining nested values for JS processing under ADR-003. |
+| A 110-second wait; exec matches Core's 30 seconds | Longer ChatGPT observations reduce round trips within the target connector's timeout margin under ADR-003. |
+| Native SERVER collection with separate MCP text budgets and loss notices | Keeps the official collector while preserving retained audio at a zero caller text budget. Disclosed retention limits and persistent loss notices make omitted media visible; see ADR-003. |
 | Shell overrides, EOF/resize/terminate, and zero wait | Preserves supported process operations and per-call overrides of configured defaults. |
 | Native MCP image/file blocks, Skills, and Web questions | Fits ChatGPT file and message delivery and provides independent Skill discovery; notify injection is not connected. |
 | One view_image display example | ChatGPT dogfooding exposed accidental text serialization of its data URL. A single positive example keeps the upstream return object and explicit image output unchanged. |

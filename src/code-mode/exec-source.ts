@@ -1,6 +1,6 @@
 import { validateOutputBudget } from "./output-budget.js";
 
-export const DEFAULT_EXEC_YIELD_TIME_MS = 10_000;
+export const DEFAULT_EXEC_YIELD_TIME_MS = 30_000;
 export const DEFAULT_WAIT_YIELD_TIME_MS = 110_000;
 export const MAX_EXEC_YIELD_TIME_MS = 30_000;
 export const MAX_WAIT_YIELD_TIME_MS = 110_000;

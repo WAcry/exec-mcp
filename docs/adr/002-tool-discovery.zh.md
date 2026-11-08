@@ -107,7 +107,8 @@ apply_patch 的字符串参数交给固定补丁引擎；本实例继续通过 A
 | --- | --- |
 | MCP source/workdir/files 对象 | MCP 没有 Codex 的隐式 turn cwd；宿主附件在外层绑定，JS 使用索引。 |
 | 字符串句柄 | 保留本地执行器的真实字段类型。 |
-| 外层预算和 110 秒 wait | 适配目标连接器，内层保留原值供 JS 处理，见 ADR-003。 |
+| wait 使用 110 秒，exec 与 Core 的 30 秒一致 | 在目标连接器的超时余量内延长 ChatGPT 观察，减少往返，见 ADR-003。 |
+| 原生 SERVER 收集，独立的 MCP 文本预算与丢失提示 | 使用官方收集器，调用者零文本预算仍保留已接纳的音频；说明保留上限，并让丢失提示始终可见，见 ADR-003。 |
 | Shell 单次覆盖、EOF/resize/terminate 和零等待 | 保留现有进程操作；配置默认值允许单次参数覆盖。 |
 | 原生 MCP 图片/文件块、Skills 和 Web 问答 | 适配 ChatGPT 的文件及消息交付方式，提供独立的 Skill 发现；未接入 notify 注入。 |
 | view_image 的一处显示示例 | ChatGPT 实际使用中曾把 data URL 误序列化为文本。一句正向示例保留上游返回对象与显式图片输出语义。 |

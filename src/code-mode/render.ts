@@ -1,9 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { encodePayload } from "../limits.js";
 import { boundModelOutput } from "./model-output.js";
+import { preserveNativeOutputNotices } from "./native-output.js";
 import { applyOutputBudget } from "./output-budget.js";
 import { outputItemsToCallToolResult } from "./result.js";
-import type { CodeModeOutputItem } from "./types.js";
 import type { RuntimeOutcome } from "./wire.js";
 
 /**
@@ -17,14 +17,13 @@ export function renderModelResult(
   attachments: CallToolResult["content"],
   notice?: string,
 ): CallToolResult {
-  const items: CodeModeOutputItem[] = [...outcome.items];
-  if (outcome.state === "completed" && outcome.errorText !== undefined) {
-    items.push({ type: "text", text: `Script error:\n${outcome.errorText}` });
-  }
-  const budgeted = applyOutputBudget(items, maxTokens);
+  // SERVER already renders the script error; errorText determines status only.
+  const native = preserveNativeOutputNotices(outcome.items);
+  const budgeted = applyOutputBudget(native.items, maxTokens);
   const status =
     statusHeader(outcome, wallTimeSeconds) +
     (notice ?? "") +
+    native.notice +
     (budgeted.truncated
       ? `Text was truncated to the ${maxTokens}-token budget. Later wait calls do not return the omitted text.\n`
       : "");

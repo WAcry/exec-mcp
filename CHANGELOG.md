@@ -8,7 +8,7 @@ Changes prepared for the first stable release of exec-mcp, connecting ChatGPT to
 
 Code Mode provides exec and wait, with nested shell commands, patches, file transfer, Skill discovery, and downstream MCP tools and resources.
 The Code Mode host and patch engine are pinned together to Codex 0.167.0, with matching protocol provenance and reviewed tool contracts. Native as_settled and stream_settled helpers, timer cleanup, stored-value snapshots, and LF/CRLF patch preservation remain available.
-Client-side output budgeting is explicitly negotiated to retain text-only limits and original image/audio delivery. Final text truncation preserves interleaved media and resources; view_image includes one concise image(...) usage example.
+Code Mode exec now waits 30 seconds by default; outer wait remains at 110 seconds. Official SERVER output collection bounds retained text, media, and item counts, while MCP keeps its existing text-only budgets and preserves native loss diagnostics even at a zero text budget. Larger media use caller-selected batches or explicit source-file export. Final text truncation preserves retained interleaved media and resources; existing audio output and the concise view_image image(...) example remain available.
 New Web notes and answers can return an in-flight response early while execution continues.
 Errors for tool input, configuration, and downstream calls name the field and the expected values, and runtime and CLI messages are in English. Commands stopped by a signal report exit code 128+N.
 Terminal sessions and their unread output have configurable limits, and cells that no wait observes stop after the idle retention period.

@@ -15,6 +15,7 @@ import {
   MAX_WAIT_YIELD_TIME_MS,
 } from "./code-mode/exec-source.js";
 import { MODEL_TEXT_BYTES } from "./code-mode/model-output.js";
+import { NATIVE_OUTPUT_LIMITS } from "./code-mode/native-output.js";
 import {
   COMMAND_YIELD_TIME_MS,
   STDIN_YIELD_TIME_MS,
@@ -47,7 +48,7 @@ const tokenBudget = z
   .min(0)
   .max(Number.MAX_SAFE_INTEGER)
   .describe(
-    "Approximate text token budget for this response; 0 omits text. Media, execution status and user notes are preserved. Subject to the final output limit.",
+    "Approximate text token budget for this response; 0 omits script text. Retained media, execution status, output-limit notices and user notes are preserved. Transport limits apply.",
   )
   .optional();
 export const EXEC_SCHEMA = z
@@ -597,7 +598,8 @@ Tool availability can change between calls. list_skills provides local skill met
 ## Results and execution
 Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources. A nested call that fails rejects with its error message as a string; use String(error) in catch blocks.
 An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.
-Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Media and execution status are preserved. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
+Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Text budgets preserve retained media, execution status and output-limit notices. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
+Native output collection per observation retains up to ${mib(NATIVE_OUTPUT_LIMITS.textBytes)} text, ${mib(NATIVE_OUTPUT_LIMITS.imageUrlBytes)} encoded image URLs, ${mib(NATIVE_OUTPUT_LIMITS.audioUrlBytes)} encoded audio URLs and ${bytes(NATIVE_OUTPUT_LIMITS.items)} items. Loss is reported; use smaller exec batches or export source files for larger media. An export link does not display its media.
 exec waits ${DEFAULT_EXEC_YIELD_TIME_MS} ms by default, at most ${MAX_EXEC_YIELD_TIME_MS}. A still-running script returns Script running and cell_id; wait returns new output or the final result for that cell. Script completed means JavaScript finished, not that every command succeeded.
 cell_id identifies a script. session_id identifies a terminal that remains usable across exec calls through tools.write_stdin. A nested terminal collection may span several outer exec/wait calls. wait({cell_id, terminate:true}) stops the cell and requests cancellation of pending calls; terminals already returned with session_id remain independent. Failures and cancellation do not undo side effects.
 New Web user notes or answers can yield an in-flight exec/wait early. The cell and nested calls continue; wait collects their later output.
@@ -629,4 +631,4 @@ export const WAIT_DESCRIPTION = `Waits on a yielded exec cell and returns new ou
 - If the cell is still running, wait may yield again with the same cell_id.
 - If the cell has already finished, wait returns the completed result and closes the cell.
 - Completion, yield_control or new Web user input can return sooner. Early yields leave the cell and nested calls running. Cancelling this wait only cancels observation.
-- max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; media and status are preserved. Terminal session_id handles are used with tools.write_stdin inside exec.`;
+- max_tokens limits this response independently of exec. Final text remains bounded to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, or ${bytes(NOTES_RESPONSE_BYTES)} with user notes; retained media, status and output-limit notices are preserved. Native collection limits are described in exec. Terminal session_id handles are used with tools.write_stdin inside exec.`;

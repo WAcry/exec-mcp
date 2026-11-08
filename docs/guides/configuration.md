@@ -261,7 +261,23 @@ terminal_max_sessions limits the sessions kept at one time, running or finished 
 and is never smaller than terminal_buffer_mib. At a limit, finished unread sessions are released first; then the oldest unread output of running sessions is dropped and marked.
 Running processes are never stopped for a limit. When they alone fill it, new commands fail until the assistant reads or terminates sessions.
 
-Ordinary model responses allow at most 36,000 UTF-8 bytes, keeping the head and tail on overflow. Responses carrying user notes allow 37,000 bytes combined.
+The official Code Mode host bounds explicit output before transport. These fixed limits are separate from the [memory] settings above:
+
+| Boundary | Limit |
+| --- | --- |
+| Native text retention | 1 MiB per observation |
+| Native image retention | 8 MiB of encoded image URLs in total per observation |
+| Native audio retention | 62 MiB of encoded audio URLs in total per observation |
+| Native output items | 32,768 per observation |
+| Host gRPC message | 64 MiB |
+| exec-mcp serialized payload | 48 MiB |
+
+An observation collects output for one exec, wait, or termination response. Media allowances count encoded URLs, including Base64, and admit whole items while space remains.
+The item limit can evict earlier media. Native losses are reported and cannot be recovered by later waits.
+Combined retained media and serialization overhead can exceed a transport cap even when each collector allowance is met; delivery can fail after operations took effect, without automatic replay.
+See the [media examples](code-mode-examples.md#forward-audio-and-deliver-larger-media) for smaller batches and source-file delivery, and [ADR-003](../adr/003-results-lifecycle.md) for the SERVER decision.
+
+Ordinary model response text allows at most 36,000 UTF-8 bytes, keeping the head and tail on overflow. Responses carrying user notes allow 37,000 text bytes combined.
 These are conservative service byte budgets; actual ChatGPT token limits may change. Note bodies allow 30,000 bytes, including the question and choice for answers.
 If the first queued note does not fit, it waits without further clipping normal output. Messages and questions use bounded memory for 72 hours; insufficient capacity rejects new submissions.
 

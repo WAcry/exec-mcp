@@ -25,17 +25,30 @@ Retained text, media, and resources keep their relative order, including at this
 Later waits do not recover omitted text. Truncation may break JSON syntax, and the host's actual token limit can change.
 
 exec.max_output_tokens and wait.max_tokens narrow their respective response text budgets. Outer arguments override first-line pragmas;
-wait does not inherit exec's explicit budget. Token counting is approximate. Status, handles, and media are preserved within the relevant final payload limits.
+wait does not inherit exec's explicit budget. Token counting is approximate. Status, handles, and retained media are preserved within the relevant final payload limits.
 The outer response budget leaves nested values intact for JS processing. Each tool still applies its own output and transport limits; oversized values can fail before reaching JS.
 Oversized inputs fail before an operation, while oversized results may fail afterward and must not trigger automatic replay.
 
-Native sessions explicitly select CLIENT output truncation and reject an incompatible reported mode before running cells; an absent acknowledgement also means CLIENT, as in the 0.167.0 host.
-Codex 0.167.0 also offers [SERVER truncation](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/session.rs),
-which bounds retention but admits only 8 MiB of encoded image URLs per observation and charges audio against the output token budget.
-Those policies can discard original images or a batch of screenshots and remove audio at a zero text budget, contrary to this adapter's existing MCP contract.
-Keep one client-side text policy instead of silently changing media delivery or applying two competing truncation policies.
-The accepted cost is that native explicit-output retention is not bounded by the new collector; transport limits and process-memory reclamation still apply,
-and burst allocation can exhaust memory before sampling. Nested results and stored values remain separate from final-output budgets.
+Native sessions select [SERVER output truncation](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/session.rs)
+on the unmodified official host and require an explicit SERVER acknowledgement before running cells. Missing or incompatible acknowledgement cancels the session.
+This replaces the previous CLIENT choice with the native [bounded collector](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-runtime/src/output/output_collection.rs).
+Its per-observation text, encoded image/audio URL, and item limits are listed in the [configuration guide](../guides/configuration.md#capacity-and-temporary-state).
+Text retains a head and rolling tail; media are admitted whole in source order against their separate allowances. Item pressure can also evict media.
+
+The native host receives Number.MAX_SAFE_INTEGER as the internal maxOutputTokens for Execute, Wait, and Terminate.
+This makes its presentation allowance nonbinding for ordinary retained output without enlarging the collector or allocating memory in proportion to that number.
+Node continues to own the caller's text-only budget and the final MCP text ceiling, so a zero caller text budget does not itself discard retained audio.
+Native audio validation still applies, including the 25 ms minimum for PCM WAV; extreme duration metadata can still exhaust the native formatter's finite audio budget.
+The adapter keeps native output-loss counts and audio-omission diagnostics in status, outside caller text budgets and preserved within the final text ceiling, and leaves gap markers in the content's original order.
+Recognition matches the pinned host's exact text formats. The protocol supplies no structured provenance, so scripts can imitate these notices; interpretation affects display only, never execution or replay.
+Omitted output is not available to later waits. The native formatter supplies script errors; the adapter uses error metadata for status without appending another copy.
+
+Accept native media omissions in exchange for bounded explicit-output retention and continued use of the official host.
+CLIENT allowed larger media within transport limits but left that retention unbounded. A locally modified host could change those policies, at the cost of maintaining another runtime implementation.
+Keep one negotiated mode without a CLIENT toggle or runtime fork. Callers select smaller batches, image transformations, or source-file export as described in the [media examples](../guides/code-mode-examples.md#forward-audio-and-deliver-larger-media).
+The native event channel bounds event count and applies backpressure; it does not bound individual allocations, JS heaps, store, or all concurrent cells' memory.
+Collector allowances and transport caps are independent: combined retained media or serialization overhead can still make a response undeliverable after operations took effect.
+Transport limits and sampled process-memory reclamation remain in force, and burst allocation can still exhaust memory before sampling. Delivery failure never replays work.
 
 User notes share the normal result's text channel and use only spare capacity. Complete messages that do not fit remain queued;
 normal output is not reduced for them. See [ADR-010](010-session-notes.md).
@@ -78,7 +91,8 @@ Longer waits do not increase buffer or output capacity.
 After the main shell exits, a short bounded drain collects remaining output and reports its exit code once the retained output is consumed.
 Descendants may keep inherited pipes open; they do not keep the terminal observation alive, and this drain does not send them a termination signal.
 
-Nested tools may outlast an outer wait window. exec returns cell_id first, and wait retrieves subsequent output.
+Nested tools may outlast an outer wait window. exec defaults to its maximum 30-second observation, matching the pinned Codex Core and reducing initial ChatGPT round trips;
+if the script is still running, it returns cell_id and wait retrieves subsequent output.
 Outer wait deliberately defaults to and is capped at 110 seconds. Long observations reduce repeated ChatGPT round trips and token use,
 while leaving transport margin under the engineering assumption that the target connector timeout is at least 120 seconds.
 Completion, an explicit yield, or termination returns sooner; new user input can also end an observation early under [ADR-010](010-session-notes.md).
@@ -143,4 +157,4 @@ Only after the native host reports SyntaxError does the service parse the receiv
 This auxiliary parse provides diagnostics; it neither gates V8 syntax nor executes altered source.
 view_image reads a local image and returns {image_url, detail}; image_url is a data URL, and detail is a host hint. Scripts display it through image(await tools.view_image(...)).
 generatedImage outputs an existing data URL and hint. Image generation, URL download, and saving files require the relevant separate capability.
-Media follows the pinned host's rules without an additional audio or image filter for text budgets.
+Media follows the pinned host's rules; the adapter's text budgets do not add another audio or image filter after native retention and formatting.

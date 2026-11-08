@@ -57,6 +57,7 @@ await stream_settled(jobs, result => {
 ```
 
 示例通过现有 exec/wait 返回部分结果，省略 yield_control 时按正常收集窗口返回。
+yield_control 请求观察返回，执行并不等待调用者的下一次 wait，因此不能保证把输出分成独立批次。
 也可用异步循环直接检查 as_settled 的各条记录。两个助手等待已经传入的操作，不负责调度或取消这些操作。
 命令退出码与 MCP isError 仍在成功返回的 value 中，保持各工具原有的含义。
 
@@ -73,7 +74,8 @@ const result = await tools.write_stdin({ session_id: "之前的句柄", yield_ti
 text(result);
 ```
 
-exec 本身仍可能先交回 `cell_id`，此后由外层 `wait` 续取。内层终端收集窗口不受外层 110 秒窗口截断，
+外层 exec 默认及最大等待 30 秒，外层 wait 默认及最大等待 110 秒；两者都可提前返回。
+exec 本身仍可能先交回 `cell_id`，此后由外层 `wait` 续取。这些外层窗口不截短内层终端的收集，
 外层 wait 超时也不重启或重放内层调用。不要重新执行原命令来续取结果。
 等待不扩大日志或模型输出预算；已退出但剩余输出超过单次读取上限时，同样需要继续读取。
 
@@ -131,6 +133,27 @@ detail 是宿主提示，默认 high，需要时可设 original。
 ```js
 image(await tools.view_image({ path: "plot.png", detail: "original" }));
 ```
+
+## 转发音频与交付较大媒体
+
+已有的 audio 助手接受 base64 data URL、{audio_url} 对象或单个 MCP AudioContent 块。
+下游调用把 CallToolResult 返回给 result 后，可逐项转发其中的音频块：
+
+```js
+for (const item of result.content) {
+  if (item.type === "audio") audio(item);
+}
+```
+
+固定 host 校验音频，包括 PCM WAV 至少 25 毫秒的要求。调用者文本预算为零时，原生省略诊断仍然可见。
+图片 detail 仍是宿主提示，不会缩小编码文件或增加原生收集器额度。
+
+较大结果用 store("media-result", result) 保存一次，或把源数据留在文件中。等该次 exec 完成后，分多次 exec 从 load 结果中选择要展示的条目。
+按[原生收集与传输限制](configuration.zh.md#容量与临时状态)控制每批条目的数量和编码大小。
+反复调用 yield_control 不能确保分批。host 已经省略的输出不能由 wait 补回；应重读保留的源数据，不重放产生它的操作。
+
+单张图片超过编码图片额度时，由调用者为视觉检查选择缩小或裁剪，或用 tools.export_file 交付保真的源文件。
+导出链接交付源文件，本身不向模型提供视觉或音频输入。服务不自动变换媒体、写盘或重试有副作用的操作。
 
 ## MCP 资源
 

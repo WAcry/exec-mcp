@@ -134,7 +134,7 @@ text("after");`,
   });
 
   it.each(["url", "object", "block"])(
-    "preserves surrounding output when the native audio helper omits a short WAV (%s)",
+    "keeps a short-WAV warning in status and marks the omitted position (%s)",
     async (shape) => {
       const data = wav(399); // 24.9375 ms at 16 kHz; just below the native threshold.
       const url = `data:audio/wav;base64,${data}`;
@@ -153,13 +153,33 @@ text("after");`,
         [],
       );
       const output = texts(result);
-      expect(output.slice(1)).toEqual([
-        "before",
-        "Audio output omitted because the clip is shorter than 25 ms; use a longer clip.",
-        "after",
-      ]);
+      expect(output.slice(1)).toEqual(["before", "[Output omitted]", "after"]);
+      const notice =
+        "Audio output omitted because the clip is shorter than 25 ms; use a longer clip.";
+      expect(output[0]).toContain(notice);
+      expect(output.join("\n").split(notice)).toHaveLength(2);
     },
   );
+
+  it("keeps native short-WAV rejection visible with a zero text budget", async () => {
+    const data = wav(399);
+    const result = await service().exec({
+      tools: [],
+      maxOutputTokens: 0,
+      source: `text("hidden before");
+        audio({type:"audio",mimeType:"audio/wav",data:${JSON.stringify(data)}});
+        text("hidden after");`,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.content.map((item) => item.type)).toEqual(["text"]);
+    const output = texts(result).join("\n");
+    const notice =
+      "Audio output omitted because the clip is shorter than 25 ms; use a longer clip.";
+    expect(output).toContain(notice);
+    expect(output.split(notice)).toHaveLength(2);
+    expect(output).not.toContain("hidden before");
+    expect(output).not.toContain("hidden after");
+  });
 
   it.each([400, 800])(
     "retains WAV audio at or above 25 ms (%s samples)",

@@ -217,7 +217,8 @@ export class CodeModeService {
           hostOutcome.errorText,
           requestId,
         );
-        if (diagnostic) hostOutcome.errorText += `\n${diagnostic}`;
+        if (diagnostic)
+          hostOutcome.items.push({ type: "text", text: diagnostic });
       }
       const outcome = this.#trackOutcome(
         lease,

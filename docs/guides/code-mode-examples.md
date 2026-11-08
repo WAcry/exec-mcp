@@ -57,6 +57,7 @@ await stream_settled(jobs, result => {
 ```
 
 The example returns partial output through the existing exec/wait path. Omitting yield_control leaves output to the normal collection window.
+yield_control requests an observation return; execution continues without waiting for the caller's next wait, so it does not guarantee separate output batches.
 An async loop over as_settled can inspect the same records directly. Both helpers wait for inputs already supplied to them; they do not schedule or cancel those operations.
 Command exit codes and MCP isError remain in the fulfilled value and retain their tool-specific meanings.
 
@@ -74,7 +75,8 @@ const result = await tools.write_stdin({ session_id: "之前的句柄", yield_ti
 text(result);
 ```
 
-exec may first return cell_id for continuation through outer wait. A terminal collection is not cut short by the outer 110-second window,
+Outer exec defaults to and is capped at 30 seconds; outer wait defaults to and is capped at 110 seconds. Both can return sooner.
+exec may first return cell_id for continuation through outer wait. These outer windows do not cut short a terminal collection,
 and an outer timeout does not restart or replay the nested call. Continue collecting from the handle instead of rerunning the original command.
 Waiting does not enlarge log or model-output budgets. An exited process with more unread output than one read can hold also needs further reads.
 
@@ -132,6 +134,27 @@ detail is a host hint, with high as the default and original available when need
 ```js
 image(await tools.view_image({ path: "plot.png", detail: "original" }));
 ```
+
+## Forward audio and deliver larger media
+
+The existing audio helper accepts a base64 data URL, an {audio_url} object, or an individual MCP AudioContent block.
+When a downstream call has returned a CallToolResult in result, forward its audio blocks individually:
+
+```js
+for (const item of result.content) {
+  if (item.type === "audio") audio(item);
+}
+```
+
+The pinned host validates audio, including a 25 ms minimum for PCM WAV. Native omission diagnostics remain visible even with a zero caller text budget.
+Image detail remains a host hint. It does not resize the encoded file or increase the native collector's allowance.
+
+For a large result, retain it once with store("media-result", result), or keep its source in files. After that exec completes, load selected items in separate exec calls.
+Choose the number and encoded size of the items to fit the [native collection and transport limits](configuration.md#capacity-and-temporary-state).
+Repeated yield_control calls cannot enforce this separation. Output already omitted by the host cannot be recovered by wait; reread retained source data instead of replaying the operation that produced it.
+
+A single image above the encoded-image allowance needs a caller-selected resize or crop for visual inspection, or tools.export_file for source fidelity.
+An exported file link delivers the source; it does not itself provide visual or audio input to the model. The service does not automatically transform media, spill it to disk, or retry side effects.
 
 ## MCP resources
 

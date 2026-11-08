@@ -12,42 +12,210 @@ function service() {
   return value;
 }
 
+/** Valid mono PCM WAV; a low sample rate gives long duration without a large fixture. */
+function pcm16Wav(sampleRate: number, frames: number): string {
+  const dataBytes = frames * 2;
+  const buffer = Buffer.alloc(44 + dataBytes);
+  buffer.write("RIFF", 0);
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write("WAVEfmt ", 8);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write("data", 36);
+  buffer.writeUInt32LE(dataBytes, 40);
+  return buffer.toString("base64");
+}
+
+const PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5xkAAAAASUVORK5CYII=";
+
 describe("pinned Codex runtime compatibility", () => {
-  it("preserves large images and audio with a zero text budget", async () => {
-    // 25 ms of 16 kHz mono PCM, so the native short-audio rule keeps it.
-    const audio = Buffer.concat([
-      Buffer.from(
-        "UklGRkQDAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YSADAAA=",
-        "base64",
-      ),
-      Buffer.alloc(800),
-    ]).toString("base64");
-    // A wire fixture exceeds the server collector's 8 MiB image URL allowance.
-    // Client-owned truncation must leave these bytes to the MCP transport limit.
-    const imageBytes = 8 * 1024 * 1024;
+  it.each(["exec", "wait", "terminate"] as const)(
+    "retains image detail and long audio at zero text budget on %s",
+    async (observation) => {
+      // 1001 seconds costs 10,010 native audio tokens, exceeding the host's
+      // ordinary 10,000-token default. The WAV itself is only about 32 KiB.
+      const audio = pcm16Wav(16, 16_016);
+      const value = service();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markReady!: () => void;
+      const ready = new Promise<void>((resolve) => {
+        markReady = resolve;
+      });
+      const output = `image({image_url:"data:image/png;base64,${PNG}",detail:"original"});
+        text("hidden body");
+        audio({type:"audio",mimeType:"audio/wav",data:${JSON.stringify(audio)}});`;
+      let result = await value.exec({
+        tools: [
+          {
+            name: "resume",
+            description: "Waits for the test to observe the initial yield.",
+            call: async () => {
+              await gate;
+              return null;
+            },
+          },
+          {
+            name: "ready",
+            description: "Confirms the preceding audio has reached the actor.",
+            call: async () => {
+              markReady();
+              return null;
+            },
+          },
+        ],
+        maxOutputTokens: 0,
+        source:
+          observation === "exec"
+            ? output
+            : `yield_control(); await tools.resume({}); ${output}
+            ${observation === "terminate" ? "await tools.ready({}); await new Promise(() => {});" : ""}`,
+      });
+      release();
+      if (observation !== "exec") {
+        if (observation === "terminate") await ready;
+        result = await value.wait({
+          cellId: cellId(result),
+          maxTokens: 0,
+          terminate: observation === "terminate",
+        });
+      }
+      expect(result.isError).not.toBe(true);
+      expect(result.content.map((item) => item.type)).toEqual([
+        "text",
+        "image",
+        "audio",
+      ]);
+      expect(result.content.find((item) => item.type === "image")).toEqual({
+        type: "image",
+        data: PNG,
+        mimeType: "image/png",
+        _meta: { "openai/imageDetail": "original" },
+      });
+      expect(result.content.find((item) => item.type === "audio")).toEqual({
+        type: "audio",
+        mimeType: "audio/wav",
+        data: audio,
+      });
+      expect(texts(result).join("\n")).not.toContain("hidden body");
+    },
+  );
+
+  it("reports an oversized image at zero text budget and still delivers a fitting image", async () => {
     const result = await service().exec({
       tools: [],
       maxOutputTokens: 0,
-      source: `text("hidden body");
-        image({image_url:"data:image/png;base64,"+"A".repeat(${imageBytes}),detail:"original"});
-        audio({type:"audio",mimeType:"audio/wav",data:${JSON.stringify(audio)}});`,
+      // A wire fixture exceeds the 8 MiB encoded URL allowance before any
+      // image decoder sees it. Rejection must not consume the media capacity.
+      source: `image("data:image/png;base64," + "A".repeat(8 * 1024 * 1024));
+        image({image_url:"data:image/png;base64,${PNG}",detail:"original"});`,
     });
     expect(result.isError).not.toBe(true);
-    expect(result.content.map((item) => item.type)).toEqual([
-      "text",
-      "image",
-      "audio",
+    expect(result.content.filter((item) => item.type === "image")).toEqual([
+      {
+        type: "image",
+        data: PNG,
+        mimeType: "image/png",
+        _meta: { "openai/imageDetail": "original" },
+      },
     ]);
-    const image = result.content.find((item) => item.type === "image");
-    expect(image?.data).toHaveLength(imageBytes);
-    expect(image?.data).toMatch(/^A+$/);
-    expect(image?._meta).toEqual({ "openai/imageDetail": "original" });
-    expect(result.content.find((item) => item.type === "audio")).toEqual({
-      type: "audio",
-      mimeType: "audio/wav",
-      data: audio,
+    expect(texts(result)[0]).toContain(
+      "Code Mode session output limit reached",
+    );
+    expect(texts(result)[0]).toContain("1 images");
+  });
+
+  it("bounds aggregate image output while keeping stored results available for a later exec", async () => {
+    const value = service();
+    const imageBytes = 4 * 1024 * 1024;
+    const first = await value.exec({
+      tools: [],
+      sessionScope: "media-recovery",
+      maxOutputTokens: 0,
+      // Both images fit individually, but their data URL prefixes push the
+      // combined bytes over 8 MiB. Explicit output does not truncate store.
+      source: `const picture = {image_url:"data:image/png;base64," + "A".repeat(${imageBytes}),detail:"original"};
+        store("pictures", [picture, picture]); image(picture); image(picture);`,
     });
-    expect(texts(result).join("\n")).not.toContain("hidden body");
+    expect(first.isError).not.toBe(true);
+    expect(first.content.filter((item) => item.type === "image")).toHaveLength(
+      1,
+    );
+    expect(texts(first)[0]).toContain("1 images");
+    const recovered = await value.exec({
+      tools: [],
+      sessionScope: "media-recovery",
+      maxOutputTokens: 0,
+      source: 'image(load("pictures")[1]);',
+    });
+    expect(recovered.isError).not.toBe(true);
+    expect(
+      recovered.content.filter((item) => item.type === "image"),
+    ).toHaveLength(1);
+    const image = recovered.content.find((item) => item.type === "image");
+    expect(image?.data).toHaveLength(imageBytes);
+    expect(image?._meta).toEqual({ "openai/imageDetail": "original" });
+    expect(texts(recovered).join("\n")).not.toContain("output limit reached");
+  });
+
+  it("resets image retention after an observed yield instead of applying a lifetime allowance", async () => {
+    const value = service();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const imageBytes = 5 * 1024 * 1024;
+    const first = await value.exec({
+      tools: [
+        {
+          name: "resume",
+          description: "Waits for the preceding observation to finish.",
+          call: async () => {
+            await gate;
+            return null;
+          },
+        },
+      ],
+      maxOutputTokens: 0,
+      source: `const picture = {image_url:"data:image/png;base64," + "A".repeat(${imageBytes}),detail:"original"};
+        image(picture); yield_control(); await tools.resume({}); image(picture);`,
+    });
+    release();
+    const final = await value.wait({ cellId: cellId(first), maxTokens: 0 });
+    for (const result of [first, final]) {
+      expect(result.isError).not.toBe(true);
+      expect(
+        result.content.filter((item) => item.type === "image"),
+      ).toHaveLength(1);
+      expect(
+        result.content.find((item) => item.type === "image")?.data,
+      ).toHaveLength(imageBytes);
+      expect(texts(result).join("\n")).not.toContain("output limit reached");
+    }
+  });
+
+  it("keeps the native text-retention warning visible when the caller suppresses all text", async () => {
+    const result = await service().exec({
+      tools: [],
+      maxOutputTokens: 0,
+      source:
+        'text("hidden head" + "x".repeat(2 * 1024 * 1024) + "hidden tail");',
+    });
+    expect(result.isError).not.toBe(true);
+    expect(texts(result)[0]).toContain(
+      "Code Mode session output limit reached",
+    );
+    expect(texts(result)[0]).toMatch(/omitted [1-9][0-9]* text bytes/);
+    expect(texts(result).join("\n")).not.toContain("hidden head");
+    expect(texts(result).join("\n")).not.toContain("hidden tail");
   });
 
   it.each([false, true])(

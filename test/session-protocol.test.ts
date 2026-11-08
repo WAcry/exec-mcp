@@ -3,6 +3,10 @@ import * as grpc from "@grpc/grpc-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodeModeHostProcess } from "../src/code-mode/host-process.js";
 import { CodeModeSession } from "../src/code-mode/session.js";
+import {
+  NATIVE_OUTPUT_LIMITS,
+  NATIVE_OUTPUT_MAX_TOKENS,
+} from "../src/code-mode/native-output.js";
 import type {
   CodeModeHostClient,
   ProtoMessage,
@@ -45,64 +49,107 @@ function notFound(): grpc.ServiceError {
 }
 
 describe("Code Mode output ownership negotiation", () => {
-  it.each([false, true])(
-    "requests client-owned output and accepts its acknowledgement (explicit=%s)",
-    async (explicit) => {
-      let opened: ProtoMessage | undefined;
-      const { client, session } = await open((client) => {
+  it("requires the official bounded collector and supplies an internal budget on every observation", async () => {
+    let opened: ProtoMessage | undefined;
+    const { client, session } = await open((client) => {
+      const invoke = client.openSession.bind(client);
+      vi.spyOn(client, "openSession").mockImplementation((request) => {
+        const stream = invoke(request);
+        stream.once("data", (message: ProtoMessage) => {
+          opened = message.opened as ProtoMessage;
+        });
+        return stream;
+      });
+    });
+    expect(client.openSession).toHaveBeenCalledWith({
+      outputTruncation: "OUTPUT_TRUNCATION_SERVER",
+    });
+    expect(opened?.outputTruncation).toBe("OUTPUT_TRUNCATION_SERVER");
+    const execute = vi.spyOn(client, "execute");
+    const wait = vi.spyOn(client, "wait");
+    const terminate = vi.spyOn(client, "terminate");
+    expect(
+      await session.execute({
+        source: 'text("ready");',
+        toolCallId: "negotiated",
+        tools: [],
+      }),
+    ).toMatchObject({
+      state: "completed",
+      items: [{ type: "text", text: "ready" }],
+    });
+    const running = await session.execute({
+      source: "yield_control(); await new Promise(() => {});",
+      toolCallId: "observe",
+      tools: [],
+    });
+    await session.wait({ cellId: running.cellId, yieldTimeMs: 0 });
+    await session.terminate(running.cellId);
+    for (const call of [execute, wait, terminate]) {
+      expect(call).toHaveBeenCalled();
+      for (const [request] of call.mock.calls)
+        expect(request.maxOutputTokens).toBe(NATIVE_OUTPUT_MAX_TOKENS);
+    }
+    expect(execute.mock.calls[0]![0].yieldTimeMs).toBe(30_000);
+  });
+
+  it.each([
+    undefined,
+    "OUTPUT_TRUNCATION_CLIENT",
+    "OUTPUT_TRUNCATION_UNSPECIFIED",
+    42,
+  ])("cancels an incompatible session lease (%s)", async (mode) => {
+    let cancel: unknown;
+    let subscribe: unknown;
+    await expect(
+      open((client) => {
+        subscribe = vi.spyOn(client, "subscribeToToolCalls");
         const invoke = client.openSession.bind(client);
         vi.spyOn(client, "openSession").mockImplementation((request) => {
           const stream = invoke(request);
+          cancel = vi.spyOn(stream, "cancel");
           stream.once("data", (message: ProtoMessage) => {
-            opened = message.opened as ProtoMessage;
-            // The pinned host omits CLIENT; also accept an explicit acknowledgement.
-            if (explicit) opened.outputTruncation = "OUTPUT_TRUNCATION_CLIENT";
+            (message.opened as ProtoMessage).outputTruncation = mode;
           });
           return stream;
         });
-      });
-      expect(client.openSession).toHaveBeenCalledWith({
-        outputTruncation: "OUTPUT_TRUNCATION_CLIENT",
-      });
-      expect(opened?.outputTruncation).toBe(
-        explicit ? "OUTPUT_TRUNCATION_CLIENT" : undefined,
-      );
-      expect(
-        await session.execute({
-          source: 'text("ready");',
-          toolCallId: "negotiated",
-          tools: [],
-        }),
-      ).toMatchObject({
-        state: "completed",
-        items: [{ type: "text", text: "ready" }],
-      });
-    },
-  );
+      }),
+    ).rejects.toThrow("bounded server-side collection is required");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(subscribe).not.toHaveBeenCalled();
+  });
 
-  it.each(["OUTPUT_TRUNCATION_SERVER", "OUTPUT_TRUNCATION_UNSPECIFIED", 42])(
-    "cancels an incompatible session lease (%s)",
-    async (mode) => {
-      let cancel: unknown;
-      let subscribe: unknown;
-      await expect(
-        open((client) => {
-          subscribe = vi.spyOn(client, "subscribeToToolCalls");
-          const invoke = client.openSession.bind(client);
-          vi.spyOn(client, "openSession").mockImplementation((request) => {
-            const stream = invoke(request);
-            cancel = vi.spyOn(stream, "cancel");
-            stream.once("data", (message: ProtoMessage) => {
-              (message.opened as ProtoMessage).outputTruncation = mode;
-            });
-            return stream;
-          });
-        }),
-      ).rejects.toThrow("client-side truncation is required");
-      expect(cancel).toHaveBeenCalledOnce();
-      expect(subscribe).not.toHaveBeenCalled();
-    },
-  );
+  it("bounds native retention before Node receives a noisy observation", async () => {
+    const { session } = await open();
+    const result = await session.execute({
+      source: 'text("HEAD" + "x".repeat(4 * 1024 * 1024) + "TAIL");',
+      toolCallId: "bounded-output",
+      tools: [],
+    });
+    expect(result.state).toBe("completed");
+    const output = result.items.flatMap((item) =>
+      item.type === "text" ? [item.text] : [],
+    );
+    expect(output[0]).toMatch(/^HEAD/);
+    expect(output.at(-1)).toMatch(/TAIL$/);
+    const notice = output.find((text) =>
+      text.startsWith("[Code Mode session output limit reached:"),
+    );
+    expect(notice).toContain("omitted 3145736 text bytes");
+    expect(
+      output.reduce((bytes, text) => bytes + Buffer.byteLength(text), 0),
+    ).toBeLessThanOrEqual(NATIVE_OUTPUT_LIMITS.textBytes + 1024);
+    expect(
+      await session.execute({
+        source: 'text("healthy");',
+        toolCallId: "after-noise",
+        tools: [],
+      }),
+    ).toMatchObject({
+      state: "completed",
+      items: [{ type: "text", text: "healthy" }],
+    });
+  });
 });
 
 describe("Code Mode missing-session RPC contracts", () => {

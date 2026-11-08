@@ -4,6 +4,7 @@ import type * as grpc from "@grpc/grpc-js";
 
 import { abortError, errorMessage } from "../util.js";
 import { DEFAULT_EXEC_YIELD_TIME_MS } from "./exec-source.js";
+import { NATIVE_OUTPUT_MAX_TOKENS } from "./native-output.js";
 import {
   nestedToolReservationBytes,
   WeightedAdmissionQueue,
@@ -128,9 +129,9 @@ export class CodeModeSession {
     if (options.maxYieldTimeMs !== undefined) {
       limits.maxYieldTimeMs = options.maxYieldTimeMs;
     }
-    // MCP budgets text separately, preserving media and rendering errors once.
+    // Bound collection in the official host; MCP owns the final text budget.
     const request: ProtoMessage = {
-      outputTruncation: "OUTPUT_TRUNCATION_CLIENT",
+      outputTruncation: "OUTPUT_TRUNCATION_SERVER",
     };
     if (Object.keys(limits).length > 0) request.cellExecutionLimits = limits;
 
@@ -151,12 +152,9 @@ export class CodeModeSession {
       id = stringField(openedPayload, "sessionId", "session ID");
       validateIdentifier(id, "session ID");
       const outputTruncation = openedPayload.outputTruncation;
-      if (
-        outputTruncation !== undefined &&
-        outputTruncation !== "OUTPUT_TRUNCATION_CLIENT"
-      )
+      if (outputTruncation !== "OUTPUT_TRUNCATION_SERVER")
         throw new Error(
-          `Code Mode host selected unsupported output truncation ${JSON.stringify(outputTruncation)}; client-side truncation is required.`,
+          `Code Mode host selected unsupported output truncation ${JSON.stringify(outputTruncation)}; bounded server-side collection is required.`,
         );
     } catch (error) {
       eventStream.cancel();
@@ -216,9 +214,9 @@ export class CodeModeSession {
       toolCallId: options.toolCallId,
       source: options.source,
       enabledTools: options.tools.map(encodeToolDefinition),
+      maxOutputTokens: NATIVE_OUTPUT_MAX_TOKENS,
+      yieldTimeMs: options.yieldTimeMs ?? DEFAULT_EXEC_YIELD_TIME_MS,
     };
-    if (options.yieldTimeMs !== undefined)
-      request.yieldTimeMs = options.yieldTimeMs;
     this.#executions.set(executionId, state);
     let stream: grpc.ClientReadableStream<ProtoMessage>;
     try {
@@ -297,6 +295,7 @@ export class CodeModeSession {
               cellId: options.cellId,
               waitId,
               yieldTimeMs: options.yieldTimeMs,
+              maxOutputTokens: NATIVE_OUTPUT_MAX_TOKENS,
             },
             callOptions,
             callback,
@@ -360,7 +359,11 @@ export class CodeModeSession {
       const response = await unaryCall(
         (options, callback) =>
           this.#client.terminate(
-            { sessionId: this.id, cellId },
+            {
+              sessionId: this.id,
+              cellId,
+              maxOutputTokens: NATIVE_OUTPUT_MAX_TOKENS,
+            },
             options,
             callback,
           ),

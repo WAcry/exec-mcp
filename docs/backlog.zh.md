@@ -7,7 +7,7 @@
 
 ## 公共 npm 安装
 
-目前尚未公开发布 npm 包。计划通过公共 npm registry 分发，让用户用 npm install 安装后从命令行启动。
+目前尚未公开发布 npm 包。计划通过公共 npm registry 分发，让用户用 `npm install` 安装后从命令行启动。
 Windows、macOS、Linux 共用这一方式，暂不提供额外的桌面安装器。
 1.0.0 当前通过源码构建使用，[README](../README.zh.md) 保留相应步骤。
 

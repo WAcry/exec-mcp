@@ -7,7 +7,7 @@ Use code, the [README](../README.md), and active ADRs for current behavior. Keep
 
 ## Public npm installation
 
-No public npm package has been published. The plan is distribution through the public npm registry, followed by installation with npm install and startup from the command line.
+No public npm package has been published. The plan is distribution through the public npm registry, followed by installation with `npm install` and startup from the command line.
 Windows, macOS, and Linux would share this approach without an additional desktop installer.
 Version 1.0.0 currently runs from a source build; the [README](../README.md) provides those steps.
 

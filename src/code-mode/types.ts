@@ -1,4 +1,5 @@
 import type { CallToolResult } from "@modelcontextprotocol/client";
+import type { PreparedToolCatalog } from "./wire.js";
 import type { MemoryReader } from "../host/process-memory.js";
 
 export type CodeModeToolKind = "function" | "freeform";
@@ -46,6 +47,8 @@ export interface CodeModeExecRequest {
   /** Server-side exit for native attachments; not a V8 global or a model-supplied callback. */
   takeAttachments?: () => CallToolResult["content"];
   tools: readonly CodeModeToolDefinition[];
+  /** Immutable wire metadata for these tools. Callbacks remain local to this exec. */
+  catalog?: PreparedToolCatalog;
   /** Opaque OpenAI conversation scope. It is correlation state, not auth. */
   sessionScope?: string;
   signal?: AbortSignal;

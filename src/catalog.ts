@@ -1,5 +1,5 @@
 // Tool descriptions adapted from OpenAI Codex (Apache-2.0),
-// rust-v0.167.0; see proto/LICENSE.
+// rust-v0.172.0; see proto/LICENSE.
 import { z } from "zod/v4";
 import {
   schemaType,
@@ -133,9 +133,7 @@ export const COMMAND_SCHEMA = z
       .optional(),
     login: z
       .boolean()
-      .describe(
-        "Enable login shell semantics (profile loading for PowerShell) for this command. Defaults to the instance setting; does not change later commands.",
-      )
+      .describe("Request login-shell startup. Omit to inherit.")
       .optional(),
     tty: z
       .boolean()
@@ -538,6 +536,14 @@ export function nativeContractsByName(shell: CommandShell): NativeContracts {
     ...NATIVE_CONTRACTS,
     exec_command: {
       ...NATIVE_CONTRACTS.exec_command,
+      schema:
+        shell.kind === "pwsh" || shell.kind === "powershell"
+          ? COMMAND_SCHEMA.extend({
+              login: COMMAND_SCHEMA.shape.login.describe(
+                "Login-shell startup. In PowerShell, false skips profiles. Keep them enabled for profile-defined commands, even unattended. Omit to inherit.",
+              ),
+            })
+          : COMMAND_SCHEMA,
       description:
         NATIVE_CONTRACTS.exec_command.description +
         "\n" +
@@ -571,6 +577,7 @@ export function execDescription(
 - Global helpers:
 - \`exit()\`: Immediately ends the current script successfully (like an early return from the top level).
 - \`text(value: string | number | boolean | undefined | null)\`: Appends a text item. Non-string values are stringified with \`JSON.stringify(...)\` when possible.
+- \`content(blocks: ContentBlock | Iterable<ContentBlock>)\`: Appends MCP blocks in order, for example \`content(result.content)\`. Media use the usual output limits, including omission notices for short WAV clips. Resources and resource links become JSON text.
 - \`image(imageUrlOrItem: string | { image_url: string; detail?: "auto" | "low" | "high" | "original" | null } | ImageContent, detail?: "auto" | "low" | "high" | "original" | null)\`: Appends an image item. \`image_url\` should be a base64-encoded \`data:\` URL. To forward an MCP tool image, pass an individual \`ImageContent\` block from \`result.content\`, for example \`image(result.content[0])\`. MCP image blocks may request detail with \`_meta: { "codex/imageDetail": "original" }\`. When provided, the second \`detail\` argument overrides any detail embedded in the first argument.
 - \`audio(audioUrlOrItem: string | { audio_url: string } | AudioContent)\`: Appends an audio item. \`audio_url\` should be a base64-encoded \`data:\` URL. To forward an MCP tool audio block, pass an individual \`AudioContent\` block from \`result.content\`, for example \`audio(result.content[0])\`.
 - \`generatedImage(result: { image_url: string; output_hint?: string })\`: Appends an image-generation result and its optional output hint. HTTP(S) URLs are not supported.
@@ -596,7 +603,7 @@ To find one, filter \`ALL_TOOLS\` by \`name\` and \`description\`: text(ALL_TOOL
 Tool availability can change between calls. list_skills provides local skill metadata; a selected SKILL.md provides the full workflow.
 
 ## Results and execution
-Tool return values reach the model through explicit text/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. structuredContent holds structured data; content may add distinct text, media or resources. A nested call that fails rejects with its error message as a string; use String(error) in catch blocks.
+Tool return values reach the model through explicit text/content/image/audio/generatedImage calls; exported resource links are attached automatically. Local methods return the values in their contracts. Downstream MCP methods return CallToolResult: {content, structuredContent?, isError?}; isError indicates failure. Use \`text(result.structuredContent)\` for structured data. \`result.content\` contains any distinct blocks after duplicate JSON text is removed. A nested call that fails rejects with its error message as a string; use String(error) in catch blocks.
 An outer host may wrap exec/wait results in its own shape; the nested return types above describe values inside source.
 Final response text is limited to ${bytes(MODEL_TEXT_BYTES)} UTF-8 bytes, retaining the beginning and end on overflow. Omitted text is not returned by later waits. Nested results and store are not pre-truncated by this limit, so JS can filter or retain them before output. max_output_tokens narrows this response's text budget; wait.max_tokens is separate. Text budgets preserve retained media, execution status and output-limit notices. With user notes attached, the combined response text ceiling is ${bytes(NOTES_RESPONSE_BYTES)} UTF-8 bytes.
 Native output collection per observation retains up to ${mib(NATIVE_OUTPUT_LIMITS.textBytes)} text, ${mib(NATIVE_OUTPUT_LIMITS.imageUrlBytes)} encoded image URLs, ${mib(NATIVE_OUTPUT_LIMITS.audioUrlBytes)} encoded audio URLs and ${bytes(NATIVE_OUTPUT_LIMITS.items)} items. Loss is reported; use smaller exec batches or export source files for larger media. An export link does not display its media.

@@ -319,6 +319,11 @@ describe("shell command construction and concise contracts", () => {
       expect(execDescription(contracts)).toContain(describeContract(command));
       expect(execDescription(contracts)).toContain(command.name);
       expect(command.description).toContain(shellDescription(shell));
+      const loginHelp =
+        kind === "pwsh" || kind === "powershell"
+          ? "In PowerShell, false skips profiles."
+          : "Request login-shell startup. Omit to inherit.";
+      expect(describeContract(command)).toContain(loginHelp);
       if (kind !== "other")
         expect(command.description).toContain("Default shell:");
       expect(command.description).not.toMatch(

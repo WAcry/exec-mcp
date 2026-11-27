@@ -152,6 +152,213 @@ describe("Code Mode output ownership negotiation", () => {
   });
 });
 
+describe("Code Mode catalog revisions", () => {
+  const tool = {
+    name: "lookup",
+    description: "Returns the current value.",
+    call: async () => "first",
+  };
+  const request = {
+    tools: [tool],
+    toolCallId: "lookup",
+    source: "text(await tools.lookup({}));",
+  };
+
+  it("reuses acknowledged contracts while each cell keeps its own callbacks", async () => {
+    const { client, session } = await open();
+    const execute = vi.spyOn(client, "execute");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = {
+      ...tool,
+      call: async () => {
+        await gate;
+        return "first";
+      },
+    };
+    const running = await session.execute({
+      ...request,
+      tools: [original],
+      source:
+        "yield_control(); await tools.lookup({}); text(await tools.lookup({}));",
+    });
+    try {
+      expect(running.state).toBe("yielded");
+      const second = { ...tool, call: async () => "second" };
+      const result = await session.execute({ ...request, tools: [second] });
+      expect(result.items).toEqual([{ type: "text", text: "second" }]);
+      const changed = { ...second, inputSchema: { type: "object" } };
+      await session.execute({ ...request, tools: [changed] });
+      const [first, reused, refresh] = execute.mock.calls.map(([call]) => call);
+      expect(first!.enabledTools).toMatchObject([{ name: "lookup" }]);
+      expect(Number(first!.catalogRevision)).toBeGreaterThan(0);
+      expect(reused!.catalogRevision).toBe(first!.catalogRevision);
+      expect(reused!.enabledTools ?? []).toEqual([]);
+      expect(refresh!.enabledTools).toMatchObject([{ name: "lookup" }]);
+      expect(Number(refresh!.catalogRevision)).toBeGreaterThan(
+        Number(first!.catalogRevision),
+      );
+    } finally {
+      release();
+    }
+    const done = await session.wait({
+      cellId: running.cellId,
+      yieldTimeMs: 5_000,
+    });
+    expect(done.items).toEqual([{ type: "text", text: "first" }]);
+
+    // A replacement session on the same host must install its own catalog.
+    const fresh = await CodeModeSession.open({
+      client,
+      startupTimeoutMs: 10_000,
+      transportTimeoutMs: 10_000,
+    });
+    cleanup.push(() => fresh.close());
+    await fresh.execute({
+      ...request,
+      tools: [{ ...tool, inputSchema: { type: "object" } }],
+    });
+    expect(execute.mock.lastCall![0].enabledTools).toMatchObject([
+      { name: "lookup" },
+    ]);
+  });
+
+  it("sends a full independent catalog while a registration awaits admission", async () => {
+    const { client, session } = await open();
+    const execute = vi.spyOn(client, "execute");
+    const [first, other] = await Promise.all([
+      session.execute(request),
+      session.execute({
+        ...request,
+        tools: [
+          {
+            name: "different",
+            description: "Another tool.",
+            call: async () => "other",
+          },
+        ],
+        source: "text(await tools.different({}));",
+      }),
+    ]);
+    expect(first.items).toEqual([{ type: "text", text: "first" }]);
+    expect(other.items).toEqual([{ type: "text", text: "other" }]);
+    const independent = execute.mock.calls[1]![0];
+    expect(independent.catalogRevision).toBeUndefined();
+    expect(independent.enabledTools).toMatchObject([{ name: "different" }]);
+    await session.execute(request);
+    expect(execute.mock.lastCall![0].catalogRevision).toBe(
+      execute.mock.calls[0]![0].catalogRevision,
+    );
+    expect(execute.mock.lastCall![0].enabledTools ?? []).toEqual([]);
+  });
+
+  it("sends full contracts when the host omits the capability", async () => {
+    const { client, session } = await open((client) => {
+      const invoke = client.openSession.bind(client);
+      vi.spyOn(client, "openSession").mockImplementation((request) => {
+        const stream = invoke(request);
+        stream.once("data", (event: ProtoMessage) => {
+          delete (event.opened as ProtoMessage).supportsCatalogRevision;
+        });
+        return stream;
+      });
+    });
+    const execute = vi.spyOn(client, "execute");
+    await session.execute(request);
+    await session.execute(request);
+    for (const [call] of execute.mock.calls) {
+      expect(call.enabledTools).toMatchObject([{ name: "lookup" }]);
+      expect(call.catalogRevision).toBeUndefined();
+    }
+  });
+
+  function observeTermination(session: CodeModeSession): Promise<void> {
+    const terminate = session.terminate.bind(session);
+    let stopped!: () => void;
+    const stoppedCell = new Promise<void>((resolve) => {
+      stopped = resolve;
+    });
+    vi.spyOn(session, "terminate").mockImplementation(async (...args) => {
+      const result = await terminate(...args);
+      stopped();
+      return result;
+    });
+    return stoppedCell;
+  }
+
+  it("keeps the referenced catalog until a cancelled RPC reaches the host", async () => {
+    const { client, session } = await open();
+    await session.execute(request);
+    const invoke = client.execute.bind(client);
+    const execute = vi.spyOn(client, "execute");
+    let dispatch!: () => void;
+    execute.mockImplementationOnce((...args) => {
+      let real: grpc.ClientReadableStream<ProtoMessage>;
+      const delayed = Object.assign(new PassThrough({ objectMode: true }), {
+        cancel: () => real?.cancel(),
+      });
+      dispatch = () => {
+        real = invoke(...args);
+        real.on("error", (error: Error) => delayed.emit("error", error));
+        real.on("status", (status) => delayed.emit("status", status));
+        real.pipe(delayed);
+      };
+      return delayed as unknown as grpc.ClientReadableStream<ProtoMessage>;
+    });
+    const stopped = observeTermination(session);
+    const abort = new AbortController();
+    const pending = session.execute({
+      ...request,
+      source: "await new Promise(() => {});",
+      signal: abort.signal,
+    });
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    const changed = {
+      ...request,
+      tools: [{ ...tool, description: "Updated lookup." }],
+    };
+    try {
+      // The replacement reaches the real host before the previous reference.
+      await session.execute(changed);
+      const [reference, replacement] = execute.mock.calls.map(([call]) => call);
+      expect(reference!.enabledTools ?? []).toEqual([]);
+      expect(Number(reference!.catalogRevision)).toBeGreaterThan(0);
+      expect(replacement!.enabledTools).toMatchObject([{ name: "lookup" }]);
+      expect(replacement!.catalogRevision).toBeUndefined();
+    } finally {
+      dispatch();
+    }
+    await stopped;
+    const result = await session.execute(changed);
+    expect(result.items).toEqual([{ type: "text", text: "first" }]);
+  });
+
+  it("discards a cancelled registration even if the host later reports the cell", async () => {
+    const { client, session } = await open();
+    const execute = vi.spyOn(client, "execute");
+    const stoppedCell = observeTermination(session);
+    const abort = new AbortController();
+    const pending = session.execute({
+      ...request,
+      source: "await new Promise(() => {});",
+      signal: abort.signal,
+    });
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    // Termination proves that the session handled the real late start event.
+    await stoppedCell;
+    await session.execute(request);
+    const [cancelled, next] = execute.mock.calls.map(([call]) => call);
+    expect(Number(next!.catalogRevision)).toBeGreaterThan(
+      Number(cancelled!.catalogRevision),
+    );
+    expect(next!.enabledTools).toMatchObject([{ name: "lookup" }]);
+  });
+});
+
 describe("Code Mode missing-session RPC contracts", () => {
   it.each([false, true])(
     "retires Execute NOT_FOUND with its status preserved (started=%s)",

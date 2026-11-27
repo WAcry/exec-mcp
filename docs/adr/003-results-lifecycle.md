@@ -2,7 +2,7 @@
 
 English | [简体中文](003-results-lifecycle.zh.md)
 
-Active, updated 2026-11-08.
+Active, updated 2026-11-27.
 
 ## Deduplication and presentation
 
@@ -11,7 +11,10 @@ Preserve distinct explanations, isError, media, resources, and content-block met
 Comparison preserves differences in large integers, duplicate keys, and numeric representations to avoid deletion caused by lossy parse/stringify operations.
 Structured data still requires checking isError, and missing fields remain distinct from valid null, arrays, or scalar values.
 
-Local methods return their values to JS; downstream methods retain CallToolResult. Scripts explicitly output through text/image/audio/generatedImage.
+The adapter removes verified mirrors before sending the result to the isolate, so they consume neither transport capacity nor script memory.
+A later [upstream opt-in](https://github.com/openai/codex/commit/96681d86f08f880ed12ba29044e855002809e0d1) retains both fields in JS and removes a mirror only when printing an original result. Changing to that behavior would change what existing scripts see.
+
+Local methods return their values to JS. Downstream methods retain CallToolResult. Scripts select output through text, content, image, audio, or generatedImage.
 Export links are attached separately under [ADR-005](005-file-transfer.md). Explicit output is sent once, without compatibility mirrors that have no actual consumer.
 
 as_settled and stream_settled use the native host implementation to process Promise outcomes as they settle.
@@ -29,9 +32,9 @@ wait does not inherit exec's explicit budget. Token counting is approximate. Sta
 The outer response budget leaves nested values intact for JS processing. Each tool still applies its own output and transport limits; oversized values can fail before reaching JS.
 Oversized inputs fail before an operation, while oversized results may fail afterward and must not trigger automatic replay.
 
-Native sessions select [SERVER output truncation](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/session.rs)
+Native sessions select [SERVER output truncation](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/code-mode-protocol/src/session.rs)
 on the unmodified official host and require an explicit SERVER acknowledgement before running cells. Missing or incompatible acknowledgement cancels the session.
-This replaces the previous CLIENT choice with the native [bounded collector](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-runtime/src/output/output_collection.rs).
+This replaces the previous CLIENT choice with the native [bounded collector](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/code-mode-runtime/src/output/output_collection.rs).
 Its per-observation text, encoded image/audio URL, and item limits are listed in the [configuration guide](../guides/configuration.md#capacity-and-temporary-state).
 Text retains a head and rolling tail; media are admitted whole in source order against their separate allowances. Item pressure can also evict media.
 
@@ -84,7 +87,7 @@ Windows tree termination uses taskkill and can race a child launched during shel
 tests of running-process termination first obtain the child's readiness and PID, then verify that child exits. This existing platform limitation is not changed by the Codex upgrade.
 
 write_stdin follows the pinned Codex collection window. Nonempty input defaults to a short wait; empty input allows a longer collection.
-The [upstream collector](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/unified_exec/process_manager.rs)
+The [upstream collector](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core/src/unified_exec/process_manager.rs)
 collects logs until the deadline or process exit. Its window starts after acquiring the terminal and completing writes or resizing.
 Queueing and stdin backpressure do not consume that window, and new logs do not reset the deadline. Explicit 0 retains immediate reads.
 Longer waits do not increase buffer or output capacity.
@@ -135,7 +138,7 @@ Old close callbacks, late results, and leases affect their own generation only. 
 Normal idle expiry creates a fresh session on the next exec and returns the existing new-session/store-empty notice. Failure markers follow the same idle retention.
 
 Only the owned Code Mode host's approximate RSS/working set is sampled. Users manage browsers, compilers, and other child process trees they start.
-The 0.167.0 protocol's optional metrics RPC is not used: its standalone packaged host has no collector and returns UNIMPLEMENTED, so platform sampling remains necessary.
+The standalone host runs without a process metrics collector, so the adapter samples the process through the platform.
 Sampling failures produce diagnostics, and stale samples cannot judge a new host. Normally, idle sessions remain after all cells finish.
 Above the high-water mark, reclaim by time of entering idle state, in FIFO order, then measure again.
 If no idle candidate remains and memory is still high, reclaim the least recently used active session; its cells and store may be lost together.

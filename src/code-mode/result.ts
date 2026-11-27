@@ -19,7 +19,7 @@ export function outputItemsToCallToolResult(
   const content: CallToolResult["content"] = items.map((item) => {
     if (item.type === "text") return { type: "text" as const, text: item.text };
     const url = item.type === "image" ? item.imageUrl : item.audioUrl;
-    const match = /^data:([^;,]+);base64,([\s\S]*)$/.exec(url);
+    const match = /^data:([^;,]+);base64,([\s\S]*)$/i.exec(url);
     if (!match)
       throw new Error(
         "Media output must be a base64 data URL: data:<MIME type>;base64,<data>.",

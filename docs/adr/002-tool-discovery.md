@@ -2,7 +2,7 @@
 
 English | [简体中文](002-tool-discovery.zh.md)
 
-Active, updated 2026-11-08.
+Active, updated 2026-11-27.
 
 ## Entry points and contract sources
 
@@ -45,6 +45,8 @@ Users complete downstream authentication on the machine. Widgets, sampling, elic
 ChatGPT calls do not wait for those interactions. ChatGPT's ingress OAuth to exec-mcp is configured separately.
 
 Tools and ALL_TOOLS share a snapshot for each exec. Catalog updates affect later calls only.
+When the native host advertises catalog revisions, later cells in the same session can reference an admitted snapshot.
+This saves repeated gRPC transfers. Concurrent admissions can send a full catalog so they can proceed independently.
 After disconnection, the last validated contract allows a known method to reconnect; the live contract is checked again before sending.
 Removed tools, changed contracts, or an unverifiable contract prevent sending. Failed calls that have already been sent are never retried automatically.
 A request that provably did not reach the server (the connection was not open, or HTTP 404 for an expired session) is sent once more after reconnecting, with no notice to the model.
@@ -94,11 +96,11 @@ A fresh model can correct its next call from this error alone.
 
 ## Codex references and adaptation
 
-Runtime, patch engine, prompts, and declarations follow rust-v0.167.0 (`086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a`).
-The references are the [Code Mode prompt](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/description.rs),
-[TypeScript schema renderer](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/code-mode-protocol/src/json_schema_types.rs),
-[shell definitions](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/shell_spec.rs), and
-[resource definitions](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs).
+Runtime, patch engine, prompts, and declarations follow rust-v0.172.0 (`3d86e43b075adeba2193ec5c22ac92f55afd82e6`).
+The references are the [Code Mode prompt](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/code-mode-protocol/src/description.rs),
+[TypeScript schema renderer](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/code-mode-protocol/src/json_schema_types.rs),
+[shell definitions](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core/src/tools/handlers/shell_spec.rs), and
+[resource definitions](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core/src/tools/handlers/mcp_resource_spec.rs).
 Image and asynchronous question contracts use the same snapshot. Local and downstream declarations use the small ported renderer;
 the pinned patch engine receives apply_patch's string argument. ALL_TOOLS remains this instance's discovery path.
 
@@ -110,14 +112,13 @@ the pinned patch engine receives apply_patch's string argument. ALL_TOOLS remain
 | Native SERVER collection with separate MCP text budgets and loss notices | Keeps the official collector while preserving retained audio at a zero caller text budget. Disclosed retention limits and persistent loss notices make omitted media visible; see ADR-003. |
 | Shell overrides, EOF/resize/terminate, and zero wait | Preserves supported process operations and per-call overrides of configured defaults. |
 | Native MCP image/file blocks, Skills, and Web questions | Fits ChatGPT file and message delivery and provides independent Skill discovery; notify injection is not connected. |
-| One view_image display example | ChatGPT dogfooding exposed accidental text serialization of its data URL. A single positive example keeps the upstream return object and explicit image output unchanged. |
-| Concise settlement-helper descriptions | The pinned host supports as_settled and stream_settled, but its base prompt still omits them. Existing short descriptions make those native helpers discoverable. |
+| view_image detail and display | Codex can hide detail under its unified image budget. ChatGPT supplies no per-model image budget to this connector, so the tool accepts an optional detail hint and returns it with the image URL. The image(...) example avoids sending the data URL as text. |
+| Native helper descriptions | The upstream base prompt omits content, as_settled, and stream_settled. Short descriptions expose the helpers to a fresh ChatGPT session. |
 | Agent messages promise no reply and send questions to request_user_input_async | exec-mcp cannot start a ChatGPT turn, so a promised reply never arrives; see [ADR-010](010-session-notes.md#agent-messages). |
 | The model titles conversations with set_conversation_title | Codex titles threads with a hidden model call on the user's message, which exec-mcp never receives; see [ADR-010](010-session-notes.md#conversation-titles). |
 | Direct resource URI reads and aggregate errors | Supports templates and links while retaining partial-failure information. |
 
 Keep upstream wording and declaration forms. Change them only where ChatGPT MCP and Codex CLI actually differ, with the reason recorded here.
-The 0.167.0 base Code Mode prompt, JSON Schema renderer, and image contract are unchanged from 0.164.0; no wording rewrite is needed.
-Reviewed newer Codex incremental tool messages require control of model history, which this MCP server does not have.
-Cached lazy downstream startup also conflicts with complete startup validation, so both remain outside this adapter.
+Codex can send incremental tool declarations through model history. ChatGPT owns that history. The connector supplies its local contracts in tools/list and the current catalog in ALL_TOOLS.
+Codex can defer optional servers with warm catalogs. Complete startup validation lets exec-mcp report connection and credential failures before the first call.
 The integration boundary remains the execution layer described in [ADR-001](001-exec-runtime.md).

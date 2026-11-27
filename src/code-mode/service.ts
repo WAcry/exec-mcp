@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 
-import { encodePayload } from "../limits.js";
+import { assertPayloadSize } from "../limits.js";
+import { prepareToolCatalog } from "./wire.js";
 import { randomHandle, throwIfAborted } from "../util.js";
 import { WeightedAdmissionQueue } from "./admission.js";
 import { CellRegistry, type CellOwner } from "./cell-registry.js";
@@ -174,10 +175,12 @@ export class CodeModeService {
       request.signal,
       "Code Mode execution was aborted before it started",
     );
-    encodePayload({
-      source: request.source,
-      tools: request.tools.map(({ call: _call, ...definition }) => definition),
-    });
+    const requestBytes = Buffer.byteLength(
+      JSON.stringify({ source: request.source, tools: [] }),
+    );
+    const catalog =
+      request.catalog ?? prepareToolCatalog(request.tools, requestBytes);
+    assertPayloadSize(requestBytes + catalog.definitionBytes);
     const parsed = parseExecSource(request.source);
     const yieldTimeMs =
       request.yieldTimeMs ?? parsed.yieldTimeMs ?? this.#defaultExecYieldTimeMs;
@@ -209,6 +212,7 @@ export class CodeModeService {
         source: hostSource(parsed.code, scope !== undefined),
         toolCallId: requestId,
         tools: request.tools,
+        catalog,
         yieldTimeMs,
       });
       if (hostOutcome.state === "completed" && hostOutcome.errorText) {

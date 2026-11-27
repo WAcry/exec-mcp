@@ -22,10 +22,16 @@ export function encodePayload(
   const json = JSON.stringify(value);
   if (json === undefined)
     throw new Error("The value cannot be encoded as JSON.");
-  const bytes = Buffer.byteLength(json);
+  assertPayloadSize(Buffer.byteLength(json), limit);
+  return Buffer.from(json);
+}
+
+export function assertPayloadSize(
+  bytes: number,
+  limit = MAX_PAYLOAD_BYTES,
+): void {
   if (bytes > limit)
     throw new Error(
       `The encoded payload is ${bytes} bytes, above the ${limit}-byte transport limit. It was not truncated or written to a file. Return less data, for example by filtering it inside exec or writing it to a file.`,
     );
-  return Buffer.from(json);
 }

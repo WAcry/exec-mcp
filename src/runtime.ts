@@ -10,6 +10,10 @@ import {
 } from "@modelcontextprotocol/server";
 import type { z } from "zod/v4";
 import { CodeModeService, sessionScopeKey } from "./code-mode/service.js";
+import {
+  prepareToolCatalog,
+  type PreparedToolCatalog,
+} from "./code-mode/wire.js";
 import type { CodeModeToolDefinition } from "./code-mode/types.js";
 import {
   nativeContracts,
@@ -189,6 +193,10 @@ export class ExecRuntime {
   readonly skillConfig: readonly SkillSetting[];
   private readonly contracts: readonly NativeContract[];
   private readonly nativeTools: readonly NativeTool[];
+  private catalog?: {
+    downstream: readonly CodeModeToolDefinition[];
+    prepared: PreparedToolCatalog;
+  };
   private readonly securitySchemes:
     | { type: string; scopes?: string[] }[]
     | undefined;
@@ -234,6 +242,22 @@ export class ExecRuntime {
   }
   get ready(): boolean {
     return this.initialized && this.closing === undefined;
+  }
+  private toolCatalog(downstream: readonly CodeModeToolDefinition[]) {
+    // Discovery retains each validated definition until its contract changes.
+    const cached = this.catalog;
+    if (
+      cached &&
+      cached.downstream.length === downstream.length &&
+      downstream.every((tool, index) => tool === cached.downstream[index])
+    )
+      return cached.prepared;
+    const prepared = prepareToolCatalog([
+      ...this.nativeTools.map((tool) => tool.definition),
+      ...downstream,
+    ]);
+    this.catalog = { downstream, prepared };
+    return prepared;
   }
   initialize(...args: Parameters<ToolDiscovery["initialize"]>): Promise<void> {
     this.initialization ??= this.discovery.initialize(...args).then(() => {
@@ -472,7 +496,8 @@ export class ExecRuntime {
                 );
               },
             }));
-            const downstream = this.discovery.snapshot().map((tool) => ({
+            const snapshot = this.discovery.snapshot();
+            const downstream = snapshot.map((tool) => ({
               ...tool,
               call: (...parameters: Parameters<typeof tool.call>) =>
                 audited(call, tool.name, parameters[0], () =>
@@ -489,6 +514,7 @@ export class ExecRuntime {
                 ? {}
                 : { maxOutputTokens: args.max_output_tokens }),
               tools: [...native, ...downstream],
+              catalog: this.toolCatalog(snapshot),
               ...(args.yield_time_ms === undefined
                 ? {}
                 : { yieldTimeMs: args.yield_time_ms }),

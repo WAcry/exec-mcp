@@ -1,3 +1,4 @@
+import { assertPayloadSize } from "../limits.js";
 import { errorMessage } from "../util.js";
 import type { ProtoMessage } from "./protocol.js";
 import type {
@@ -34,9 +35,29 @@ export function toolMap(
   return result;
 }
 
-export function encodeToolDefinition(
-  tool: CodeModeToolDefinition,
-): ProtoMessage {
+type ToolMetadata = Omit<CodeModeToolDefinition, "call">;
+
+export interface PreparedToolCatalog {
+  readonly enabledTools: readonly ProtoMessage[];
+  /** Extra JSON bytes relative to an empty tools array in the exec input guard. */
+  readonly definitionBytes: number;
+}
+
+/** Snapshot only executable metadata. Per-request callbacks can capture attachments and workdirs. */
+export function prepareToolCatalog(
+  tools: readonly (ToolMetadata & { call?: CodeModeToolDefinition["call"] })[],
+  requestBytes = 0,
+): PreparedToolCatalog {
+  const metadata = tools.map(({ call: _call, ...definition }) => definition);
+  const definitionBytes = Buffer.byteLength(JSON.stringify(metadata)) - 2;
+  assertPayloadSize(requestBytes + definitionBytes);
+  return {
+    enabledTools: metadata.map(encodeToolDefinition),
+    definitionBytes,
+  };
+}
+
+export function encodeToolDefinition(tool: ToolMetadata): ProtoMessage {
   const toolName = tool.toolName ?? { name: tool.name };
   const result: ProtoMessage = {
     name: tool.name,

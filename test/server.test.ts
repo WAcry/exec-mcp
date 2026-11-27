@@ -35,7 +35,12 @@ afterEach(async () => {
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
-function fixture(marker: string): DownstreamMcpServerConfig {
+function fixture(
+  marker: string,
+  content: CallToolResult["content"] = [
+    { type: "text", text: "distinct note" },
+  ],
+): DownstreamMcpServerConfig {
   const source = `
 import { appendFileSync } from 'node:fs';
 import { Server } from '@modelcontextprotocol/server';
@@ -48,7 +53,7 @@ serveStdio(()=>{
  server.setRequestHandler('tools/call',async request=>{
   appendFileSync(marker,'call\\n');
   const value=request.params.arguments.value; const data={value:value+1};
-  return {structuredContent:data,content:[{type:'text',text:JSON.stringify(data)},{type:'text',text:'distinct note'}],...(value<0?{isError:true}:{})};
+  return {structuredContent:data,content:[{type:'text',text:JSON.stringify(data)},...${JSON.stringify(content)}],...(value<0?{isError:true}:{})};
  });
  return server;
 });`;
@@ -146,6 +151,55 @@ describe.each([false, true])("MCP transport (legacy=%s)", (legacy) => {
 describe.each([false, true])(
   "startup discovery over actual MCP (legacy=%s)",
   (legacy) => {
+    it("forwards distinct downstream content blocks in order and reads structured data separately", async () => {
+      const marker = path.join(await directory(), "calls.txt");
+      const link = {
+        type: "resource_link",
+        name: "notes",
+        uri: "file:///notes",
+      } as const;
+      const resource = {
+        type: "resource",
+        resource: { uri: "file:///notes", text: "notes" },
+      } as const;
+      const blocks = [
+        { type: "text", text: "caption" },
+        {
+          type: "image",
+          mimeType: "image/png",
+          data: "aW1hZ2U=",
+          _meta: { "codex/imageDetail": "original" },
+        },
+        { type: "audio", mimeType: "audio/mpeg", data: "YXVkaW8=" },
+        link,
+        resource,
+      ] satisfies CallToolResult["content"];
+      const { client } = await connection(
+        { mcpServers: [fixture(marker, blocks)] },
+        legacy,
+      );
+      const listing = await client.listTools();
+      expect(
+        listing.tools.find((tool) => tool.name === "exec")?.description,
+      ).toContain("content(result.content)");
+      const result = await exec(
+        client,
+        "const r = await tools.mcp__fixture__add({value:41}); text(r.structuredContent); content(r.content);",
+      );
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      const output = result.content.slice(1);
+      expect(output.slice(0, 4)).toEqual([
+        { type: "text", text: '{"value":42}' },
+        blocks[0],
+        { ...blocks[1], _meta: { "openai/imageDetail": "original" } },
+        blocks[2],
+      ]);
+      expect(
+        output
+          .slice(4)
+          .map((block) => block.type === "text" && JSON.parse(block.text)),
+      ).toEqual([link, resource]);
+    });
     it("discovers and invokes inner downstream tools through renamed outer connectors", async () => {
       const marker = path.join(await directory(), "nested-calls.txt");
       const inner = await connection({ mcpServers: [fixture(marker)] }, legacy);

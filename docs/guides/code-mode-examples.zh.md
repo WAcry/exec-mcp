@@ -125,13 +125,24 @@ text(ALL_TOOLS.filter(t => /github|pull_request/i.test(t.name + " " + t.descript
 source 内的下游方法返回 MCP CallToolResult。外层宿主可能重新包装 exec/wait 的输出，
 转发输出的代码按宿主实际返回结构读取，该结构可以与嵌套方法的结果不同。
 
+要转发保存在 `result` 中的下游结果，可分别输出结构化值和内容块。
+适配层在 JS 取到结果之前会移除无损重复的 JSON 文本，因此 `structuredContent` 有值时，`content` 也可能为空。
+
+```js
+if (result.isError) text("The downstream tool reported an error.");
+if (result.structuredContent !== undefined) text(result.structuredContent);
+content(result.content);
+```
+
+原生 `content` 助手接受单个块或可迭代的块集合，按原有顺序处理。文本、图片与音频分别沿用各自的输出限制。资源链接和内嵌资源会作为 JSON 文本输出。要交付可下载的本地文件，请使用 `export_file`。
+
 ## 查看本地图片
 
 view_image 返回 {image_url, detail}，image_url 包含本地文件的 data URL。把结果传给 image 即可展示。
 detail 是宿主提示，默认 high，需要时可设 original。
 
 ```js
-image(await tools.view_image({ path: "plot.png", detail: "original" }));
+image(await tools.view_image({ path: "plot.png" }));
 ```
 
 ## 转发音频与交付较大媒体
@@ -145,7 +156,7 @@ for (const item of result.content) {
 }
 ```
 
-固定 host 校验音频，包括 PCM WAV 至少 25 毫秒的要求。调用者文本预算为零时，原生省略诊断仍然可见。
+当 host 测得 PCM WAV 片段短于 25 毫秒时，会返回音频省略提示。调用者文本预算为零时，这条提示仍然可见。
 图片 detail 仍是宿主提示，不会缩小编码文件或增加原生收集器额度。
 
 较大结果用 store("media-result", result) 保存一次，或把源数据留在文件中。等该次 exec 完成后，分多次 exec 从 load 结果中选择要展示的条目。

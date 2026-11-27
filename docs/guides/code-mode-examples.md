@@ -126,13 +126,24 @@ This is the bound snapshot for the current exec. Filtering does not connect to o
 Inside source, downstream methods return MCP CallToolResult values. When an outer host wraps exec/wait output,
 code forwarding that output uses the host's actual return shape, which can differ from the nested method's result.
 
+To forward a downstream result held in `result`, select the structured value and its content blocks separately.
+The adapter removes lossless JSON mirrors before JS sees the result, so `content` can be empty even when `structuredContent` holds data.
+
+```js
+if (result.isError) text("The downstream tool reported an error.");
+if (result.structuredContent !== undefined) text(result.structuredContent);
+content(result.content);
+```
+
+The native `content` helper accepts a single block or an iterable and processes the blocks in order. Text, images, and audio follow their usual output limits. Resource links and embedded resources appear as JSON text. Use `export_file` to deliver a downloadable local file.
+
 ## View a local image
 
 view_image returns {image_url, detail}; image_url contains the local file as a data URL. Pass the result to image to display it.
 detail is a host hint, with high as the default and original available when needed.
 
 ```js
-image(await tools.view_image({ path: "plot.png", detail: "original" }));
+image(await tools.view_image({ path: "plot.png" }));
 ```
 
 ## Forward audio and deliver larger media
@@ -146,7 +157,7 @@ for (const item of result.content) {
 }
 ```
 
-The pinned host validates audio, including a 25 ms minimum for PCM WAV. Native omission diagnostics remain visible even with a zero caller text budget.
+When the host measures a PCM WAV clip shorter than 25 ms, it returns an omission notice. The notice stays visible with a zero caller text budget.
 Image detail remains a host hint. It does not resize the encoded file or increase the native collector's allowance.
 
 For a large result, retain it once with store("media-result", result), or keep its source in files. After that exec completes, load selected items in separate exec calls.

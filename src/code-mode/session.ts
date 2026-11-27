@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type * as grpc from "@grpc/grpc-js";
 
@@ -26,7 +27,8 @@ import {
   decodeOutcome,
   decodeToolName,
   decodeWaitResponse,
-  encodeToolDefinition,
+  prepareToolCatalog,
+  type PreparedToolCatalog,
   numberField,
   optionalStringField,
   recordField,
@@ -70,6 +72,9 @@ export class CodeModeSession {
   readonly #toolStream: grpc.ClientReadableStream<ProtoMessage>;
   readonly #transportTimeoutMs: number;
   readonly id: string;
+  #catalogRevision: number | undefined;
+  #catalogAdmission: string | undefined;
+  #catalog: PreparedToolCatalog | undefined;
   #cells = new Map<string, CellState>();
   #cancelledInvocations = new Set<string>();
   #closed = false;
@@ -86,6 +91,7 @@ export class CodeModeSession {
     client: CodeModeHostClient;
     eventStream: grpc.ClientReadableStream<ProtoMessage>;
     id: string;
+    supportsCatalogRevision: boolean;
     onFailure?: (session: CodeModeSession, error: Error) => void;
     toolStream: grpc.ClientReadableStream<ProtoMessage>;
     transportTimeoutMs: number;
@@ -94,6 +100,7 @@ export class CodeModeSession {
     this.#client = options.client;
     this.#eventStream = options.eventStream;
     this.id = options.id;
+    this.#catalogRevision = options.supportsCatalogRevision ? 0 : undefined;
     this.#onFailure = options.onFailure;
     this.#toolStream = options.toolStream;
     this.#transportTimeoutMs = options.transportTimeoutMs;
@@ -138,6 +145,7 @@ export class CodeModeSession {
     const eventStream = options.client.openSession(request);
     const eventMonitor = monitorStreamFailure(eventStream, "session lease");
     let id: string;
+    let supportsCatalogRevision: boolean;
     try {
       const opened = await firstStreamMessage(
         eventStream,
@@ -151,6 +159,7 @@ export class CodeModeSession {
       );
       id = stringField(openedPayload, "sessionId", "session ID");
       validateIdentifier(id, "session ID");
+      supportsCatalogRevision = openedPayload.supportsCatalogRevision === true;
       const outputTruncation = openedPayload.outputTruncation;
       if (outputTruncation !== "OUTPUT_TRUNCATION_SERVER")
         throw new Error(
@@ -185,6 +194,7 @@ export class CodeModeSession {
       client: options.client,
       eventStream,
       id,
+      supportsCatalogRevision,
       ...(options.onFailure === undefined
         ? {}
         : { onFailure: options.onFailure }),
@@ -202,18 +212,20 @@ export class CodeModeSession {
     source: string;
     toolCallId: string;
     tools: readonly CodeModeToolDefinition[];
+    catalog?: PreparedToolCatalog;
     yieldTimeMs?: number;
   }): Promise<RuntimeOutcome> {
     if (options.signal?.aborted === true) throw executionAbortError();
     this.#requireOpen();
     const executionId = crypto.randomUUID();
     const state: ExecutionState = { tools: toolMap(options.tools) };
+    const catalog = options.catalog ?? prepareToolCatalog(options.tools);
     const request: ProtoMessage = {
       sessionId: this.id,
       executionId,
       toolCallId: options.toolCallId,
       source: options.source,
-      enabledTools: options.tools.map(encodeToolDefinition),
+      ...this.#catalogFields(executionId, catalog),
       maxOutputTokens: NATIVE_OUTPUT_MAX_TOKENS,
       yieldTimeMs: options.yieldTimeMs ?? DEFAULT_EXEC_YIELD_TIME_MS,
     };
@@ -228,6 +240,7 @@ export class CodeModeSession {
           1_000,
       });
     } catch (error) {
+      this.#finishCatalogAdmission(executionId);
       this.#executions.delete(executionId);
       if (isMissingSession(error)) this.#fail(error);
       throw error;
@@ -238,6 +251,7 @@ export class CodeModeSession {
         stream,
         executionId,
         state,
+        catalog,
         options.signal,
       );
     } catch (error) {
@@ -269,6 +283,36 @@ export class CodeModeSession {
     } finally {
       unwatch();
     }
+  }
+
+  #catalogFields(
+    executionId: string,
+    catalog: PreparedToolCatalog,
+  ): ProtoMessage {
+    const full = { enabledTools: catalog.enabledTools };
+    if (
+      this.#catalogRevision === undefined ||
+      this.#catalogAdmission !== undefined ||
+      catalog.enabledTools.length === 0
+    )
+      return full;
+
+    // A concurrent full request without a revision never replaces the host cache.
+    this.#catalogAdmission = executionId;
+    if (isDeepStrictEqual(this.#catalog?.enabledTools, catalog.enabledTools)) {
+      return { catalogRevision: this.#catalogRevision };
+    }
+    this.#catalog = undefined;
+    return { ...full, catalogRevision: ++this.#catalogRevision };
+  }
+
+  #finishCatalogAdmission(
+    executionId: string,
+    accepted?: PreparedToolCatalog,
+  ): void {
+    if (this.#catalogAdmission !== executionId) return;
+    this.#catalogAdmission = undefined;
+    this.#catalog = accepted;
   }
 
   async wait(options: {
@@ -437,6 +481,7 @@ export class CodeModeSession {
     stream: grpc.ClientReadableStream<ProtoMessage>,
     expectedExecutionId: string,
     state: ExecutionState,
+    catalog: PreparedToolCatalog,
     signal?: AbortSignal,
   ): Promise<RuntimeOutcome> {
     return new Promise((resolve, reject) => {
@@ -458,12 +503,14 @@ export class CodeModeSession {
       const finish = (error?: Error, outcome?: RuntimeOutcome): void => {
         if (settled) return;
         settled = true;
+        session.#finishCatalogAdmission(expectedExecutionId);
         detach();
         if (error !== undefined) reject(error);
         else resolve(outcome!);
       };
       /** After an early cancellation, the stream is read only to find and stop the cell. */
       const failPendingStart = (error: Error): void => {
+        session.#finishCatalogAdmission(expectedExecutionId);
         detach();
         stream.cancel();
         session.#executions.delete(expectedExecutionId);
@@ -477,7 +524,8 @@ export class CodeModeSession {
           return;
         }
         // Return the cancellation now, but keep reading until the host reports
-        // the cell ID, then terminate that cell. Only a missing report is unknown.
+        // the cell ID, then terminate that cell. A pending catalog reference
+        // keeps its admission slot until the host has resolved that reference.
         settled = true;
         signal?.removeEventListener("abort", abort);
         reject(executionAbortError());
@@ -493,11 +541,6 @@ export class CodeModeSession {
         startTimer.unref();
       };
 
-      if (signal?.aborted === true) {
-        abort();
-        return;
-      }
-      signal?.addEventListener("abort", abort, { once: true });
       function onData(event: ProtoMessage): void {
         try {
           if (event.event === "started") {
@@ -521,6 +564,10 @@ export class CodeModeSession {
             cellId = stringField(started, "cellId", "cell ID");
             validateIdentifier(cellId, "cell ID");
             state.cellId = cellId;
+            session.#finishCatalogAdmission(
+              executionId,
+              state.cancelled ? undefined : catalog,
+            );
             const cell = session.#cellState(cellId);
             session.#maybeRetireCell(cellId, cell);
             if (settled && state.cancelled === true) {
@@ -564,6 +611,8 @@ export class CodeModeSession {
       stream.on("data", onData);
       stream.on("error", onError);
       stream.on("end", onEnd);
+      if (signal?.aborted === true) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
     });
   }
 

@@ -77,6 +77,32 @@ text("after");`,
     ]);
   });
 
+  it("keeps earlier iterable blocks when content rejects encrypted text and accepts mixed-case data URLs", async () => {
+    const result = await service().exec({
+      tools: [],
+      source: `function* blocks() {
+        try {
+          yield {type: "image", mimeType: "image/png", data: "DaTa:image/png;BaSe64,YQ=="};
+          yield {type: "text", text: "opaque", _meta: {"codex/encryptedContent": true}};
+        } finally { text("iterator closed"); }
+      }
+      try { content(blocks()); } catch (err) { text(String(err)); }
+      content({type:"text", text:"after"});`,
+    });
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(result.content.slice(1)).toEqual([
+      {
+        type: "image",
+        mimeType: "image/png",
+        data: "YQ==",
+        _meta: { "openai/imageDetail": "high" },
+      },
+      { type: "text", text: "iterator closed" },
+      { type: "text", text: "content cannot emit encrypted MCP text" },
+      { type: "text", text: "after" },
+    ]);
+  });
+
   it("delivers omitted and explicit undefined arguments without a JSON serialization failure", async () => {
     const calls: unknown[] = [];
     const result = await service().exec({
@@ -133,7 +159,7 @@ text("after");`,
     expect(jsonOutput(later)).toEqual({ value: null });
   });
 
-  it.each(["url", "object", "block"])(
+  it.each(["url", "object", "block", "content"])(
     "keeps a short-WAV warning in status and marks the omitted position (%s)",
     async (shape) => {
       const data = wav(399); // 24.9375 ms at 16 kHz; just below the native threshold.
@@ -146,7 +172,7 @@ text("after");`,
             : { type: "audio", mimeType: "audio/wav", data };
       const result = await service().exec({
         tools: [],
-        source: `text("before");audio(${JSON.stringify(argument)});text("after");`,
+        source: `text("before");${shape === "content" ? "content" : "audio"}(${JSON.stringify(argument)});text("after");`,
       });
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
       expect(result.content.filter((item) => item.type === "audio")).toEqual(
